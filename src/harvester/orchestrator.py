@@ -1,0 +1,384 @@
+"""
+Scraper Orchestrator - Coordinates scraping across all 18 VC funds.
+
+Handles:
+- Running scrapers for configured funds
+- Processing articles through extraction pipeline
+- Storing deals in database
+- Error handling and logging
+
+OPTIMIZED:
+- Concurrent article processing (5 parallel)
+- Pre-extraction URL deduplication
+- Metrics logging for performance monitoring
+- Error isolation (one bad article doesn't crash fund)
+"""
+
+import asyncio
+import logging
+import time
+from typing import List, Optional, Dict, Type, Set
+from datetime import datetime
+
+from sqlalchemy import select
+
+from .base_scraper import BaseScraper, NormalizedArticle
+from .scrapers.a16z import A16ZScraper
+from .scrapers.sequoia import SequoiaScraper
+from .scrapers.benchmark import BenchmarkScraper
+from .scrapers.founders_fund import FoundersFundScraper
+from .scrapers.thrive import ThriveScraper
+from .scrapers.khosla import KhoslaScraper
+from .scrapers.index_ventures import IndexVenturesScraper
+from .scrapers.insight import InsightScraper
+from .scrapers.bessemer import BessemerScraper
+from .scrapers.redpoint import RedpointScraper
+from .scrapers.greylock import GreylockScraper
+from .scrapers.gv import GVScraper
+from .scrapers.menlo import MenloScraper
+from .scrapers.usv import USVScraper
+from .scrapers.accel import AccelScraper
+from .scrapers.felicis import FelicisScraper
+from .scrapers.general_catalyst import GeneralCatalystScraper
+from .scrapers.first_round import FirstRoundScraper
+from ..config.funds import FUND_REGISTRY, FundConfig, ScraperType
+from ..analyst.extractor import extract_deal
+from ..archivist.storage import save_deal
+from ..archivist.database import get_session
+from ..archivist.models import Article
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+# Registry of implemented scrapers (All 18 VC funds)
+SCRAPER_REGISTRY: Dict[str, Type[BaseScraper]] = {
+    # Original 5
+    "a16z": A16ZScraper,
+    "sequoia": SequoiaScraper,
+    "benchmark": BenchmarkScraper,
+    "founders_fund": FoundersFundScraper,
+    "thrive": ThriveScraper,
+    # Additional 13
+    "khosla": KhoslaScraper,
+    "index": IndexVenturesScraper,
+    "insight": InsightScraper,
+    "bessemer": BessemerScraper,
+    "redpoint": RedpointScraper,
+    "greylock": GreylockScraper,
+    "gv": GVScraper,
+    "menlo": MenloScraper,
+    "usv": USVScraper,
+    "accel": AccelScraper,
+    "felicis": FelicisScraper,
+    "general_catalyst": GeneralCatalystScraper,
+    "first_round": FirstRoundScraper,
+}
+
+# Concurrency settings
+MAX_CONCURRENT_EXTRACTIONS = 5
+RATE_LIMIT_DELAY = 0.5  # Reduced from 1.0s
+
+
+class ScrapingResult:
+    """Result of a scraping operation."""
+
+    def __init__(self, fund_slug: str):
+        self.fund_slug = fund_slug
+        self.articles_found = 0
+        self.articles_skipped_duplicate = 0
+        self.articles_skipped_no_funding = 0
+        self.deals_extracted = 0
+        self.deals_saved = 0
+        self.errors: List[str] = []
+        self.started_at = datetime.utcnow()
+        self.completed_at: Optional[datetime] = None
+
+    def complete(self):
+        self.completed_at = datetime.utcnow()
+
+    @property
+    def duration_seconds(self) -> float:
+        if self.completed_at:
+            return (self.completed_at - self.started_at).total_seconds()
+        return 0
+
+    def log_metrics(self):
+        """Log performance metrics."""
+        logger.info(
+            f"METRICS fund={self.fund_slug} "
+            f"articles_found={self.articles_found} "
+            f"skipped_duplicate={self.articles_skipped_duplicate} "
+            f"skipped_no_funding={self.articles_skipped_no_funding} "
+            f"deals_extracted={self.deals_extracted} "
+            f"deals_saved={self.deals_saved} "
+            f"errors={len(self.errors)} "
+            f"duration_sec={self.duration_seconds:.2f}"
+        )
+
+
+async def check_url_exists(url: str) -> bool:
+    """
+    Check if an article URL already exists in the database.
+
+    OPTIMIZATION: Avoids expensive Claude calls for duplicate articles.
+    """
+    try:
+        async with get_session() as session:
+            stmt = select(Article).where(Article.url == url).limit(1)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none() is not None
+    except Exception as e:
+        logger.warning(f"Error checking URL existence: {e}")
+        return False  # Assume not exists on error
+
+
+async def process_article(
+    article: NormalizedArticle,
+    fund_config: FundConfig,
+) -> tuple[bool, str]:
+    """
+    Process a single article through extraction and storage.
+
+    Returns:
+        Tuple of (success: bool, status: str)
+        Status can be: "saved", "low_confidence", "error:{message}"
+    """
+    try:
+        # Extract deal information using Claude
+        extraction = await extract_deal(
+            article_text=article.text,
+            source_url=article.url,
+            fund_context=fund_config,
+        )
+
+        # Skip low-confidence extractions
+        if extraction.confidence_score < 0.5:
+            logger.info(
+                f"Skipping low-confidence extraction for {article.title}: "
+                f"{extraction.confidence_score:.2f}"
+            )
+            return False, "low_confidence"
+
+        # Save to database
+        async with get_session() as session:
+            deal = await save_deal(
+                session=session,
+                extraction=extraction,
+                article_url=article.url,
+                article_title=article.title,
+                article_text=article.text,
+                source_fund_slug=article.fund_slug,
+            )
+            logger.info(
+                f"Saved deal: {extraction.startup_name} - "
+                f"{extraction.round_label.value} - "
+                f"Lead: {extraction.tracked_fund_is_lead}"
+            )
+            return True, "saved"
+
+    except Exception as e:
+        error_msg = f"Error processing article {article.url}: {e}"
+        logger.error(error_msg)
+        return False, f"error:{str(e)}"
+
+
+async def scrape_fund(fund_slug: str) -> ScrapingResult:
+    """
+    Scrape a single fund and process all articles.
+
+    OPTIMIZED:
+    - Pre-extraction URL deduplication
+    - Concurrent article processing
+    - Error isolation per article
+
+    Args:
+        fund_slug: The slug of the fund to scrape (e.g., "a16z")
+
+    Returns:
+        ScrapingResult with statistics
+    """
+    result = ScrapingResult(fund_slug)
+    start_time = time.perf_counter()
+
+    # Check if fund exists
+    if fund_slug not in FUND_REGISTRY:
+        result.errors.append(f"Unknown fund: {fund_slug}")
+        result.complete()
+        return result
+
+    fund_config = FUND_REGISTRY[fund_slug]
+
+    # Check if scraper is implemented
+    if fund_slug not in SCRAPER_REGISTRY:
+        result.errors.append(f"Scraper not implemented for: {fund_slug}")
+        result.complete()
+        return result
+
+    scraper_class = SCRAPER_REGISTRY[fund_slug]
+
+    try:
+        async with scraper_class() as scraper:
+            logger.info(f"Starting scrape for {fund_config.name}")
+
+            # Collect all articles first
+            articles: List[NormalizedArticle] = []
+            async for article in scraper.scrape():
+                result.articles_found += 1
+                articles.append(article)
+
+            logger.info(f"Found {len(articles)} articles for {fund_config.name}")
+
+            # Pre-extraction deduplication
+            unique_articles: List[NormalizedArticle] = []
+            for article in articles:
+                if await check_url_exists(article.url):
+                    result.articles_skipped_duplicate += 1
+                    logger.debug(f"Skipping duplicate: {article.url}")
+                else:
+                    unique_articles.append(article)
+
+            logger.info(
+                f"After deduplication: {len(unique_articles)} unique articles "
+                f"({result.articles_skipped_duplicate} duplicates skipped)"
+            )
+
+            # Process articles concurrently with semaphore
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_EXTRACTIONS)
+
+            async def process_with_limit(article: NormalizedArticle) -> tuple[bool, str]:
+                async with semaphore:
+                    # Small delay between extractions (rate limiting)
+                    await asyncio.sleep(RATE_LIMIT_DELAY)
+                    return await process_article(article, fund_config)
+
+            # Run all extractions concurrently
+            if unique_articles:
+                tasks = [process_with_limit(article) for article in unique_articles]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Process results
+                for i, res in enumerate(results):
+                    if isinstance(res, Exception):
+                        result.errors.append(f"Article {i}: {str(res)}")
+                    else:
+                        success, status = res
+                        result.deals_extracted += 1
+                        if success:
+                            result.deals_saved += 1
+                        elif status == "low_confidence":
+                            result.articles_skipped_no_funding += 1
+                        elif status.startswith("error:"):
+                            result.errors.append(status)
+
+    except Exception as e:
+        error_msg = f"Error scraping {fund_slug}: {e}"
+        logger.error(error_msg)
+        result.errors.append(error_msg)
+
+    result.complete()
+    result.log_metrics()
+
+    return result
+
+
+async def scrape_all_funds(
+    fund_slugs: Optional[List[str]] = None,
+    parallel: bool = False,
+    max_parallel_funds: int = 3,
+) -> List[ScrapingResult]:
+    """
+    Scrape multiple funds.
+
+    OPTIMIZED:
+    - Optional parallel fund scraping
+    - Configurable parallelism level
+
+    Args:
+        fund_slugs: List of fund slugs to scrape. If None, scrapes all implemented funds.
+        parallel: If True, scrape funds concurrently.
+        max_parallel_funds: Maximum number of funds to scrape in parallel.
+
+    Returns:
+        List of ScrapingResult objects
+    """
+    if fund_slugs is None:
+        fund_slugs = list(SCRAPER_REGISTRY.keys())
+
+    logger.info(f"Starting scrape for {len(fund_slugs)} funds: {fund_slugs}")
+
+    if parallel:
+        # Run funds in parallel with limited concurrency
+        semaphore = asyncio.Semaphore(max_parallel_funds)
+
+        async def scrape_with_limit(slug: str) -> ScrapingResult:
+            async with semaphore:
+                return await scrape_fund(slug)
+
+        tasks = [scrape_with_limit(slug) for slug in fund_slugs]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Handle any exceptions
+        processed_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                error_result = ScrapingResult(fund_slugs[i])
+                error_result.errors.append(str(result))
+                error_result.complete()
+                processed_results.append(error_result)
+            else:
+                processed_results.append(result)
+        return processed_results
+    else:
+        # Run scrapers sequentially
+        results = []
+        for slug in fund_slugs:
+            result = await scrape_fund(slug)
+            results.append(result)
+            # Delay between funds
+            await asyncio.sleep(1.0)
+        return results
+
+
+async def run_scraper_cli(fund_slug: Optional[str] = None):
+    """
+    CLI entry point for running scrapers.
+
+    Args:
+        fund_slug: Specific fund to scrape, or None for all implemented funds.
+    """
+    if fund_slug:
+        result = await scrape_fund(fund_slug)
+        print(f"\n=== Scraping Results for {fund_slug} ===")
+        print(f"Articles found: {result.articles_found}")
+        print(f"Duplicates skipped: {result.articles_skipped_duplicate}")
+        print(f"Deals extracted: {result.deals_extracted}")
+        print(f"Deals saved: {result.deals_saved}")
+        print(f"Errors: {len(result.errors)}")
+        if result.errors:
+            for error in result.errors:
+                print(f"  - {error}")
+        print(f"Duration: {result.duration_seconds:.2f}s")
+    else:
+        results = await scrape_all_funds()
+        print("\n=== Scraping Summary ===")
+        total_articles = sum(r.articles_found for r in results)
+        total_deals = sum(r.deals_saved for r in results)
+        total_errors = sum(len(r.errors) for r in results)
+        total_duration = sum(r.duration_seconds for r in results)
+        print(f"Total articles: {total_articles}")
+        print(f"Total deals saved: {total_deals}")
+        print(f"Total errors: {total_errors}")
+        print(f"Total duration: {total_duration:.2f}s")
+
+
+# List of implemented scrapers
+def get_implemented_scrapers() -> List[str]:
+    """Return list of fund slugs with implemented scrapers."""
+    return list(SCRAPER_REGISTRY.keys())
+
+
+def get_unimplemented_scrapers() -> List[str]:
+    """Return list of fund slugs without implemented scrapers."""
+    return [slug for slug in FUND_REGISTRY if slug not in SCRAPER_REGISTRY]

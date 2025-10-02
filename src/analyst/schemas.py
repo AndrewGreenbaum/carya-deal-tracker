@@ -1,0 +1,155 @@
+"""
+Pydantic schemas for deal extraction with Instructor.
+
+These schemas enforce structured JSON output from the LLM.
+"""
+
+from pydantic import BaseModel, Field
+from typing import List, Optional
+from enum import Enum
+from datetime import date
+
+
+class RoundType(str, Enum):
+    """Investment round types."""
+    PRE_SEED = "pre_seed"
+    SEED = "seed"
+    SERIES_A = "series_a"
+    SERIES_B = "series_b"
+    SERIES_C = "series_c"
+    SERIES_D = "series_d"
+    SERIES_E_PLUS = "series_e_plus"
+    GROWTH = "growth"
+    DEBT = "debt"
+    UNKNOWN = "unknown"
+
+
+class LeadStatus(str, Enum):
+    """Confidence level for lead investor determination."""
+    CONFIRMED_LEAD = "confirmed_lead"     # Explicit "led by" language
+    LIKELY_LEAD = "likely_lead"           # Strong signals (priced, terms)
+    PARTICIPANT = "participant"            # Explicitly participating
+    UNRESOLVED = "unresolved"             # Ambiguous - "existing investors led"
+
+
+class InvestorMention(BaseModel):
+    """A single investor mentioned in the article."""
+    name: str = Field(description="Investor/fund name as mentioned in text")
+    role: LeadStatus = Field(description="Their role in this round")
+    partner_name: Optional[str] = Field(
+        default=None,
+        description="Partner name if mentioned (e.g., 'Bill Gurley')"
+    )
+    is_tracked_fund: bool = Field(
+        default=False,
+        description="True if this is one of our 18 tracked funds"
+    )
+
+
+class ChainOfThought(BaseModel):
+    """Reasoning trace for the extraction decision."""
+    verb_analysis: str = Field(
+        description="Analysis of key verbs: 'led', 'participated', 'joined', 'priced'"
+    )
+    lead_signals: List[str] = Field(
+        description="Phrases indicating lead investor status"
+    )
+    participation_signals: List[str] = Field(
+        description="Phrases indicating participation only"
+    )
+    ambiguity_flags: List[str] = Field(
+        default_factory=list,
+        description="Any ambiguous language that complicates determination"
+    )
+    final_reasoning: str = Field(
+        description="Final reasoning for the is_lead determination"
+    )
+
+
+class DealExtraction(BaseModel):
+    """
+    Structured extraction of a funding deal from press release or news article.
+
+    This is the core schema used with Instructor for LLM extraction.
+    """
+    # Core deal info
+    startup_name: str = Field(description="Name of the company raising funding")
+    startup_description: Optional[str] = Field(
+        default=None,
+        description="Brief description of what the startup does"
+    )
+
+    # Round details
+    round_label: RoundType = Field(description="Type of funding round")
+    amount: Optional[str] = Field(
+        default=None,
+        description="Amount raised (e.g., '$50M', '$50 million')"
+    )
+    valuation: Optional[str] = Field(
+        default=None,
+        description="Post-money valuation if disclosed"
+    )
+    round_date: Optional[date] = Field(
+        default=None,
+        description="Date of the announcement"
+    )
+
+    # Investors
+    lead_investors: List[InvestorMention] = Field(
+        description="Investors who led or co-led the round"
+    )
+    participating_investors: List[InvestorMention] = Field(
+        description="Investors who participated but did not lead"
+    )
+
+    # Tracked fund analysis
+    tracked_fund_is_lead: bool = Field(
+        description="True ONLY if one of our 18 tracked funds led or co-led"
+    )
+    tracked_fund_name: Optional[str] = Field(
+        default=None,
+        description="Name of the tracked fund if involved"
+    )
+    tracked_fund_role: Optional[LeadStatus] = Field(
+        default=None,
+        description="Role of the tracked fund in this round"
+    )
+    tracked_fund_partner: Optional[str] = Field(
+        default=None,
+        description="Partner from tracked fund if mentioned"
+    )
+
+    # Reasoning
+    reasoning: ChainOfThought = Field(
+        description="Chain-of-thought reasoning for the extraction"
+    )
+
+    # Quality signals
+    confidence_score: float = Field(
+        ge=0.0, le=1.0,
+        description="Confidence in the extraction (0.0-1.0)"
+    )
+    thesis_drift_score: float = Field(
+        default=0.0,
+        ge=0.0, le=1.0,
+        description="How far this deal is from fund's typical thesis (0=typical, 1=unusual)"
+    )
+
+
+class ArticleAnalysis(BaseModel):
+    """
+    Full analysis of an article that may contain multiple deals.
+    """
+    source_url: str = Field(description="URL of the source article")
+    title: str = Field(description="Article title")
+    published_date: Optional[date] = Field(default=None)
+    deals: List[DealExtraction] = Field(
+        description="All funding deals mentioned in the article"
+    )
+    is_funding_news: bool = Field(
+        description="True if this article is about funding/investment"
+    )
+    rejection_reason: Optional[str] = Field(
+        default=None,
+        description="If not funding news, why was it rejected"
+    )
