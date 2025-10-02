@@ -3,8 +3,6 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-healthcheckPath = "/health"
-healthcheckTimeout = 30
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 5
 # Run migrations before starting the app
