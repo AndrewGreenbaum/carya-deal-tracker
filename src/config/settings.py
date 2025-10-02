@@ -2,7 +2,9 @@
 Application settings loaded from environment variables.
 """
 
+import os
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from functools import lru_cache
 
 
@@ -13,8 +15,19 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
 
-    # Database
+    # Database - Railway provides DATABASE_URL
     database_url: str = "postgresql+asyncpg://bud:tracker@localhost:5432/budtracker"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def convert_database_url(cls, v: str) -> str:
+        """Convert standard postgres:// URL to asyncpg format."""
+        # Railway uses postgres:// or postgresql://, we need postgresql+asyncpg://
+        if v.startswith("postgres://"):
+            v = v.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif v.startswith("postgresql://") and "+asyncpg" not in v:
+            v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
 
     # LLM Settings
     llm_model: str = "claude-sonnet-4-20250514"
@@ -41,12 +54,14 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        # Allow reading DATABASE_URL from environment
+        extra = "ignore"
 
 
-@lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings instance."""
+    """Get settings instance (no caching to pick up env vars)."""
     return Settings()
 
 
-settings = get_settings()
+# Create settings instance at import time
+settings = Settings()
