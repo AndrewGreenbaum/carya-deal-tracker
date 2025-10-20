@@ -17,7 +17,6 @@ from .models import (
 from .database import get_session
 from ..analyst.schemas import DealExtraction, LeadStatus, EnterpriseCategory
 from ..config.funds import FUND_REGISTRY
-from ..scheduler.notifications import send_lead_deal_alert
 
 
 async def get_or_create_company(
@@ -165,6 +164,9 @@ async def save_deal(
 
     # Send Slack/Discord alert for lead deals
     if extraction.tracked_fund_is_lead:
+        # Lazy import to avoid circular dependency
+        from ..scheduler.notifications import send_lead_deal_alert
+
         # Find the lead investor name from extraction
         lead_investor_name = "Unknown"
         for inv in extraction.lead_investors:
