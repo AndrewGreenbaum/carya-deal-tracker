@@ -127,8 +127,8 @@ FUND_REGISTRY: dict[str, FundConfig] = {
         name="Greylock",
         slug="greylock",
         ingestion_url="https://greylock.com/blog/portfolio-news/",
-        scraper_type=ScraperType.HTML,
-        extraction_notes="Portfolio news page; prioritize Partner-authored posts."
+        scraper_type=ScraperType.PLAYWRIGHT,
+        extraction_notes="Portfolio news page; requires Playwright for JS rendering."
     ),
 
     "gv": FundConfig(

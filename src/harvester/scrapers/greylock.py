@@ -2,23 +2,25 @@
 Greylock Partners Scraper.
 
 Source: https://greylock.com/blog/portfolio-news/
-Format: HTML
+Format: PLAYWRIGHT (JavaScript-rendered content)
 
-Portfolio news page; prioritize Partner-authored posts.
+Portfolio news page; requires Playwright for JS rendering.
 """
 
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
-from ..base_scraper import SimpleHTMLScraper, RawArticle, NormalizedArticle
+from ..playwright_scraper import PlaywrightScraper
+from ..base_scraper import RawArticle, NormalizedArticle
 from ...config.funds import FUND_REGISTRY
 
 
-class GreylockScraper(SimpleHTMLScraper):
+class GreylockScraper(PlaywrightScraper):
     """
-    Scraper for Greylock news page.
+    Scraper for Greylock portfolio news page.
 
-    Key: Prioritize Partner-authored posts.
+    Uses Playwright to render JavaScript-heavy pages.
+    Prioritizes Partner-authored posts.
     """
 
     # Known Greylock partners
@@ -41,28 +43,38 @@ class GreylockScraper(SimpleHTMLScraper):
 
     async def fetch(self, url: Optional[str] = None) -> str:
         target_url = url or f"{self.base_url}/blog/portfolio-news/"
-        response = await self.client.get(target_url)
-        response.raise_for_status()
-        return response.text
+
+        # Use Playwright to render the JavaScript content
+        html = await self.fetch_rendered(
+            target_url,
+            wait_selector="article, [class*='post'], [class*='card'], [class*='blog']",
+            wait_ms=5000
+        )
+        return html
 
     async def parse(self, html: str) -> List[RawArticle]:
         soup = BeautifulSoup(html, "lxml")
         articles = []
         seen_urls = set()
 
+        # Try multiple selectors for Greylock's layout
         selectors = [
             "article",
-            ".news-item",
             ".post-card",
             ".blog-post",
-            "[class*='news']",
             "[class*='post']",
-            ".card",
+            "[class*='Post']",
+            "[class*='card']",
+            "[class*='Card']",
+            "[class*='blog']",
+            "[class*='Blog']",
+            "a[href*='/blog/']",
         ]
 
         for selector in selectors:
             for card in soup.select(selector):
-                title_el = card.select_one("h2, h3, h4, .title, [class*='title'], a")
+                # Extract title
+                title_el = card.select_one("h2, h3, h4, .title, [class*='title'], [class*='Title'], a")
                 if not title_el:
                     continue
                 title = title_el.get_text(strip=True)
@@ -70,17 +82,25 @@ class GreylockScraper(SimpleHTMLScraper):
                 if not title or len(title) < 10:
                     continue
 
+                # Extract link
                 link_el = card.select_one("a[href]")
                 if not link_el:
-                    link_el = card.find_parent("a")
+                    if card.name == "a":
+                        link_el = card
+                    else:
+                        link_el = card.find_parent("a")
                 if not link_el:
                     continue
 
                 url = link_el.get("href", "")
 
-                # Handle Medium links
+                # Make URL absolute
                 if url and not url.startswith("http"):
                     url = f"{self.base_url}{url}"
+
+                # Skip non-blog URLs
+                if "/blog/" not in url and "/portfolio-news" not in url:
+                    continue
 
                 if url in seen_urls or not url:
                     continue
@@ -88,18 +108,20 @@ class GreylockScraper(SimpleHTMLScraper):
 
                 # Extract author
                 author = None
-                author_el = card.select_one(".author, [class*='author'], .byline")
+                author_el = card.select_one(".author, [class*='author'], [class*='Author'], .byline")
                 if author_el:
                     author = author_el.get_text(strip=True)
 
-                date_el = card.select_one("time, .date, [class*='date']")
+                # Extract date
+                date_el = card.select_one("time, .date, [class*='date'], [class*='Date']")
                 pub_date = None
                 if date_el:
                     date_str = date_el.get("datetime") or date_el.get_text(strip=True)
                     pub_date = self._parse_date(date_str)
 
+                # Extract tags
                 tags = []
-                for tag_el in card.select(".tag, .category, [class*='tag']"):
+                for tag_el in card.select(".tag, .category, [class*='tag'], [class*='category']"):
                     tag_text = tag_el.get_text(strip=True).lower()
                     if tag_text:
                         tags.append(tag_text)
@@ -117,14 +139,31 @@ class GreylockScraper(SimpleHTMLScraper):
 
     async def normalize(self, raw: RawArticle) -> NormalizedArticle:
         try:
-            full_html = await self.fetch(raw.url)
+            # Fetch full article with Playwright
+            full_html = await self.fetch_rendered(
+                raw.url,
+                wait_selector="article, .post-content, [class*='content'], main",
+                wait_ms=3000
+            )
             soup = BeautifulSoup(full_html, "lxml")
-            text = self._extract_text(full_html)
+
+            # Find main content
+            content_el = soup.select_one(
+                "article, .post-content, .entry-content, [class*='Content'], main"
+            )
+
+            if content_el:
+                # Remove navigation and non-content elements
+                for el in content_el.select("nav, header, footer, .share, .related, script, style"):
+                    el.decompose()
+                text = content_el.get_text(separator="\n", strip=True)
+            else:
+                text = self._extract_text(full_html)
 
             # Try to find author in full article
             author = raw.author
             if not author:
-                author_el = soup.select_one(".author, [class*='author'], .byline, [rel='author']")
+                author_el = soup.select_one(".author, [class*='author'], [class*='Author'], .byline, [rel='author']")
                 if author_el:
                     author = author_el.get_text(strip=True)
 
