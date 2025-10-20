@@ -185,36 +185,32 @@ function App() {
     async (offset = 0) => {
       setLoading(true);
       try {
+        // When showRejected is true, don't apply filters - show everything
+        // Otherwise, apply Enterprise AI and Lead filters to API call
         const result = await fetchDeals({
           limit: PAGE_SIZE,
           offset,
-          is_lead: filters.leadOnly ? true : undefined,
-          is_enterprise_ai: filters.enterpriseAiOnly ? true : undefined,
+          is_lead: filters.showRejected ? undefined : (filters.leadOnly ? true : undefined),
+          is_enterprise_ai: filters.showRejected ? undefined : (filters.enterpriseAiOnly ? true : undefined),
           enterprise_category: filters.selectedCategory,
           fund_slug: filters.selectedFund,
         });
 
-        // Filter out rejected deals unless showRejected is true
-        let filteredDeals = result.deals;
-        if (!filters.showRejected) {
-          filteredDeals = result.deals.filter(
-            (deal) => deal.isEnterpriseAi && deal.investorRoles.includes('lead')
-          );
-        }
-
-        setDeals(filteredDeals);
+        // Use API results directly - no client-side filtering needed
+        // The API already filters based on the parameters we sent
+        setDeals(result.deals);
         setPagination({
-          deals: filteredDeals,
+          deals: result.deals,
           total: result.total,
           limit: PAGE_SIZE,
           offset: result.offset,
           hasMore: result.hasMore,
         });
 
-        // Calculate stats
+        // Calculate stats from the results
         const now = new Date();
         const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        const newDeals = result.deals.filter((d) => new Date(d.date) > yesterday).length;
+        const newDeals = result.deals.filter((d) => d.date && new Date(d.date) > yesterday).length;
         const enterpriseDeals = result.deals.filter((d) => d.isEnterpriseAi).length;
         const ratio = result.deals.length > 0
           ? Math.round((enterpriseDeals / result.deals.length) * 100)
@@ -246,17 +242,16 @@ function App() {
     [filters]
   );
 
-  // Initial load
+  // Initial load and reload on filter change
   useEffect(() => {
     loadDeals(0);
+  }, [loadDeals]);
+
+  // Load funds and system status once on mount
+  useEffect(() => {
     loadFunds();
     loadSystemStatus();
-  }, []);
-
-  // Reload on filter change
-  useEffect(() => {
-    loadDeals(0);
-  }, [filters]);
+  }, [loadFunds, loadSystemStatus]);
 
   // Refresh system status periodically
   useEffect(() => {
