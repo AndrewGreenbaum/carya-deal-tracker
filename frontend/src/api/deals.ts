@@ -1,4 +1,121 @@
-import type { Deal, InvestorRole, InvestmentStage, EnterpriseCategory } from '../types';
+/**
+ * Bud Tracker API Client
+ *
+ * Comprehensive API client for all backend endpoints.
+ * Supports caching, error handling, and TypeScript types.
+ */
+
+import type {
+  Deal,
+  Fund,
+  PaginatedDeals,
+  DealFilters,
+  HealthResponse,
+  ScraperStatus,
+  SchedulerStatusResponse,
+  StealthDetectionsResponse,
+  ScrapeResponse,
+  SECEdgarResponse,
+  BraveSearchResponse,
+  NewsAggregatorResponse,
+  FirecrawlResponse,
+  AllSourcesResponse,
+  ExtractionRequest,
+  ExtractionResponse,
+  InvestorRole,
+  InvestmentStage,
+  EnterpriseCategory,
+} from '../types';
+
+// ============================================
+// Configuration
+// ============================================
+
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+const API_KEY = import.meta.env.VITE_API_KEY || 'dev-key';
+
+// ============================================
+// Cache Infrastructure
+// ============================================
+
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+const cache = new Map<string, CacheEntry<unknown>>();
+const CACHE_TTL = 60000; // 1 minute
+
+function getCached<T>(key: string): T | null {
+  const entry = cache.get(key);
+  if (entry && Date.now() - entry.timestamp < CACHE_TTL) {
+    return entry.data as T;
+  }
+  cache.delete(key);
+  return null;
+}
+
+function setCache<T>(key: string, data: T): void {
+  cache.set(key, { data, timestamp: Date.now() });
+}
+
+export function invalidateCache(prefix?: string): void {
+  if (prefix) {
+    for (const key of cache.keys()) {
+      if (key.startsWith(prefix)) {
+        cache.delete(key);
+      }
+    }
+  } else {
+    cache.clear();
+  }
+}
+
+// ============================================
+// Request Helpers
+// ============================================
+
+async function apiGet<T>(path: string, useCache = true): Promise<T> {
+  const cacheKey = `GET:${path}`;
+
+  if (useCache) {
+    const cached = getCached<T>(cacheKey);
+    if (cached) return cached;
+  }
+
+  const response = await fetch(`${API_BASE}${path}`);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(error.detail || `API Error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  if (useCache) setCache(cacheKey, data);
+  return data;
+}
+
+async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': API_KEY,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(error.detail || `API Error: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+// ============================================
+// Response Mappers (snake_case -> camelCase)
+// ============================================
 
 interface DealApiResponse {
   id: string;
@@ -8,7 +125,6 @@ interface DealApiResponse {
   amount_invested: string;
   date: string;
   next_steps?: string;
-  // Enterprise AI fields
   enterprise_category?: string;
   is_enterprise_ai: boolean;
   lead_investor?: string;
@@ -16,7 +132,7 @@ interface DealApiResponse {
   verification_snippet?: string;
 }
 
-interface PaginatedDealsResponse {
+interface PaginatedDealsApiResponse {
   deals: DealApiResponse[];
   total: number;
   limit: number;
@@ -24,146 +140,501 @@ interface PaginatedDealsResponse {
   has_more: boolean;
 }
 
-// Simple in-memory cache
-const cache: Map<string, { data: any; timestamp: number }> = new Map();
-const CACHE_TTL = 60000; // 1 minute
-
-function getCached<T>(key: string): T | null {
-  const cached = cache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data as T;
-  }
-  cache.delete(key);
-  return null;
+function mapDeal(api: DealApiResponse): Deal {
+  return {
+    id: api.id,
+    startupName: api.startup_name,
+    investorRoles: api.investor_roles as InvestorRole[],
+    investmentStage: api.investment_stage as InvestmentStage,
+    amountInvested: api.amount_invested,
+    date: api.date,
+    nextSteps: api.next_steps,
+    enterpriseCategory: api.enterprise_category as EnterpriseCategory | undefined,
+    isEnterpriseAi: api.is_enterprise_ai ?? false,
+    leadInvestor: api.lead_investor,
+    leadPartner: api.lead_partner,
+    verificationSnippet: api.verification_snippet,
+  };
 }
 
-function setCache(key: string, data: any): void {
-  cache.set(key, { data, timestamp: Date.now() });
+// ============================================
+// Health & Status Endpoints
+// ============================================
+
+export async function fetchHealth(): Promise<HealthResponse> {
+  const data = await apiGet<{
+    status: string;
+    timestamp: string;
+    tracked_funds: number;
+    implemented_scrapers: number;
+  }>('/health');
+
+  return {
+    status: data.status as 'healthy' | 'unhealthy',
+    timestamp: data.timestamp,
+    trackedFunds: data.tracked_funds,
+    implementedScrapers: data.implemented_scrapers,
+  };
 }
 
-export function invalidateCache(): void {
-  cache.clear();
+export async function fetchScraperStatus(): Promise<ScraperStatus> {
+  const data = await apiGet<{
+    implemented: string[];
+    not_implemented: string[];
+    total_funds: number;
+  }>('/scrapers/status');
+
+  return {
+    implemented: data.implemented,
+    unimplemented: data.not_implemented,
+    totalFunds: data.total_funds,
+  };
 }
 
-// Use environment variable for API base URL (supports dev proxy and production direct)
-const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+export async function fetchSchedulerStatus(): Promise<SchedulerStatusResponse> {
+  const data = await apiGet<{
+    status: string;
+    jobs: Array<{ id: string; name: string; next_run?: string }>;
+  }>('/scheduler/status', false);
 
-export interface FetchDealsOptions {
-  limit?: number;
-  offset?: number;
-  stage?: string;
-  is_lead?: boolean;
-  fund_slug?: string;
-  // Enterprise AI filters
-  is_enterprise_ai?: boolean;
-  enterprise_category?: string;
-}
-
-export interface PaginatedDeals {
-  deals: Deal[];
-  total: number;
-  limit: number;
-  offset: number;
-  hasMore: boolean;
-}
-
-export async function fetchDeals(options: FetchDealsOptions = {}): Promise<PaginatedDeals> {
-  const { limit = 50, offset = 0, stage, is_lead, fund_slug, is_enterprise_ai, enterprise_category } = options;
-
-  // Build query string
-  const params = new URLSearchParams();
-  params.set('limit', limit.toString());
-  params.set('offset', offset.toString());
-  if (stage) params.set('stage', stage);
-  if (is_lead !== undefined) params.set('is_lead', is_lead.toString());
-  if (fund_slug) params.set('fund_slug', fund_slug);
-  if (is_enterprise_ai !== undefined) params.set('is_enterprise_ai', is_enterprise_ai.toString());
-  if (enterprise_category) params.set('enterprise_category', enterprise_category);
-
-  const cacheKey = `deals:${params.toString()}`;
-  const cached = getCached<PaginatedDeals>(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  const response = await fetch(`${API_BASE}/deals?${params.toString()}`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch deals: ${response.statusText}`);
-  }
-
-  const data: PaginatedDealsResponse = await response.json();
-
-  const result: PaginatedDeals = {
-    deals: data.deals.map((deal) => ({
-      id: deal.id,
-      startupName: deal.startup_name,
-      investorRoles: deal.investor_roles as InvestorRole[],
-      investmentStage: deal.investment_stage as InvestmentStage,
-      amountInvested: deal.amount_invested,
-      date: deal.date,
-      nextSteps: deal.next_steps,
-      // Enterprise AI fields
-      enterpriseCategory: deal.enterprise_category as EnterpriseCategory | undefined,
-      isEnterpriseAi: deal.is_enterprise_ai ?? false,
-      leadInvestor: deal.lead_investor,
-      leadPartner: deal.lead_partner,
-      verificationSnippet: deal.verification_snippet,
+  return {
+    status: data.status as SchedulerStatusResponse['status'],
+    jobs: data.jobs.map((j) => ({
+      id: j.id,
+      name: j.name,
+      nextRun: j.next_run,
     })),
+  };
+}
+
+// ============================================
+// Funds Endpoints
+// ============================================
+
+export async function fetchFunds(): Promise<Fund[]> {
+  const data = await apiGet<Array<{
+    slug: string;
+    name: string;
+    ingestion_url: string;
+    scraper_type: string;
+  }>>('/funds');
+
+  return data.map((f) => ({
+    slug: f.slug,
+    name: f.name,
+    ingestionUrl: f.ingestion_url,
+    scraperType: f.scraper_type as Fund['scraperType'],
+  }));
+}
+
+export async function fetchFund(slug: string): Promise<Fund> {
+  const data = await apiGet<{
+    slug: string;
+    name: string;
+    ingestion_url: string;
+    scraper_type: string;
+  }>(`/funds/${slug}`);
+
+  return {
+    slug: data.slug,
+    name: data.name,
+    ingestionUrl: data.ingestion_url,
+    scraperType: data.scraper_type as Fund['scraperType'],
+  };
+}
+
+// ============================================
+// Deals Endpoints
+// ============================================
+
+export async function fetchDeals(filters: DealFilters = {}): Promise<PaginatedDeals> {
+  const params = new URLSearchParams();
+  params.set('limit', (filters.limit ?? 50).toString());
+  params.set('offset', (filters.offset ?? 0).toString());
+  if (filters.stage) params.set('stage', filters.stage);
+  if (filters.is_lead !== undefined) params.set('is_lead', filters.is_lead.toString());
+  if (filters.fund_slug) params.set('fund_slug', filters.fund_slug);
+  if (filters.is_enterprise_ai !== undefined) params.set('is_enterprise_ai', filters.is_enterprise_ai.toString());
+  if (filters.enterprise_category) params.set('enterprise_category', filters.enterprise_category);
+
+  const data = await apiGet<PaginatedDealsApiResponse>(`/deals?${params.toString()}`);
+
+  return {
+    deals: data.deals.map(mapDeal),
     total: data.total,
     limit: data.limit,
     offset: data.offset,
     hasMore: data.has_more,
   };
-
-  setCache(cacheKey, result);
-  return result;
 }
 
-// Legacy function for backwards compatibility
+export function getExportUrl(filters: Omit<DealFilters, 'limit' | 'offset'> = {}): string {
+  const params = new URLSearchParams();
+  if (filters.stage) params.set('stage', filters.stage);
+  if (filters.is_lead !== undefined) params.set('is_lead', filters.is_lead.toString());
+  if (filters.fund_slug) params.set('fund_slug', filters.fund_slug);
+  if (filters.is_enterprise_ai !== undefined) params.set('is_enterprise_ai', filters.is_enterprise_ai.toString());
+  if (filters.enterprise_category) params.set('enterprise_category', filters.enterprise_category);
+
+  const queryString = params.toString();
+  return `${API_BASE}/deals/export${queryString ? '?' + queryString : ''}`;
+}
+
+// ============================================
+// Stealth Detection Endpoints
+// ============================================
+
+export async function fetchStealthDetections(
+  fundSlug?: string,
+  limit = 50,
+  offset = 0
+): Promise<StealthDetectionsResponse> {
+  const params = new URLSearchParams();
+  params.set('limit', limit.toString());
+  params.set('offset', offset.toString());
+  if (fundSlug) params.set('fund_slug', fundSlug);
+
+  const data = await apiGet<{
+    detections: Array<{
+      id: number;
+      fund_slug: string;
+      detected_url: string;
+      detected_at: string;
+      company_name?: string;
+      is_confirmed: boolean;
+      notes?: string;
+    }>;
+    total: number;
+  }>(`/stealth-detections?${params.toString()}`);
+
+  return {
+    detections: data.detections.map((d) => ({
+      id: d.id,
+      fundSlug: d.fund_slug,
+      detectedUrl: d.detected_url,
+      detectedAt: d.detected_at,
+      companyName: d.company_name,
+      isConfirmed: d.is_confirmed,
+      notes: d.notes,
+    })),
+    total: data.total,
+  };
+}
+
+// ============================================
+// Extraction Endpoints
+// ============================================
+
+export async function extractDeal(request: ExtractionRequest): Promise<ExtractionResponse> {
+  const data = await apiPost<{
+    startup_name: string;
+    round_label: string;
+    amount?: string;
+    tracked_fund_is_lead: boolean;
+    tracked_fund_name?: string;
+    tracked_fund_role?: string;
+    confidence_score: number;
+    reasoning_summary: string;
+  }>('/extract', {
+    text: request.text,
+    source_url: request.sourceUrl,
+    fund_slug: request.fundSlug,
+  });
+
+  return {
+    startupName: data.startup_name,
+    roundLabel: data.round_label,
+    amount: data.amount,
+    trackedFundIsLead: data.tracked_fund_is_lead,
+    trackedFundName: data.tracked_fund_name,
+    trackedFundRole: data.tracked_fund_role,
+    confidenceScore: data.confidence_score,
+    reasoningSummary: data.reasoning_summary,
+  };
+}
+
+export async function extractDealBatch(
+  requests: ExtractionRequest[]
+): Promise<ExtractionResponse[]> {
+  const data = await apiPost<Array<{
+    startup_name: string;
+    round_label: string;
+    amount?: string;
+    tracked_fund_is_lead: boolean;
+    tracked_fund_name?: string;
+    tracked_fund_role?: string;
+    confidence_score: number;
+    reasoning_summary: string;
+  }>>('/extract/batch', {
+    articles: requests.map((r) => ({
+      text: r.text,
+      source_url: r.sourceUrl,
+      fund_slug: r.fundSlug,
+    })),
+  });
+
+  return data.map((d) => ({
+    startupName: d.startup_name,
+    roundLabel: d.round_label,
+    amount: d.amount,
+    trackedFundIsLead: d.tracked_fund_is_lead,
+    trackedFundName: d.tracked_fund_name,
+    trackedFundRole: d.tracked_fund_role,
+    confidenceScore: d.confidence_score,
+    reasoningSummary: d.reasoning_summary,
+  }));
+}
+
+// ============================================
+// Scraper Endpoints
+// ============================================
+
+export async function runScraper(fundSlug: string): Promise<ScrapeResponse> {
+  const data = await apiPost<{
+    fund_slug: string;
+    articles_found: number;
+    articles_skipped_duplicate: number;
+    deals_extracted: number;
+    deals_saved: number;
+    errors: string[];
+    duration_seconds: number;
+  }>(`/scrapers/run/${fundSlug}`);
+
+  invalidateCache('GET:/deals');
+
+  return {
+    fundSlug: data.fund_slug,
+    articlesFound: data.articles_found,
+    articlesSkippedDuplicate: data.articles_skipped_duplicate,
+    dealsExtracted: data.deals_extracted,
+    dealsSaved: data.deals_saved,
+    errors: data.errors,
+    durationSeconds: data.duration_seconds,
+  };
+}
+
+export async function runScrapersBatch(
+  fundSlugs: string[],
+  parallel = false
+): Promise<ScrapeResponse[]> {
+  const data = await apiPost<Array<{
+    fund_slug: string;
+    articles_found: number;
+    articles_skipped_duplicate: number;
+    deals_extracted: number;
+    deals_saved: number;
+    errors: string[];
+    duration_seconds: number;
+  }>>('/scrapers/run', { fund_slugs: fundSlugs, parallel });
+
+  invalidateCache('GET:/deals');
+
+  return data.map((d) => ({
+    fundSlug: d.fund_slug,
+    articlesFound: d.articles_found,
+    articlesSkippedDuplicate: d.articles_skipped_duplicate,
+    dealsExtracted: d.deals_extracted,
+    dealsSaved: d.deals_saved,
+    errors: d.errors,
+    durationSeconds: d.duration_seconds,
+  }));
+}
+
+export async function runAllScrapers(parallel = true): Promise<ScrapeResponse[]> {
+  const data = await apiPost<Array<{
+    fund_slug: string;
+    articles_found: number;
+    articles_skipped_duplicate: number;
+    deals_extracted: number;
+    deals_saved: number;
+    errors: string[];
+    duration_seconds: number;
+  }>>(`/scrapers/run-all?parallel=${parallel}`);
+
+  invalidateCache('GET:/deals');
+
+  return data.map((d) => ({
+    fundSlug: d.fund_slug,
+    articlesFound: d.articles_found,
+    articlesSkippedDuplicate: d.articles_skipped_duplicate,
+    dealsExtracted: d.deals_extracted,
+    dealsSaved: d.deals_saved,
+    errors: d.errors,
+    durationSeconds: d.duration_seconds,
+  }));
+}
+
+// ============================================
+// Data Source Endpoints
+// ============================================
+
+export async function runSECEdgar(hours = 24): Promise<SECEdgarResponse> {
+  const data = await apiPost<{
+    filings_found: number;
+    filings_with_tracked_funds: number;
+    articles_generated: number;
+  }>(`/scrapers/sec-edgar?hours=${hours}`);
+
+  invalidateCache('GET:/deals');
+
+  return {
+    filingsFound: data.filings_found,
+    filingsWithTrackedFunds: data.filings_with_tracked_funds,
+    articlesGenerated: data.articles_generated,
+  };
+}
+
+export async function runBraveSearch(freshness = 'pw'): Promise<BraveSearchResponse> {
+  const data = await apiPost<{
+    queries_executed: number;
+    results_found: number;
+    articles_generated: number;
+  }>(`/scrapers/brave-search?freshness=${freshness}`);
+
+  invalidateCache('GET:/deals');
+
+  return {
+    queriesExecuted: data.queries_executed,
+    resultsFound: data.results_found,
+    articlesGenerated: data.articles_generated,
+  };
+}
+
+export async function runNewsAggregator(days = 30): Promise<NewsAggregatorResponse> {
+  const data = await apiPost<{
+    articles_fetched: number;
+    articles_processed: number;
+    enterprise_ai_deals: number;
+    lead_deals: number;
+    deals_saved: number;
+    skipped_consumer: number;
+    skipped_participant: number;
+    errors: number;
+  }>(`/scrapers/news?days=${days}`);
+
+  invalidateCache('GET:/deals');
+
+  return {
+    articlesFetched: data.articles_fetched,
+    articlesProcessed: data.articles_processed,
+    enterpriseAiDeals: data.enterprise_ai_deals,
+    leadDeals: data.lead_deals,
+    dealsSaved: data.deals_saved,
+    skippedConsumer: data.skipped_consumer,
+    skippedParticipant: data.skipped_participant,
+    errors: data.errors,
+  };
+}
+
+export async function runFirecrawl(urls: string[]): Promise<FirecrawlResponse> {
+  const data = await apiPost<{
+    urls_submitted: number;
+    urls_scraped: number;
+    articles_generated: number;
+  }>('/scrapers/firecrawl', { urls });
+
+  return {
+    urlsSubmitted: data.urls_submitted,
+    urlsScraped: data.urls_scraped,
+    articlesGenerated: data.articles_generated,
+  };
+}
+
+export async function runAllSources(days = 7): Promise<AllSourcesResponse> {
+  const data = await apiPost<{
+    sec_edgar: {
+      filings_found: number;
+      filings_with_tracked_funds: number;
+      articles_generated: number;
+    };
+    brave_search?: {
+      queries_executed: number;
+      results_found: number;
+      articles_generated: number;
+    };
+    newsapi: {
+      articles_fetched: number;
+      articles_processed: number;
+      enterprise_ai_deals: number;
+      lead_deals: number;
+      deals_saved: number;
+      skipped_consumer: number;
+      skipped_participant: number;
+      errors: number;
+    };
+  }>(`/scrapers/all-sources?days=${days}`);
+
+  invalidateCache('GET:/deals');
+
+  return {
+    secEdgar: {
+      filingsFound: data.sec_edgar.filings_found,
+      filingsWithTrackedFunds: data.sec_edgar.filings_with_tracked_funds,
+      articlesGenerated: data.sec_edgar.articles_generated,
+    },
+    braveSearch: data.brave_search
+      ? {
+          queriesExecuted: data.brave_search.queries_executed,
+          resultsFound: data.brave_search.results_found,
+          articlesGenerated: data.brave_search.articles_generated,
+        }
+      : undefined,
+    newsapi: {
+      articlesFetched: data.newsapi.articles_fetched,
+      articlesProcessed: data.newsapi.articles_processed,
+      enterpriseAiDeals: data.newsapi.enterprise_ai_deals,
+      leadDeals: data.newsapi.lead_deals,
+      dealsSaved: data.newsapi.deals_saved,
+      skippedConsumer: data.newsapi.skipped_consumer,
+      skippedParticipant: data.newsapi.skipped_participant,
+      errors: data.newsapi.errors,
+    },
+  };
+}
+
+export async function runBackfill(months = 12, dryRun = false): Promise<NewsAggregatorResponse> {
+  const data = await apiPost<{
+    articles_fetched: number;
+    articles_processed: number;
+    enterprise_ai_deals: number;
+    lead_deals: number;
+    deals_saved: number;
+    skipped_consumer: number;
+    skipped_participant: number;
+    errors: number;
+  }>(`/backfill?months=${months}&dry_run=${dryRun}`);
+
+  if (!dryRun) invalidateCache('GET:/deals');
+
+  return {
+    articlesFetched: data.articles_fetched,
+    articlesProcessed: data.articles_processed,
+    enterpriseAiDeals: data.enterprise_ai_deals,
+    leadDeals: data.lead_deals,
+    dealsSaved: data.deals_saved,
+    skippedConsumer: data.skipped_consumer,
+    skippedParticipant: data.skipped_participant,
+    errors: data.errors,
+  };
+}
+
+// ============================================
+// Cache Management
+// ============================================
+
+export async function clearServerCache(): Promise<void> {
+  await apiPost('/cache/clear');
+  invalidateCache();
+}
+
+// ============================================
+// Legacy Compatibility
+// ============================================
+
 export async function fetchDealsLegacy(): Promise<Deal[]> {
   const result = await fetchDeals({ limit: 200 });
   return result.deals;
 }
 
-export async function fetchFunds() {
-  const cacheKey = 'funds';
-  const cached = getCached(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  const response = await fetch(`${API_BASE}/funds`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch funds: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-  setCache(cacheKey, data);
-  return data;
-}
-
-export async function fetchHealth() {
-  const response = await fetch(`${API_BASE}/health`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch health: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-export function getExportUrl(options: Omit<FetchDealsOptions, 'limit' | 'offset'> = {}): string {
-  const { stage, is_lead, fund_slug, is_enterprise_ai, enterprise_category } = options;
-
-  const params = new URLSearchParams();
-  if (stage) params.set('stage', stage);
-  if (is_lead !== undefined) params.set('is_lead', is_lead.toString());
-  if (fund_slug) params.set('fund_slug', fund_slug);
-  if (is_enterprise_ai !== undefined) params.set('is_enterprise_ai', is_enterprise_ai.toString());
-  if (enterprise_category) params.set('enterprise_category', enterprise_category);
-
-  const queryString = params.toString();
-  return `${API_BASE}/deals/export${queryString ? '?' + queryString : ''}`;
-}
+// Re-export for backwards compatibility
+export type { DealFilters as FetchDealsOptions };

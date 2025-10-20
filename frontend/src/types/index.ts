@@ -1,3 +1,7 @@
+// ============================================
+// Core Enums & Types
+// ============================================
+
 export type InvestorRole = 'lead' | 'non_lead' | 'stealth';
 
 export type InvestmentStage =
@@ -19,10 +23,20 @@ export type EnterpriseCategory =
   | 'data_intelligence'
   | 'not_enterprise';
 
+export type ScraperType = 'html' | 'rss' | 'playwright' | 'external' | 'dom_diff';
+
+export type ViewType = 'dashboard' | 'stealth' | 'settings' | 'scrapers';
+
+export type ServiceStatus = 'live' | 'idle' | 'error' | 'processing';
+
+// ============================================
+// Deal Types
+// ============================================
+
 export interface Deal {
   id: string;
   startupName: string;
-  investorRoles: InvestorRole[]; // For the dot indicators
+  investorRoles: InvestorRole[];
   investmentStage: InvestmentStage;
   amountInvested: string;
   date: string;
@@ -33,11 +47,304 @@ export interface Deal {
   leadInvestor?: string;
   leadPartner?: string;
   verificationSnippet?: string;
+  // Source tracking
+  sourceUrl?: string;
+  sourceName?: string;
 }
+
+export interface PaginatedDeals {
+  deals: Deal[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+// API uses snake_case, so we need to handle both
+export interface DealFilters {
+  fund_slug?: string;
+  stage?: InvestmentStage;
+  is_lead?: boolean;
+  is_enterprise_ai?: boolean;
+  enterprise_category?: EnterpriseCategory;
+  limit?: number;
+  offset?: number;
+}
+
+// ============================================
+// Fund Types
+// ============================================
 
 export interface Fund {
   slug: string;
   name: string;
   ingestionUrl: string;
-  scraperType: string;
+  scraperType: ScraperType;
+  // Extended fields from registry
+  partnerNames?: string[];
+  negativeKeywords?: string[];
+  extractionNotes?: string;
+  stealthMonitorPath?: string;
+  // Runtime status
+  lastScraped?: string;
+  isActive?: boolean;
 }
+
+// ============================================
+// Stealth Detection Types
+// ============================================
+
+export interface StealthDetection {
+  id: number;
+  fundSlug: string;
+  detectedUrl: string;
+  detectedAt: string;
+  companyName?: string;
+  isConfirmed: boolean;
+  notes?: string;
+}
+
+export interface StealthDetectionsResponse {
+  detections: StealthDetection[];
+  total: number;
+}
+
+// ============================================
+// Health & Status Types
+// ============================================
+
+export interface HealthResponse {
+  status: 'healthy' | 'unhealthy';
+  timestamp: string;
+  trackedFunds: number;
+  implementedScrapers: number;
+}
+
+export interface ScraperStatus {
+  implemented: string[];
+  unimplemented: string[];
+  totalFunds: number;
+}
+
+export interface ScraperStatusResponse {
+  implemented: string[];
+  notImplemented: string[];
+  totalFunds: number;
+}
+
+export interface SchedulerJob {
+  id: string;
+  name: string;
+  nextRun?: string;
+  next_run_time?: string;
+}
+
+export interface SchedulerStatusResponse {
+  status: 'running' | 'stopped' | 'not_initialized';
+  jobs: SchedulerJob[];
+  next_run?: string;
+}
+
+// ============================================
+// Scraping Result Types
+// ============================================
+
+export interface ScrapeResponse {
+  fundSlug: string;
+  articlesFound: number;
+  articlesSkippedDuplicate: number;
+  dealsExtracted: number;
+  dealsSaved: number;
+  errors: string[];
+  durationSeconds: number;
+}
+
+export interface SECEdgarResponse {
+  filingsFound: number;
+  filingsWithTrackedFunds: number;
+  articlesGenerated: number;
+}
+
+export interface BraveSearchResponse {
+  queriesExecuted: number;
+  resultsFound: number;
+  articlesGenerated: number;
+}
+
+export interface NewsAggregatorResponse {
+  articlesFetched: number;
+  articlesProcessed: number;
+  enterpriseAiDeals: number;
+  leadDeals: number;
+  dealsSaved: number;
+  skippedConsumer: number;
+  skippedParticipant: number;
+  errors: number;
+}
+
+export interface FirecrawlResponse {
+  urlsSubmitted: number;
+  urlsScraped: number;
+  articlesGenerated: number;
+}
+
+export interface AllSourcesResponse {
+  secEdgar: SECEdgarResponse;
+  braveSearch?: BraveSearchResponse;
+  newsapi: NewsAggregatorResponse;
+}
+
+// ============================================
+// Extraction Types
+// ============================================
+
+export interface ExtractionRequest {
+  text: string;
+  sourceUrl?: string;
+  fundSlug?: string;
+}
+
+export interface ExtractionResponse {
+  startupName: string;
+  roundLabel: string;
+  amount?: string;
+  trackedFundIsLead: boolean;
+  trackedFundName?: string;
+  trackedFundRole?: string;
+  confidenceScore: number;
+  reasoningSummary: string;
+}
+
+// ============================================
+// UI State Types
+// ============================================
+
+export interface ServiceStatusInfo {
+  status: ServiceStatus;
+  lastRun?: string;
+}
+
+export interface SystemStatus {
+  secEdgar: ServiceStatusInfo;
+  scrapers: ServiceStatusInfo;
+  claude: ServiceStatusInfo;
+  nextScrape?: string;
+}
+
+export interface DashboardStats {
+  newDeals24h: number;
+  newDealsTrend: number; // +/- from previous day
+  enterpriseAiRatio: number; // percentage
+  tokensUsed: string; // e.g., "8.4M"
+  claudeCalls: number;
+  verificationRate: number; // percentage
+}
+
+export interface FilterState {
+  enterpriseAiOnly: boolean;
+  leadOnly: boolean;
+  showRejected: boolean;
+  selectedFund?: string;
+  selectedCategory?: EnterpriseCategory;
+}
+
+export interface AppState {
+  view: ViewType;
+  filters: FilterState;
+  deals: Deal[];
+  funds: Fund[];
+  isLoading: boolean;
+  error?: string;
+  selectedDeal?: Deal;
+  pagination: {
+    total: number;
+    limit: number;
+    offset: number;
+    hasMore: boolean;
+  };
+  systemStatus: SystemStatus;
+  stats: DashboardStats;
+}
+
+// ============================================
+// Notification Types (for Slack/Discord)
+// ============================================
+
+export interface NotificationSettings {
+  slackWebhookUrl?: string;
+  discordWebhookUrl?: string;
+  enableLeadAlerts: boolean;
+  enableDailySummary: boolean;
+  enableErrorAlerts: boolean;
+}
+
+// ============================================
+// Cost Tracking Types
+// ============================================
+
+export interface CostTracker {
+  currentMonth: number; // USD
+  monthlyLimit: number;
+  lastUpdated?: string;
+  breakdown?: {
+    anthropic: number;
+    newsapi: number;
+    braveSearch: number;
+    firecrawl: number;
+  };
+}
+
+// ============================================
+// Utility Types
+// ============================================
+
+export type LoadingState = 'idle' | 'loading' | 'success' | 'error';
+
+export interface ApiError {
+  detail: string;
+  status: number;
+}
+
+// Category display helpers
+export const CATEGORY_LABELS: Record<EnterpriseCategory, string> = {
+  infrastructure: 'Infrastructure',
+  security: 'Security',
+  vertical_saas: 'Vertical SaaS',
+  agentic: 'Agentic',
+  data_intelligence: 'Data Intelligence',
+  not_enterprise: 'Not Enterprise',
+};
+
+export const STAGE_LABELS: Record<InvestmentStage, string> = {
+  pre_seed: 'Pre-Seed',
+  seed: 'Seed',
+  series_a: 'Series A',
+  series_b: 'Series B',
+  series_c: 'Series C',
+  series_d: 'Series D',
+  growth: 'Growth',
+  exit: 'Exit',
+  unknown: 'Unknown',
+};
+
+// The 18 tracked funds (from backend registry)
+export const TRACKED_FUNDS = [
+  { slug: 'a16z', name: 'a16z' },
+  { slug: 'sequoia', name: 'Sequoia Capital' },
+  { slug: 'benchmark', name: 'Benchmark' },
+  { slug: 'founders_fund', name: 'Founders Fund' },
+  { slug: 'thrive', name: 'Thrive Capital' },
+  { slug: 'greylock', name: 'Greylock' },
+  { slug: 'khosla', name: 'Khosla Ventures' },
+  { slug: 'index', name: 'Index Ventures' },
+  { slug: 'insight', name: 'Insight Partners' },
+  { slug: 'bessemer', name: 'Bessemer VP' },
+  { slug: 'redpoint', name: 'Redpoint' },
+  { slug: 'gv', name: 'GV' },
+  { slug: 'menlo', name: 'Menlo Ventures' },
+  { slug: 'usv', name: 'USV' },
+  { slug: 'accel', name: 'Accel' },
+  { slug: 'felicis', name: 'Felicis' },
+  { slug: 'general_catalyst', name: 'General Catalyst' },
+  { slug: 'first_round', name: 'First Round' },
+] as const;

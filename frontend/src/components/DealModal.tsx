@@ -1,72 +1,38 @@
-import { X, Building2, Shield, Layers, Bot, Database, Copy, Check } from 'lucide-react';
+/**
+ * DealModal - Detailed view of a single deal
+ *
+ * Shows all deal fields with copy functionality for verification snippet
+ * Command Center dark theme
+ */
+
 import { useState } from 'react';
+import {
+  X,
+  Copy,
+  Check,
+  ExternalLink,
+  Users,
+  DollarSign,
+  Calendar,
+  Shield,
+  Cpu,
+  Bot,
+  Database,
+  Building2,
+  Layers,
+} from 'lucide-react';
 import type { Deal, EnterpriseCategory } from '../types';
+import { STAGE_LABELS, CATEGORY_LABELS } from '../types';
 
 interface DealModalProps {
   deal: Deal;
   onClose: () => void;
-  darkMode?: boolean;
 }
 
-function CategoryBadge({ category, darkMode }: { category?: EnterpriseCategory; darkMode?: boolean }) {
-  const categoryConfig: Record<string, { label: string; icon: typeof Building2; color: string; bg: string }> = {
-    infrastructure: { label: 'Infrastructure', icon: Layers, color: 'text-blue-500', bg: 'bg-blue-100' },
-    security: { label: 'Security', icon: Shield, color: 'text-red-500', bg: 'bg-red-100' },
-    vertical_saas: { label: 'Vertical SaaS', icon: Building2, color: 'text-green-500', bg: 'bg-green-100' },
-    agentic: { label: 'Agentic', icon: Bot, color: 'text-purple-500', bg: 'bg-purple-100' },
-    data_intelligence: { label: 'Data Intelligence', icon: Database, color: 'text-amber-500', bg: 'bg-amber-100' },
-  };
-
-  if (!category || category === 'not_enterprise') {
-    return <span className={darkMode ? 'text-gray-500' : 'text-gray-400'}>Not Enterprise AI</span>;
-  }
-
-  const config = categoryConfig[category];
-  if (!config) return null;
-
-  const Icon = config.icon;
-  return (
-    <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${darkMode ? 'bg-gray-800' : config.bg}`}>
-      <Icon size={16} className={config.color} />
-      <span className={`text-sm font-medium ${config.color}`}>{config.label}</span>
-    </div>
-  );
-}
-
-function formatStage(stage: string): string {
-  const stageMap: Record<string, string> = {
-    pre_seed: 'Pre-Seed',
-    seed: 'Seed',
-    series_a: 'Series A',
-    series_b: 'Series B',
-    series_c: 'Series C',
-    series_d: 'Series D',
-    growth: 'Growth',
-    exit: 'Exit',
-    unknown: 'Unknown',
-  };
-  return stageMap[stage] || stage;
-}
-
-function formatDate(dateStr: string): string {
-  if (!dateStr || dateStr === 'DD/MM/YYYY') return '-';
-  try {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  } catch {
-    return dateStr;
-  }
-}
-
-export function DealModal({ deal, onClose, darkMode = false }: DealModalProps) {
+export function DealModal({ deal, onClose }: DealModalProps) {
   const [copied, setCopied] = useState(false);
 
-  const handleCopySnippet = async () => {
+  const copySnippet = async () => {
     if (deal.verificationSnippet) {
       await navigator.clipboard.writeText(deal.verificationSnippet);
       setCopied(true);
@@ -80,146 +46,226 @@ export function DealModal({ deal, onClose, darkMode = false }: DealModalProps) {
     }
   };
 
+  const getCategoryIcon = (category?: EnterpriseCategory) => {
+    switch (category) {
+      case 'infrastructure':
+        return <Layers className="w-4 h-4" />;
+      case 'security':
+        return <Shield className="w-4 h-4" />;
+      case 'vertical_saas':
+        return <Building2 className="w-4 h-4" />;
+      case 'agentic':
+        return <Bot className="w-4 h-4" />;
+      case 'data_intelligence':
+        return <Database className="w-4 h-4" />;
+      default:
+        return <Cpu className="w-4 h-4" />;
+    }
+  };
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={handleBackdropClick}
-    >
-      <div className={`w-full max-w-2xl mx-4 rounded-xl shadow-2xl ${
-        darkMode ? 'bg-gray-900 border border-gray-700' : 'bg-white'
-      }`}>
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 animate-fade-in"
+        onClick={handleBackdropClick}
+      />
+
+      {/* Modal Content */}
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl mx-4 bg-[#0a0a0c] border border-slate-800 rounded-lg shadow-2xl animate-slide-up">
         {/* Header */}
-        <div className={`flex items-center justify-between px-6 py-4 border-b ${
-          darkMode ? 'border-gray-700' : 'border-gray-200'
-        }`}>
-          <h2 className={`text-xl font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-            {deal.startupName}
-          </h2>
+        <div className="flex items-start justify-between p-6 border-b border-slate-800">
+          <div>
+            <h2 className="text-2xl font-bold text-white">{deal.startupName}</h2>
+            <div className="flex items-center gap-2 mt-2 text-sm">
+              <span className={`stage-badge stage-${deal.investmentStage}`}>
+                {STAGE_LABELS[deal.investmentStage]}
+              </span>
+              <span className="text-slate-500">•</span>
+              <span className="text-slate-300">{deal.amountInvested}</span>
+            </div>
+          </div>
           <button
             onClick={onClose}
-            className={`p-2 rounded-lg transition-colors ${
-              darkMode
-                ? 'hover:bg-gray-800 text-gray-400 hover:text-gray-200'
-                : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
-            }`}
+            className="p-2 hover:bg-slate-800 rounded transition-colors text-slate-400 hover:text-white"
           >
-            <X size={20} />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="px-6 py-6 space-y-6">
-          {/* Key Details Grid */}
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <div className={`text-sm font-medium mb-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Round
-              </div>
-              <div className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                {formatStage(deal.investmentStage)}
-              </div>
-            </div>
-            <div>
-              <div className={`text-sm font-medium mb-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Amount
-              </div>
-              <div className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                {deal.amountInvested}
-              </div>
-            </div>
-            <div>
-              <div className={`text-sm font-medium mb-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Date
-              </div>
-              <div className={darkMode ? 'text-gray-300' : 'text-gray-700'}>
-                {formatDate(deal.date)}
-              </div>
-            </div>
-            <div>
-              <div className={`text-sm font-medium mb-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Category
-              </div>
-              <CategoryBadge category={deal.enterpriseCategory} darkMode={darkMode} />
-            </div>
-          </div>
+        <div className="p-6 space-y-6">
+          {/* Main Info Grid */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* Lead Investor */}
+            <InfoCard
+              icon={<Users className="w-4 h-4 text-emerald-400" />}
+              label="Lead Investor"
+              value={deal.leadInvestor || 'Unknown'}
+              subValue={deal.leadPartner ? `Partner: ${deal.leadPartner}` : undefined}
+            />
 
-          {/* Lead Investor */}
-          {deal.leadInvestor && (
-            <div>
-              <div className={`text-sm font-medium mb-2 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Lead Investor
-              </div>
-              <div className={`flex items-center gap-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                <div className={`w-3 h-3 rounded-full ${darkMode ? 'bg-white' : 'bg-gray-900'}`} />
-                <span className="font-medium">{deal.leadInvestor}</span>
-                {deal.leadPartner && (
-                  <span className={darkMode ? 'text-gray-400' : 'text-gray-500'}>
-                    ({deal.leadPartner})
+            {/* Amount */}
+            <InfoCard
+              icon={<DollarSign className="w-4 h-4 text-blue-400" />}
+              label="Amount Raised"
+              value={deal.amountInvested}
+            />
+
+            {/* Date */}
+            <InfoCard
+              icon={<Calendar className="w-4 h-4 text-purple-400" />}
+              label="Announced"
+              value={formatDate(deal.date)}
+            />
+
+            {/* Category */}
+            <InfoCard
+              icon={getCategoryIcon(deal.enterpriseCategory)}
+              label="Enterprise Category"
+              value={
+                deal.enterpriseCategory
+                  ? CATEGORY_LABELS[deal.enterpriseCategory]
+                  : 'Not Classified'
+              }
+              badge={
+                deal.isEnterpriseAi ? (
+                  <span className="ml-2 px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs rounded">
+                    Enterprise AI
                   </span>
-                )}
-              </div>
-            </div>
-          )}
+                ) : (
+                  <span className="ml-2 px-2 py-0.5 bg-slate-700 text-slate-400 text-xs rounded">
+                    Consumer
+                  </span>
+                )
+              }
+            />
+          </div>
 
           {/* Verification Snippet */}
-          {deal.verificationSnippet && (
-            <div>
-              <div className={`text-sm font-medium mb-2 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                 Verification Snippet
-              </div>
-              <div className={`relative p-4 rounded-lg ${
-                darkMode ? 'bg-gray-800' : 'bg-gray-50'
-              }`}>
-                <p className={`italic pr-10 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                  "{deal.verificationSnippet}"
-                </p>
+              </label>
+              {deal.verificationSnippet && (
                 <button
-                  onClick={handleCopySnippet}
-                  className={`absolute top-3 right-3 p-2 rounded transition-colors ${
-                    darkMode
-                      ? 'hover:bg-gray-700 text-gray-400'
-                      : 'hover:bg-gray-200 text-gray-500'
-                  }`}
-                  title="Copy to clipboard"
+                  onClick={copySnippet}
+                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-white transition-colors"
                 >
-                  {copied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
+                  {copied ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-400" />
+                      <span className="text-emerald-400">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" />
+                      <span>Copy</span>
+                    </>
+                  )}
                 </button>
-              </div>
+              )}
             </div>
-          )}
-
-          {/* Enterprise AI Badge */}
-          <div className="flex items-center gap-2">
-            <div className={`px-3 py-1 rounded-full text-sm font-medium ${
-              deal.isEnterpriseAi
-                ? darkMode
-                  ? 'bg-green-900 text-green-300'
-                  : 'bg-green-100 text-green-700'
-                : darkMode
-                  ? 'bg-gray-800 text-gray-400'
-                  : 'bg-gray-100 text-gray-500'
-            }`}>
-              {deal.isEnterpriseAi ? 'Enterprise AI' : 'Consumer/Other'}
+            <div className="p-4 bg-slate-900 border-l-2 border-emerald-500 rounded-r">
+              {deal.verificationSnippet ? (
+                <p className="text-slate-300 italic">"{deal.verificationSnippet}"</p>
+              ) : (
+                <p className="text-slate-500 italic">No verification snippet available</p>
+              )}
             </div>
           </div>
+
+          {/* Investor Roles */}
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
+              Investor Roles
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {deal.investorRoles.map((role, idx) => (
+                <span
+                  key={idx}
+                  className={`px-3 py-1 rounded text-sm ${
+                    role === 'lead'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : role === 'stealth'
+                      ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                      : 'bg-slate-800 text-slate-400 border border-slate-700'
+                  }`}
+                >
+                  {role === 'lead'
+                    ? 'Lead Investor'
+                    : role === 'stealth'
+                    ? 'Stealth'
+                    : 'Participant'}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Source Link */}
+          {deal.sourceUrl && (
+            <div className="pt-4 border-t border-slate-800">
+              <a
+                href={deal.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                <ExternalLink className="w-4 h-4" />
+                View Source Article
+              </a>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
-        <div className={`px-6 py-4 border-t ${
-          darkMode ? 'border-gray-700' : 'border-gray-200'
-        }`}>
-          <button
-            onClick={onClose}
-            className={`w-full py-2 px-4 rounded-lg font-medium transition-colors ${
-              darkMode
-                ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
+        <div className="px-6 py-4 border-t border-slate-800 flex justify-end">
+          <button onClick={onClose} className="btn-secondary">
             Close
           </button>
         </div>
       </div>
+    </>
+  );
+}
+
+interface InfoCardProps {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  subValue?: string;
+  badge?: React.ReactNode;
+}
+
+function InfoCard({ icon, label, value, subValue, badge }: InfoCardProps) {
+  return (
+    <div className="p-3 bg-slate-900/50 border border-slate-800 rounded">
+      <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
+        {icon}
+        {label}
+      </div>
+      <div className="text-white font-medium flex items-center flex-wrap">
+        {value}
+        {badge}
+      </div>
+      {subValue && <div className="text-xs text-slate-400 mt-0.5">{subValue}</div>}
     </div>
   );
 }
+
+function formatDate(dateString: string): string {
+  if (!dateString) return 'Unknown';
+  try {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch {
+    return dateString;
+  }
+}
+
+export default DealModal;

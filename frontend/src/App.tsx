@@ -1,14 +1,48 @@
+/**
+ * App.tsx - Main orchestrator for the Bud Tracker Command Center
+ *
+ * Features:
+ * - Dashboard view with stats, filters, and deals table
+ * - Stealth Tracker view for silent portfolio additions
+ * - Scraper Control view for manual scraper runs
+ * - Settings panel for notifications
+ * - Live system status indicators
+ *
+ * Command Center dark theme
+ */
+
 import { useState, useEffect, useCallback } from 'react';
-import { Moon, Sun, Download } from 'lucide-react';
-import { Sidebar } from './components/Sidebar';
-import { Header } from './components/Header';
-import { DealTable } from './components/DealTable';
+import { CommandHeader } from './components/CommandHeader';
+import { CommandSidebar } from './components/CommandSidebar';
+import { StatsCards } from './components/StatsCards';
+import { DealsTable } from './components/DealsTable';
 import { DealModal } from './components/DealModal';
 import { StealthTracker } from './components/StealthTracker';
-import { fetchDeals, invalidateCache, getExportUrl, type FetchDealsOptions } from './api/deals';
-import type { Deal } from './types';
+import { ScraperControl } from './components/ScraperControl';
+import { SettingsPanel } from './components/SettingsPanel';
+import {
+  fetchDeals,
+  fetchFunds,
+  fetchHealth,
+  fetchScraperStatus,
+  fetchSchedulerStatus,
+  invalidateCache,
+  getExportUrl,
+} from './api/deals';
+import type {
+  Deal,
+  Fund,
+  FilterState,
+  ViewType,
+  SystemStatus,
+  DashboardStats,
+  CostTracker,
+  PaginatedDeals,
+} from './types';
 
-// Sample data for fallback when API unavailable
+const PAGE_SIZE = 50;
+
+// Sample deals fallback
 const sampleDeals: Deal[] = [
   {
     id: '1',
@@ -22,6 +56,7 @@ const sampleDeals: Deal[] = [
     leadInvestor: 'Sequoia Capital',
     leadPartner: 'Roelof Botha',
     verificationSnippet: 'led by Sequoia Capital',
+    sourceName: 'TechCrunch',
   },
   {
     id: '2',
@@ -34,6 +69,7 @@ const sampleDeals: Deal[] = [
     isEnterpriseAi: true,
     leadInvestor: 'a16z',
     verificationSnippet: 'Series B led by Andreessen Horowitz',
+    sourceName: 'Fortune',
   },
   {
     id: '3',
@@ -47,309 +83,279 @@ const sampleDeals: Deal[] = [
     leadInvestor: 'Founders Fund',
     leadPartner: 'Keith Rabois',
     verificationSnippet: 'Founders Fund led the round',
+    sourceName: 'SEC EDGAR',
   },
 ];
 
-const PAGE_SIZE = 50;
-
 function App() {
-  const [activeMenuItem, setActiveMenuItem] = useState('home');
+  // View state
+  const [currentView, setCurrentView] = useState<ViewType>('dashboard');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Data state
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [funds, setFunds] = useState<Fund[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [darkMode, setDarkMode] = useState(false);
 
   // Pagination state
-  const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
+  const [pagination, setPagination] = useState<PaginatedDeals>({
+    deals: [],
+    total: 0,
+    limit: PAGE_SIZE,
+    offset: 0,
+    hasMore: false,
+  });
 
   // Filter state - default to Enterprise AI + Lead only
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [stageFilter, _setStageFilter] = useState<string | undefined>();
-  const [leadFilter, setLeadFilter] = useState<boolean | undefined>(true);
-  const [enterpriseFilter, setEnterpriseFilter] = useState<boolean | undefined>(true);
-  const [categoryFilter, setCategoryFilter] = useState<string | undefined>();
+  const [filters, setFilters] = useState<FilterState>({
+    enterpriseAiOnly: true,
+    leadOnly: true,
+    showRejected: false,
+    selectedFund: undefined,
+    selectedCategory: undefined,
+  });
+
+  // System status
+  const [systemStatus, setSystemStatus] = useState<SystemStatus>({
+    secEdgar: { status: 'idle', lastRun: undefined },
+    scrapers: { status: 'idle', lastRun: undefined },
+    claude: { status: 'idle', lastRun: undefined },
+    nextScrape: new Date(Date.now() + 3600000).toISOString(),
+  });
+
+  // Stats
+  const [stats, setStats] = useState<DashboardStats>({
+    newDeals24h: 0,
+    newDealsTrend: 0,
+    enterpriseAiRatio: 0,
+    tokensUsed: '0',
+    claudeCalls: 0,
+    verificationRate: 100,
+  });
+
+  // Cost tracker
+  const [costTracker] = useState<CostTracker>({
+    currentMonth: 45,
+    monthlyLimit: 100,
+    lastUpdated: new Date().toISOString(),
+  });
 
   // Modal state
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
 
-  const loadDeals = useCallback(async (options: FetchDealsOptions = {}) => {
-    setLoading(true);
+  // Load system status
+  const loadSystemStatus = useCallback(async () => {
     try {
-      const result = await fetchDeals({
-        limit: PAGE_SIZE,
-        offset: options.offset ?? offset,
-        stage: options.stage ?? stageFilter,
-        is_lead: options.is_lead ?? leadFilter,
-        is_enterprise_ai: options.is_enterprise_ai ?? enterpriseFilter,
-        enterprise_category: options.enterprise_category ?? categoryFilter,
-      });
+      const [health, scraperStatus, schedulerStatus] = await Promise.all([
+        fetchHealth().catch(() => null),
+        fetchScraperStatus().catch(() => null),
+        fetchSchedulerStatus().catch(() => null),
+      ]);
 
-      setDeals(result.deals);
-      setTotal(result.total);
-      setOffset(result.offset);
-      setHasMore(result.hasMore);
-      setError(null);
+      if (health || scraperStatus || schedulerStatus) {
+        setSystemStatus((prev) => ({
+          ...prev,
+          secEdgar: { status: 'live', lastRun: new Date().toISOString() },
+          scrapers: {
+            status: scraperStatus?.implemented?.length ? 'live' : 'idle',
+            lastRun: new Date().toISOString(),
+          },
+          claude: { status: 'live', lastRun: new Date().toISOString() },
+          nextScrape: schedulerStatus?.next_run || prev.nextScrape,
+        }));
+      }
     } catch (err) {
-      console.warn('API unavailable, using sample data:', err);
-      setDeals(sampleDeals);
-      setTotal(sampleDeals.length);
-      setHasMore(false);
-      setError('Using sample data (API unavailable)');
-    } finally {
-      setLoading(false);
+      console.warn('Failed to load system status:', err);
     }
-  }, [offset, stageFilter, leadFilter, enterpriseFilter, categoryFilter]);
+  }, []);
 
-  useEffect(() => {
-    loadDeals({ offset: 0 });
-  }, [stageFilter, leadFilter, enterpriseFilter, categoryFilter]);
+  // Load funds
+  const loadFunds = useCallback(async () => {
+    try {
+      const fundsData = await fetchFunds();
+      setFunds(fundsData);
+    } catch (err) {
+      console.warn('Failed to load funds:', err);
+    }
+  }, []);
+
+  // Load deals
+  const loadDeals = useCallback(
+    async (offset = 0) => {
+      setLoading(true);
+      try {
+        const result = await fetchDeals({
+          limit: PAGE_SIZE,
+          offset,
+          is_lead: filters.leadOnly ? true : undefined,
+          is_enterprise_ai: filters.enterpriseAiOnly ? true : undefined,
+          enterprise_category: filters.selectedCategory,
+          fund_slug: filters.selectedFund,
+        });
+
+        // Filter out rejected deals unless showRejected is true
+        let filteredDeals = result.deals;
+        if (!filters.showRejected) {
+          filteredDeals = result.deals.filter(
+            (deal) => deal.isEnterpriseAi && deal.investorRoles.includes('lead')
+          );
+        }
+
+        setDeals(filteredDeals);
+        setPagination({
+          deals: filteredDeals,
+          total: result.total,
+          limit: PAGE_SIZE,
+          offset: result.offset,
+          hasMore: result.hasMore,
+        });
+
+        // Calculate stats
+        const now = new Date();
+        const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        const newDeals = result.deals.filter((d) => new Date(d.date) > yesterday).length;
+        const enterpriseDeals = result.deals.filter((d) => d.isEnterpriseAi).length;
+        const ratio = result.deals.length > 0
+          ? Math.round((enterpriseDeals / result.deals.length) * 100)
+          : 0;
+
+        setStats((prev) => ({
+          ...prev,
+          newDeals24h: newDeals,
+          enterpriseAiRatio: ratio,
+          verificationRate: 100,
+        }));
+
+        setError(null);
+      } catch (err) {
+        console.warn('API unavailable, using sample data:', err);
+        setDeals(sampleDeals);
+        setPagination({
+          deals: sampleDeals,
+          total: sampleDeals.length,
+          limit: PAGE_SIZE,
+          offset: 0,
+          hasMore: false,
+        });
+        setError('Using sample data (API unavailable)');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [filters]
+  );
 
   // Initial load
   useEffect(() => {
-    loadDeals({ offset: 0 });
+    loadDeals(0);
+    loadFunds();
+    loadSystemStatus();
   }, []);
 
-  const handleDealClick = (deal: Deal) => {
-    setSelectedDeal(deal);
+  // Reload on filter change
+  useEffect(() => {
+    loadDeals(0);
+  }, [filters]);
+
+  // Refresh system status periodically
+  useEffect(() => {
+    const interval = setInterval(loadSystemStatus, 60000);
+    return () => clearInterval(interval);
+  }, [loadSystemStatus]);
+
+  const handleRefresh = () => {
+    invalidateCache();
+    loadDeals(0);
+    loadSystemStatus();
   };
 
   const handleExport = () => {
     const url = getExportUrl({
-      stage: stageFilter,
-      is_lead: leadFilter,
-      is_enterprise_ai: enterpriseFilter,
-      enterprise_category: categoryFilter,
+      is_lead: filters.leadOnly ? true : undefined,
+      is_enterprise_ai: filters.enterpriseAiOnly ? true : undefined,
+      enterprise_category: filters.selectedCategory,
+      fund_slug: filters.selectedFund,
     });
     window.open(url, '_blank');
   };
 
-  const handleNextPage = () => {
-    if (hasMore) {
-      loadDeals({ offset: offset + PAGE_SIZE });
-    }
+  const handlePageChange = (newOffset: number) => {
+    loadDeals(newOffset);
   };
-
-  const handlePrevPage = () => {
-    if (offset > 0) {
-      loadDeals({ offset: Math.max(0, offset - PAGE_SIZE) });
-    }
-  };
-
-  const handleRefresh = () => {
-    invalidateCache();
-    loadDeals({ offset: 0 });
-  };
-
-  const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
-  const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (
-    <div className={`h-screen flex ${darkMode ? 'bg-black' : 'bg-white'}`}>
-      {/* Sidebar */}
-      <Sidebar
-        activeItem={activeMenuItem}
-        onItemClick={setActiveMenuItem}
-        darkMode={darkMode}
+    <div className="h-screen flex flex-col bg-[#050506] text-slate-300 font-['JetBrains_Mono',monospace]">
+      {/* Header */}
+      <CommandHeader
+        systemStatus={systemStatus}
+        onRefresh={handleRefresh}
+        onSettingsClick={() => setSettingsOpen(true)}
       />
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <Header darkMode={darkMode}>
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            className={`p-2 rounded-lg transition-colors ${
-              darkMode
-                ? 'hover:bg-gray-800 text-gray-300'
-                : 'hover:bg-gray-100 text-gray-600'
-            }`}
-            title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-          >
-            {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-          </button>
-        </Header>
+      {/* Main Layout */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Sidebar */}
+        <CommandSidebar
+          filters={filters}
+          onFiltersChange={setFilters}
+          funds={funds}
+          currentView={currentView}
+          onViewChange={setCurrentView}
+          costTracker={costTracker}
+        />
 
-        {/* Content Area */}
-        <main className={`flex-1 overflow-hidden flex flex-col ${darkMode ? 'bg-black' : ''}`}>
-          {/* Stealth Tracker View */}
-          {activeMenuItem === 'stealth' ? (
-            <StealthTracker darkMode={darkMode} />
-          ) : (
-          <>
-          {/* Status Banner */}
-          {error && (
-            <div className={`px-6 py-2 border-b text-sm flex items-center justify-between ${
-              darkMode
-                ? 'bg-amber-900/30 border-amber-700 text-amber-400'
-                : 'bg-amber-50 border-amber-200 text-amber-700'
-            }`}>
-              <span>{error}</span>
-              <button
-                onClick={handleRefresh}
-                className={`underline text-sm ${
-                  darkMode ? 'text-amber-300 hover:text-amber-200' : 'text-amber-800 hover:text-amber-900'
-                }`}
-              >
-                Retry
-              </button>
-            </div>
-          )}
+        {/* Main Content */}
+        <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Dashboard View */}
+          {currentView === 'dashboard' && (
+            <>
+              {/* Stats Cards */}
+              <StatsCards stats={stats} />
 
-          {/* Filter Controls */}
-          <div className={`px-6 py-3 border-b flex items-center gap-4 ${
-            darkMode
-              ? 'bg-gray-900 border-gray-700'
-              : 'bg-gray-50 border-gray-200'
-          }`}>
-            <span className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Filters:</span>
-            <button
-              onClick={() => setEnterpriseFilter(enterpriseFilter ? undefined : true)}
-              className={`px-3 py-1 text-sm rounded-full border transition-colors ${
-                enterpriseFilter
-                  ? darkMode
-                    ? 'bg-blue-900 border-blue-700 text-blue-300'
-                    : 'bg-blue-100 border-blue-300 text-blue-700'
-                  : darkMode
-                    ? 'border-gray-600 text-gray-400 hover:border-gray-500'
-                    : 'border-gray-300 text-gray-600 hover:border-gray-400'
-              }`}
-            >
-              Enterprise AI Only
-            </button>
-            <button
-              onClick={() => setLeadFilter(leadFilter ? undefined : true)}
-              className={`px-3 py-1 text-sm rounded-full border transition-colors ${
-                leadFilter
-                  ? darkMode
-                    ? 'bg-green-900 border-green-700 text-green-300'
-                    : 'bg-green-100 border-green-300 text-green-700'
-                  : darkMode
-                    ? 'border-gray-600 text-gray-400 hover:border-gray-500'
-                    : 'border-gray-300 text-gray-600 hover:border-gray-400'
-              }`}
-            >
-              Lead Deals Only
-            </button>
-            <select
-              value={categoryFilter || ''}
-              onChange={(e) => setCategoryFilter(e.target.value || undefined)}
-              className={`px-3 py-1 text-sm rounded border ${
-                darkMode
-                  ? 'bg-gray-800 border-gray-600 text-gray-300'
-                  : 'bg-white border-gray-300 text-gray-700'
-              }`}
-            >
-              <option value="">All Categories</option>
-              <option value="infrastructure">Infrastructure</option>
-              <option value="security">Security</option>
-              <option value="vertical_saas">Vertical SaaS</option>
-              <option value="agentic">Agentic</option>
-              <option value="data_intelligence">Data Intelligence</option>
-            </select>
-          </div>
-
-          {/* Pagination Controls */}
-          {!loading && deals.length > 0 && (
-            <div className={`px-6 py-3 border-b flex items-center justify-between ${
-              darkMode
-                ? 'bg-gray-900 border-gray-700'
-                : 'bg-gray-50 border-gray-200'
-            }`}>
-              <div className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                Showing {offset + 1}-{Math.min(offset + deals.length, total)} of {total} deals
-              </div>
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={handleExport}
-                  className={`flex items-center gap-1 text-sm ${darkMode ? 'text-green-400 hover:text-green-300' : 'text-green-600 hover:text-green-800'}`}
-                  title="Export to CSV"
-                >
-                  <Download size={14} />
-                  Export
-                </button>
-                <button
-                  onClick={handleRefresh}
-                  className={`text-sm ${darkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800'}`}
-                >
-                  Refresh
-                </button>
-                <div className="flex items-center gap-2">
+              {/* Error Banner */}
+              {error && (
+                <div className="px-6 py-2 border-b border-amber-500/30 bg-amber-500/10 text-amber-400 text-sm flex items-center justify-between">
+                  <span>{error}</span>
                   <button
-                    onClick={handlePrevPage}
-                    disabled={offset === 0}
-                    className={`px-3 py-1 text-sm rounded border ${
-                      offset === 0
-                        ? darkMode
-                          ? 'border-gray-700 text-gray-600 cursor-not-allowed'
-                          : 'border-gray-200 text-gray-400 cursor-not-allowed'
-                        : darkMode
-                          ? 'border-gray-600 text-gray-300 hover:bg-gray-800'
-                          : 'border-gray-300 text-gray-700 hover:bg-gray-100'
-                    }`}
+                    onClick={handleRefresh}
+                    className="text-amber-300 hover:text-amber-200 underline"
                   >
-                    Previous
-                  </button>
-                  <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                    Page {currentPage} of {totalPages || 1}
-                  </span>
-                  <button
-                    onClick={handleNextPage}
-                    disabled={!hasMore}
-                    className={`px-3 py-1 text-sm rounded border ${
-                      !hasMore
-                        ? darkMode
-                          ? 'border-gray-700 text-gray-600 cursor-not-allowed'
-                          : 'border-gray-200 text-gray-400 cursor-not-allowed'
-                        : darkMode
-                          ? 'border-gray-600 text-gray-300 hover:bg-gray-800'
-                          : 'border-gray-300 text-gray-700 hover:bg-gray-100'
-                    }`}
-                  >
-                    Next
+                    Retry
                   </button>
                 </div>
+              )}
+
+              {/* Deals Table */}
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <DealsTable
+                  deals={deals}
+                  pagination={pagination}
+                  onDealClick={setSelectedDeal}
+                  onExport={handleExport}
+                  onRefresh={handleRefresh}
+                  onPageChange={handlePageChange}
+                  isLoading={loading}
+                />
               </div>
-            </div>
+            </>
           )}
 
-          {/* Loading State */}
-          {loading ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="flex flex-col items-center gap-2">
-                <div className={`w-8 h-8 border-2 rounded-full animate-spin ${
-                  darkMode
-                    ? 'border-gray-600 border-t-gray-300'
-                    : 'border-gray-300 border-t-gray-600'
-                }`} />
-                <div className={darkMode ? 'text-gray-400' : 'text-gray-500'}>Loading deals...</div>
-              </div>
-            </div>
-          ) : deals.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className={darkMode ? 'text-gray-400' : 'text-gray-500'}>No deals found</div>
-            </div>
-          ) : (
-            <DealTable
-              deals={deals}
-              onDealClick={handleDealClick}
-              darkMode={darkMode}
-            />
-          )}
-          </>
-          )}
+          {/* Stealth Tracker View */}
+          {currentView === 'stealth' && <StealthTracker />}
+
+          {/* Scrapers View */}
+          {currentView === 'scrapers' && <ScraperControl />}
         </main>
       </div>
 
       {/* Deal Modal */}
       {selectedDeal && (
-        <DealModal
-          deal={selectedDeal}
-          onClose={() => setSelectedDeal(null)}
-          darkMode={darkMode}
-        />
+        <DealModal deal={selectedDeal} onClose={() => setSelectedDeal(null)} />
       )}
+
+      {/* Settings Panel */}
+      <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }
