@@ -129,3 +129,74 @@ async def _send_discord(message: dict):
             logger.info("Discord notification sent")
     except Exception as e:
         logger.error(f"Failed to send Discord notification: {e}")
+
+
+async def send_lead_deal_alert(
+    company_name: str,
+    amount: Optional[str],
+    round_type: str,
+    lead_investor: str,
+    enterprise_category: Optional[str],
+    verification_snippet: Optional[str],
+):
+    """
+    Send instant alert when a new lead deal is saved.
+
+    Called from storage.py when is_lead_confirmed=True.
+    """
+    # Format amount for display
+    amount_display = amount if amount else "Undisclosed"
+    category_display = enterprise_category.replace("_", " ").title() if enterprise_category else "N/A"
+    snippet_display = f'"{verification_snippet}"' if verification_snippet else "N/A"
+
+    text = f"""🚀 *NEW LEAD DEAL DETECTED*
+
+*Company:* {company_name}
+*Round:* {round_type.replace("_", " ").title()}
+*Amount:* {amount_display}
+*Lead:* {lead_investor}
+*Category:* {category_display}
+
+*Verification:* {snippet_display}"""
+
+    message = {
+        "text": text,
+        "blocks": [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": "🚀 New Lead Deal Detected", "emoji": True}
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Company:*\n{company_name}"},
+                    {"type": "mrkdwn", "text": f"*Round:*\n{round_type.replace('_', ' ').title()}"},
+                    {"type": "mrkdwn", "text": f"*Amount:*\n{amount_display}"},
+                    {"type": "mrkdwn", "text": f"*Lead:*\n{lead_investor}"},
+                ]
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Category:*\n{category_display}"},
+                ]
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {"type": "mrkdwn", "text": f"*Verification:* {snippet_display}"}
+                ]
+            }
+        ]
+    }
+
+    # Log the alert
+    logger.info(f"Lead deal alert: {company_name} - {round_type} led by {lead_investor}")
+
+    # Send to Slack
+    if settings.slack_webhook_url:
+        await _send_slack(message)
+
+    # Send to Discord
+    if settings.discord_webhook_url:
+        await _send_discord(message)

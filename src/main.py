@@ -40,6 +40,7 @@ from .archivist import (
     DealInvestor,
     PortfolioCompany,
 )
+from .archivist.models import StealthDetection
 from .harvester import (
     scrape_fund,
     scrape_all_funds,
@@ -134,9 +135,18 @@ app = FastAPI(
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # CORS middleware for frontend
+# Build allowed origins dynamically (includes production frontend if configured)
+_allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+]
+if settings.frontend_url:
+    _allowed_origins.append(settings.frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -189,6 +199,12 @@ class DealResponse(BaseModel):
     amount_invested: str
     date: str
     next_steps: Optional[str] = None
+    # Enterprise AI fields
+    enterprise_category: Optional[str] = None
+    is_enterprise_ai: bool = False
+    lead_investor: Optional[str] = None
+    lead_partner: Optional[str] = None
+    verification_snippet: Optional[str] = None
 
 
 class PaginatedDealsResponse(BaseModel):
@@ -264,17 +280,21 @@ async def get_fund(slug: str):
 async def list_deals(
     fund_slug: Optional[str] = Query(None, description="Filter by fund slug"),
     stage: Optional[str] = Query(None, description="Filter by investment stage"),
-    is_lead: Optional[bool] = Query(None, description="Filter by lead status"),
+    is_lead: Optional[bool] = Query(None, description="Filter by lead status (True = tracked fund led)"),
+    is_enterprise_ai: Optional[bool] = Query(None, description="Filter for Enterprise AI only (True = B2B AI)"),
+    enterprise_category: Optional[str] = Query(None, description="Filter by category (infrastructure, security, vertical_saas, agentic, data_intelligence)"),
     limit: int = Query(50, ge=1, le=200, description="Max results to return"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
 ):
     """
     List tracked deals with pagination.
 
-    OPTIMIZED:
-    - Proper pagination support
-    - No sample data fallback (fail properly)
-    - Efficient query with selectinload
+    ENTERPRISE AI FILTER:
+    - is_enterprise_ai=true: Only B2B Enterprise AI deals
+    - enterprise_category: Filter by specific category
+
+    LEAD FILTER:
+    - is_lead=true: Only deals where tracked fund LED the round
     """
     try:
         async with get_session() as session:
@@ -286,6 +306,10 @@ async def list_deals(
                 base_stmt = base_stmt.where(Deal.round_type == stage)
             if is_lead is not None:
                 base_stmt = base_stmt.where(Deal.is_lead_confirmed == is_lead)
+            if is_enterprise_ai is not None:
+                base_stmt = base_stmt.where(Deal.is_enterprise_ai == is_enterprise_ai)
+            if enterprise_category:
+                base_stmt = base_stmt.where(Deal.enterprise_category == enterprise_category)
 
             # Get total count for pagination
             count_stmt = select(func.count()).select_from(base_stmt.subquery())
@@ -310,11 +334,14 @@ async def list_deals(
             # Build responses
             responses = []
             for deal in deals:
-                # Build investor roles list
+                # Build investor roles list and find lead investor
                 investor_roles = []
+                lead_investor_name = None
                 for inv in deal.investors:
                     if inv.is_lead:
                         investor_roles.append("lead")
+                        if inv.is_tracked_fund:
+                            lead_investor_name = inv.investor_name
                     elif inv.is_tracked_fund:
                         investor_roles.append("non_lead")
                     else:
@@ -332,6 +359,12 @@ async def list_deals(
                     amount_invested=deal.amount or "Undisclosed",
                     date=deal.announced_date.isoformat() if deal.announced_date else "",
                     next_steps=None,
+                    # Enterprise AI fields
+                    enterprise_category=deal.enterprise_category,
+                    is_enterprise_ai=deal.is_enterprise_ai,
+                    lead_investor=lead_investor_name,
+                    lead_partner=deal.lead_partner_name,
+                    verification_snippet=deal.verification_snippet,
                 ))
 
             return PaginatedDealsResponse(
@@ -349,6 +382,164 @@ async def list_deals(
             status_code=503,
             detail=f"Database unavailable: {str(e)}"
         )
+
+
+@app.get("/deals/export")
+async def export_deals_csv(
+    fund_slug: Optional[str] = Query(None, description="Filter by fund slug"),
+    stage: Optional[str] = Query(None, description="Filter by investment stage"),
+    is_lead: Optional[bool] = Query(None, description="Filter by lead status"),
+    is_enterprise_ai: Optional[bool] = Query(None, description="Filter for Enterprise AI only"),
+    enterprise_category: Optional[str] = Query(None, description="Filter by category"),
+):
+    """
+    Export deals as CSV file.
+
+    Applies same filters as /deals endpoint.
+    Returns a downloadable CSV file.
+    """
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    try:
+        async with get_session() as session:
+            # Build query with filters
+            stmt = (
+                select(Deal)
+                .options(
+                    selectinload(Deal.company),
+                    selectinload(Deal.investors),
+                )
+            )
+
+            if stage:
+                stmt = stmt.where(Deal.round_type == stage)
+            if is_lead is not None:
+                stmt = stmt.where(Deal.is_lead_confirmed == is_lead)
+            if is_enterprise_ai is not None:
+                stmt = stmt.where(Deal.is_enterprise_ai == is_enterprise_ai)
+            if enterprise_category:
+                stmt = stmt.where(Deal.enterprise_category == enterprise_category)
+
+            stmt = stmt.order_by(Deal.created_at.desc())
+            result = await session.execute(stmt)
+            deals = result.scalars().all()
+
+            # Create CSV in memory
+            output = io.StringIO()
+            writer = csv.writer(output)
+
+            # Header row
+            writer.writerow([
+                "Company",
+                "Round",
+                "Amount",
+                "Date",
+                "Lead Investor",
+                "Lead Partner",
+                "Enterprise Category",
+                "Is Enterprise AI",
+                "Verification Snippet",
+            ])
+
+            # Data rows
+            for deal in deals:
+                # Find lead investor
+                lead_investor = None
+                for inv in deal.investors:
+                    if inv.is_lead and inv.is_tracked_fund:
+                        lead_investor = inv.investor_name
+                        break
+
+                writer.writerow([
+                    deal.company.name if deal.company else "Unknown",
+                    deal.round_type,
+                    deal.amount or "Undisclosed",
+                    deal.announced_date.isoformat() if deal.announced_date else "",
+                    lead_investor or "",
+                    deal.lead_partner_name or "",
+                    deal.enterprise_category or "",
+                    "Yes" if deal.is_enterprise_ai else "No",
+                    deal.verification_snippet or "",
+                ])
+
+            output.seek(0)
+
+            # Return as streaming response with CSV content type
+            return StreamingResponse(
+                iter([output.getvalue()]),
+                media_type="text/csv",
+                headers={
+                    "Content-Disposition": f"attachment; filename=bud-tracker-deals-{datetime.utcnow().strftime('%Y%m%d')}.csv"
+                }
+            )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class StealthDetectionResponse(BaseModel):
+    id: int
+    fund_slug: str
+    detected_url: str
+    detected_at: str
+    company_name: Optional[str]
+    is_confirmed: bool
+    notes: Optional[str]
+
+
+class StealthDetectionsListResponse(BaseModel):
+    detections: List[StealthDetectionResponse]
+    total: int
+
+
+@app.get("/stealth-detections", response_model=StealthDetectionsListResponse)
+async def list_stealth_detections(
+    fund_slug: Optional[str] = Query(None, description="Filter by fund slug"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """
+    List stealth portfolio detections.
+
+    Shows companies added to fund portfolios without press releases.
+    """
+    try:
+        async with get_session() as session:
+            stmt = select(StealthDetection).order_by(StealthDetection.detected_at.desc())
+
+            if fund_slug:
+                stmt = stmt.where(StealthDetection.fund_slug == fund_slug)
+
+            # Get total count
+            count_stmt = select(func.count()).select_from(stmt.subquery())
+            total_result = await session.execute(count_stmt)
+            total = total_result.scalar() or 0
+
+            # Apply pagination
+            stmt = stmt.offset(offset).limit(limit)
+            result = await session.execute(stmt)
+            detections = result.scalars().all()
+
+            return StealthDetectionsListResponse(
+                detections=[
+                    StealthDetectionResponse(
+                        id=d.id,
+                        fund_slug=d.fund_slug,
+                        detected_url=d.detected_url,
+                        detected_at=d.detected_at.isoformat(),
+                        company_name=d.company_name,
+                        is_confirmed=d.is_confirmed,
+                        notes=d.notes,
+                    )
+                    for d in detections
+                ],
+                total=total,
+            )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/extract", response_model=ExtractionResponse)
@@ -589,6 +780,306 @@ async def run_all_scrapers(
         )
         for r in results
     ]
+
+
+# ----- News Aggregator Endpoints -----
+
+class NewsAggregatorResponse(BaseModel):
+    articles_fetched: int
+    articles_processed: int
+    enterprise_ai_deals: int
+    lead_deals: int
+    deals_saved: int
+    skipped_consumer: int
+    skipped_participant: int
+    errors: int
+
+
+@app.post("/scrapers/news", response_model=NewsAggregatorResponse)
+async def run_news_aggregator(
+    days: int = Query(30, ge=1, le=365, description="Number of days to fetch"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run news aggregator to fetch funding news from TechCrunch, Fortune, etc.
+
+    Searches for Enterprise AI deals led by tracked funds.
+    Requires NEWSAPI_KEY to be configured.
+    """
+    from datetime import date, timedelta
+    from .harvester.backfill import backfill_deals
+
+    from_date = date.today() - timedelta(days=days)
+    to_date = date.today()
+
+    try:
+        stats = await backfill_deals(
+            from_date=from_date,
+            to_date=to_date,
+            dry_run=False,
+            verbose=False,
+        )
+
+        # Invalidate deals cache
+        cache.invalidate("deals")
+
+        return NewsAggregatorResponse(**stats)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/backfill", response_model=NewsAggregatorResponse)
+async def run_backfill(
+    months: int = Query(12, ge=1, le=12, description="Number of months to backfill"),
+    dry_run: bool = Query(False, description="Preview without saving"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run historical backfill for Enterprise AI deals.
+
+    Fetches up to 12 months of funding news from NewsAPI.
+    NOTE: NewsAPI Developer plan required for >1 month history.
+    """
+    from .harvester.backfill import backfill_monthly_batches
+
+    try:
+        stats = await backfill_monthly_batches(
+            months=months,
+            dry_run=dry_run,
+            verbose=False,
+        )
+
+        if not dry_run:
+            cache.invalidate("deals")
+
+        return NewsAggregatorResponse(**stats)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----- New Data Source Endpoints -----
+
+class SECEdgarResponse(BaseModel):
+    filings_found: int
+    filings_with_tracked_funds: int
+    articles_generated: int
+
+
+@app.post("/scrapers/sec-edgar", response_model=SECEdgarResponse)
+async def run_sec_edgar_scraper(
+    hours: int = Query(24, ge=1, le=168, description="Hours to look back"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run SEC EDGAR Form D scraper.
+
+    Fetches recent Form D filings (private placements) from SEC.
+    This is the "first signal" - often appears before news.
+    No API key required (public SEC data).
+    """
+    from .harvester.scrapers.sec_edgar import SECEdgarScraper
+
+    try:
+        async with SECEdgarScraper() as scraper:
+            filings = await scraper.fetch_recent_filings(hours=hours)
+
+            tracked_count = 0
+            articles = []
+            for filing in filings:
+                fund_slug = scraper.match_tracked_fund(filing)
+                if fund_slug:
+                    tracked_count += 1
+                article = await scraper.to_normalized_article(filing, fund_slug)
+                articles.append(article)
+
+        cache.invalidate("deals")
+
+        return SECEdgarResponse(
+            filings_found=len(filings),
+            filings_with_tracked_funds=tracked_count,
+            articles_generated=len(articles),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class BraveSearchResponse(BaseModel):
+    queries_executed: int
+    results_found: int
+    articles_generated: int
+
+
+@app.post("/scrapers/brave-search", response_model=BraveSearchResponse)
+async def run_brave_search_scraper_endpoint(
+    freshness: str = Query("pw", description="pd=past day, pw=past week, pm=past month"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run Brave Search API scraper.
+
+    Searches for funding news with "led by" language for tracked funds.
+    Requires BRAVE_SEARCH_KEY to be configured.
+    """
+    from .harvester.scrapers.brave_search import BraveSearchScraper
+
+    if not settings.brave_search_key:
+        raise HTTPException(status_code=400, detail="BRAVE_SEARCH_KEY not configured")
+
+    try:
+        async with BraveSearchScraper() as scraper:
+            fund_results = await scraper.search_all_funds(freshness=freshness)
+
+            total_results = sum(len(results) for results in fund_results.values())
+
+            articles = await scraper.scrape_all(freshness=freshness)
+
+        cache.invalidate("deals")
+
+        return BraveSearchResponse(
+            queries_executed=len(fund_results),
+            results_found=total_results,
+            articles_generated=len(articles),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class FirecrawlRequest(BaseModel):
+    urls: List[str] = Field(..., min_length=1, max_length=10, description="URLs to scrape")
+
+
+class FirecrawlResponse(BaseModel):
+    urls_submitted: int
+    urls_scraped: int
+    articles_generated: int
+
+
+@app.post("/scrapers/firecrawl", response_model=FirecrawlResponse)
+async def run_firecrawl_scraper_endpoint(
+    request: FirecrawlRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Scrape URLs using Firecrawl API.
+
+    Use this for JS-heavy PR sites (PRNewswire, BusinessWire, etc.)
+    that have bot detection. Returns clean markdown text.
+    Requires FIRECRAWL_API_KEY to be configured.
+    """
+    from .harvester.scrapers.firecrawl_scraper import FirecrawlScraper
+
+    if not settings.firecrawl_api_key:
+        raise HTTPException(status_code=400, detail="FIRECRAWL_API_KEY not configured")
+
+    try:
+        async with FirecrawlScraper() as scraper:
+            articles = await scraper.scrape_pr_urls(request.urls)
+
+        return FirecrawlResponse(
+            urls_submitted=len(request.urls),
+            urls_scraped=len(articles),
+            articles_generated=len(articles),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class AllSourcesResponse(BaseModel):
+    sec_edgar: SECEdgarResponse
+    brave_search: Optional[BraveSearchResponse] = None
+    newsapi: NewsAggregatorResponse
+
+
+@app.post("/scrapers/all-sources", response_model=AllSourcesResponse)
+async def run_all_sources(
+    days: int = Query(7, ge=1, le=30, description="Days to look back"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run all data source scrapers in parallel.
+
+    Fetches from:
+    1. SEC EDGAR (Form D filings) - always runs
+    2. Brave Search (if configured)
+    3. NewsAPI (if configured)
+
+    This is the recommended endpoint for comprehensive deal discovery.
+    """
+    from datetime import date, timedelta
+    from .harvester.backfill import backfill_deals
+    from .harvester.scrapers.sec_edgar import SECEdgarScraper
+    from .harvester.scrapers.brave_search import BraveSearchScraper
+
+    results = {}
+
+    # SEC EDGAR (always runs - free)
+    try:
+        async with SECEdgarScraper() as scraper:
+            filings = await scraper.fetch_recent_filings(hours=days * 24)
+            tracked_count = sum(1 for f in filings if scraper.match_tracked_fund(f))
+
+        results["sec_edgar"] = SECEdgarResponse(
+            filings_found=len(filings),
+            filings_with_tracked_funds=tracked_count,
+            articles_generated=len(filings),
+        )
+    except Exception as e:
+        results["sec_edgar"] = SECEdgarResponse(filings_found=0, filings_with_tracked_funds=0, articles_generated=0)
+
+    # Brave Search (if configured)
+    if settings.brave_search_key:
+        try:
+            freshness = "pd" if days <= 1 else ("pw" if days <= 7 else "pm")
+            async with BraveSearchScraper() as scraper:
+                articles = await scraper.scrape_all(freshness=freshness)
+
+            results["brave_search"] = BraveSearchResponse(
+                queries_executed=18,
+                results_found=len(articles),
+                articles_generated=len(articles),
+            )
+        except Exception:
+            results["brave_search"] = None
+    else:
+        results["brave_search"] = None
+
+    # NewsAPI
+    try:
+        from_date = date.today() - timedelta(days=days)
+        to_date = date.today()
+
+        stats = await backfill_deals(
+            from_date=from_date,
+            to_date=to_date,
+            dry_run=False,
+            verbose=False,
+        )
+
+        results["newsapi"] = NewsAggregatorResponse(**stats)
+    except Exception:
+        results["newsapi"] = NewsAggregatorResponse(
+            articles_fetched=0,
+            articles_processed=0,
+            enterprise_ai_deals=0,
+            lead_deals=0,
+            deals_saved=0,
+            skipped_consumer=0,
+            skipped_participant=0,
+            errors=0,
+        )
+
+    cache.invalidate("deals")
+
+    return AllSourcesResponse(**results)
 
 
 # ----- Scheduler Status -----

@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     # API Keys
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+    newsapi_key: str = ""  # NewsAPI.org for TechCrunch, Fortune, BusinessWire
+    brave_search_key: str = ""  # Brave Search API for news discovery
+    firecrawl_api_key: str = ""  # Firecrawl for JS-heavy PR sites
+
+    # Frontend URL for CORS (production)
+    frontend_url: str = ""  # e.g., https://your-frontend.railway.app
 
     # Database - Railway provides DATABASE_URL
     database_url: str = "postgresql+asyncpg://bud:tracker@localhost:5432/budtracker"

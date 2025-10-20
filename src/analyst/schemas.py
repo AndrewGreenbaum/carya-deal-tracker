@@ -32,6 +32,16 @@ class LeadStatus(str, Enum):
     UNRESOLVED = "unresolved"             # Ambiguous - "existing investors led"
 
 
+class EnterpriseCategory(str, Enum):
+    """Enterprise AI categories for filtering B2B deals."""
+    INFRASTRUCTURE = "infrastructure"      # LLMOps, AI chips, MLOps, vector DBs
+    SECURITY = "security"                  # AI-powered cybersecurity, threat detection
+    VERTICAL_SAAS = "vertical_saas"        # AI for Healthcare, Finance, Legal, HR
+    AGENTIC = "agentic"                    # Workflow automation, AI agents for teams
+    DATA_INTELLIGENCE = "data_intelligence" # Enterprise search, analytics, knowledge mgmt
+    NOT_ENTERPRISE = "not_enterprise"      # Consumer AI - EXCLUDE from tracking
+
+
 class InvestorMention(BaseModel):
     """A single investor mentioned in the article."""
     name: str = Field(description="Investor/fund name as mentioned in text")
@@ -122,6 +132,20 @@ class DealExtraction(BaseModel):
     # Reasoning
     reasoning: ChainOfThought = Field(
         description="Chain-of-thought reasoning for the extraction"
+    )
+
+    # Enterprise AI Classification
+    enterprise_category: EnterpriseCategory = Field(
+        default=EnterpriseCategory.NOT_ENTERPRISE,
+        description="Category of enterprise AI (or NOT_ENTERPRISE for consumer)"
+    )
+    is_enterprise_ai: bool = Field(
+        default=False,
+        description="True if B2B Enterprise AI company (not consumer)"
+    )
+    verification_snippet: Optional[str] = Field(
+        default=None,
+        description="Exact quote from article proving lead investor status (e.g., 'led by Sequoia')"
     )
 
     # Quality signals

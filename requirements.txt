@@ -26,6 +26,8 @@ apscheduler>=3.10.0
 pydantic>=2.6.0
 pydantic-settings>=2.1.0
 python-dotenv>=1.0.0
+python-dateutil>=2.8.0
+feedparser>=6.0.0
 
 # Dev/Testing
 pytest>=8.0.0

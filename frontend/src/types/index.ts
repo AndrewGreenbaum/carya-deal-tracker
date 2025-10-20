@@ -8,7 +8,16 @@ export type InvestmentStage =
   | 'series_c'
   | 'series_d'
   | 'growth'
-  | 'exit';
+  | 'exit'
+  | 'unknown';
+
+export type EnterpriseCategory =
+  | 'infrastructure'
+  | 'security'
+  | 'vertical_saas'
+  | 'agentic'
+  | 'data_intelligence'
+  | 'not_enterprise';
 
 export interface Deal {
   id: string;
@@ -18,6 +27,12 @@ export interface Deal {
   amountInvested: string;
   date: string;
   nextSteps?: string;
+  // Enterprise AI fields
+  enterpriseCategory?: EnterpriseCategory;
+  isEnterpriseAi: boolean;
+  leadInvestor?: string;
+  leadPartner?: string;
+  verificationSnippet?: string;
 }
 
 export interface Fund {

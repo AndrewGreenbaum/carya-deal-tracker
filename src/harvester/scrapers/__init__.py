@@ -22,6 +22,14 @@ from .felicis import FelicisScraper
 from .general_catalyst import GeneralCatalystScraper
 from .first_round import FirstRoundScraper
 
+# News aggregator (multi-source)
+from .news_aggregator import NewsAggregatorScraper, run_news_aggregator
+
+# New data sources
+from .sec_edgar import SECEdgarScraper, run_sec_edgar_scraper
+from .brave_search import BraveSearchScraper, run_brave_search_scraper
+from .firecrawl_scraper import FirecrawlScraper, scrape_with_firecrawl, run_firecrawl_scraper
+
 __all__ = [
     # Original 5
     "A16ZScraper",
@@ -43,4 +51,15 @@ __all__ = [
     "FelicisScraper",
     "GeneralCatalystScraper",
     "FirstRoundScraper",
+    # News aggregator
+    "NewsAggregatorScraper",
+    "run_news_aggregator",
+    # New data sources
+    "SECEdgarScraper",
+    "run_sec_edgar_scraper",
+    "BraveSearchScraper",
+    "run_brave_search_scraper",
+    "FirecrawlScraper",
+    "scrape_with_firecrawl",
+    "run_firecrawl_scraper",
 ]

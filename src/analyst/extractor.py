@@ -15,7 +15,7 @@ import instructor
 from anthropic import Anthropic
 from typing import Optional, List
 
-from .schemas import DealExtraction, ArticleAnalysis, LeadStatus, RoundType
+from .schemas import DealExtraction, ArticleAnalysis, LeadStatus, RoundType, EnterpriseCategory
 from ..config.settings import settings
 from ..config.funds import FUND_REGISTRY, FundConfig
 
@@ -46,17 +46,56 @@ FUND_NAME_VARIANTS = {
 }
 
 
-SYSTEM_PROMPT = """You are an expert venture capital analyst specializing in identifying lead investors in funding rounds.
+SYSTEM_PROMPT = """You are an expert venture capital analyst specializing in identifying lead investors in B2B Enterprise AI funding rounds.
 
 Your task is to analyze press releases and news articles about startup funding and extract:
 1. Key deal details (company, round type, amount)
-2. Lead vs. participating investors
-3. Specifically identify if any of our TRACKED FUNDS led the round
+2. Lead vs. participating investors (with verification snippet)
+3. Whether this is an ENTERPRISE AI company (not consumer)
+4. Specifically identify if any of our TRACKED FUNDS LED the round
 
-CRITICAL DISTINCTION - Lead vs. Participant:
-- LEAD: The investor who "led", "priced", "set terms", or is listed FIRST with "led by [X]"
-- PARTICIPANT: Investors who "joined", "participated", or are listed after "with participation from"
-- AMBIGUOUS: Phrases like "existing investors led" or "insiders led" are UNRESOLVED
+═══════════════════════════════════════════════════════════════════
+ENTERPRISE AI CLASSIFICATION (CRITICAL - Filter Consumer Companies)
+═══════════════════════════════════════════════════════════════════
+
+INCLUDE (set is_enterprise_ai=True):
+- INFRASTRUCTURE: LLMOps, AI chips, MLOps, vector databases, inference optimization
+- SECURITY: AI-powered cybersecurity, threat detection, compliance automation
+- VERTICAL_SAAS: AI for Healthcare, Finance, Legal, HR (B2B tools for professionals)
+- AGENTIC: Workflow automation for teams, AI agents for enterprise, copilots
+- DATA_INTELLIGENCE: Enterprise search (e.g., Glean), analytics, knowledge management
+
+EXCLUDE (set is_enterprise_ai=False, enterprise_category=NOT_ENTERPRISE):
+- Consumer chatbots, personal AI assistants
+- Gaming AI, entertainment AI
+- Consumer shopping/recommendations (e.g., personal shopping assistants)
+- B2C wearables, fitness AI
+- General foundational model rounds (OpenAI, Anthropic main fundraises)
+- Social media AI, dating AI, personal productivity apps
+
+If unsure between Enterprise and Consumer, default to NOT_ENTERPRISE.
+
+═══════════════════════════════════════════════════════════════════
+LEAD INVESTOR PROTOCOL (STRICT VERIFICATION REQUIRED)
+═══════════════════════════════════════════════════════════════════
+
+LEAD: The investor who "led", "priced", "set terms", or is listed with:
+- "led by [Investor]"
+- "round was headed by"
+- "led the investment"
+- "Series X led by"
+- "[Investor] led the round"
+
+PARTICIPANT (NOT LEAD - these should be EXCLUDED):
+- "participated in"
+- "joined the round"
+- "investors included"
+- "with participation from"
+
+VERIFICATION SNIPPET (REQUIRED):
+You MUST extract the EXACT quote from the article proving lead status.
+Set verification_snippet to the phrase like: "led by Sequoia Capital"
+If no explicit lead language exists, set tracked_fund_is_lead=False.
 
 TRACKED FUNDS (identify these specifically):
 - Founders Fund, Benchmark, Sequoia Capital, Khosla Ventures, Index Ventures
@@ -70,13 +109,18 @@ DISAMBIGUATION RULES:
 - "Thrive" = Thrive Capital. Exclude "Thrive IT Services" or "Thrive Global"
 - "Sequoia" = Sequoia Capital US. Note if HongShan/Peak XV (formerly Sequoia China/India)
 
-CHAIN OF THOUGHT:
+═══════════════════════════════════════════════════════════════════
+CHAIN OF THOUGHT
+═══════════════════════════════════════════════════════════════════
+
 Always explain your reasoning by:
-1. Identifying key verbs (led, participated, joined, priced)
-2. Listing signals for lead status
-3. Listing signals for participation
-4. Flagging any ambiguity
-5. Making a final determination with confidence
+1. Identifying if company is Enterprise AI vs Consumer
+2. Identifying key verbs (led, participated, joined, priced)
+3. Extracting the EXACT verification snippet proving lead status
+4. Listing signals for lead status
+5. Listing signals for participation
+6. Flagging any ambiguity
+7. Making a final determination with confidence
 
 Output must be valid JSON matching the schema."""
 
@@ -176,8 +220,11 @@ async def extract_deal(
             tracked_fund_name=None,
             tracked_fund_role=None,
             tracked_fund_partner=None,
+            enterprise_category=EnterpriseCategory.NOT_ENTERPRISE,
+            is_enterprise_ai=False,
+            verification_snippet=None,
             confidence_score=0.1,
-            thesis_drift_score=None,
+            thesis_drift_score=0.0,
             reasoning=ChainOfThought(
                 verb_analysis="No funding keywords detected",
                 lead_signals=[],
@@ -269,8 +316,11 @@ async def extract_deal_batch(
                 tracked_fund_name=None,
                 tracked_fund_role=None,
                 tracked_fund_partner=None,
+                enterprise_category=EnterpriseCategory.NOT_ENTERPRISE,
+                is_enterprise_ai=False,
+                verification_snippet=None,
                 confidence_score=0.0,
-                thesis_drift_score=None,
+                thesis_drift_score=0.0,
                 reasoning=ChainOfThought(
                     verb_analysis="Extraction failed",
                     lead_signals=[],

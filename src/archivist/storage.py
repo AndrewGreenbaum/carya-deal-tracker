@@ -15,8 +15,9 @@ from .models import (
     Article,
 )
 from .database import get_session
-from ..analyst.schemas import DealExtraction, LeadStatus
+from ..analyst.schemas import DealExtraction, LeadStatus, EnterpriseCategory
 from ..config.funds import FUND_REGISTRY
+from ..scheduler.notifications import send_lead_deal_alert
 
 
 async def get_or_create_company(
@@ -90,7 +91,7 @@ async def save_deal(
         description=extraction.startup_description,
     )
 
-    # Create deal
+    # Create deal with enterprise AI classification
     deal = Deal(
         company_id=company.id,
         round_type=extraction.round_label.value,
@@ -98,6 +99,10 @@ async def save_deal(
         valuation=extraction.valuation,
         announced_date=extraction.round_date,
         is_lead_confirmed=extraction.tracked_fund_is_lead,
+        lead_partner_name=extraction.tracked_fund_partner,
+        verification_snippet=extraction.verification_snippet,
+        enterprise_category=extraction.enterprise_category.value if extraction.enterprise_category else None,
+        is_enterprise_ai=extraction.is_enterprise_ai,
         confidence_score=extraction.confidence_score,
         thesis_drift_score=extraction.thesis_drift_score,
     )
@@ -157,6 +162,25 @@ async def save_deal(
     session.add(article)
 
     await session.flush()
+
+    # Send Slack/Discord alert for lead deals
+    if extraction.tracked_fund_is_lead:
+        # Find the lead investor name from extraction
+        lead_investor_name = "Unknown"
+        for inv in extraction.lead_investors:
+            if inv.is_tracked_fund:
+                lead_investor_name = inv.name
+                break
+
+        await send_lead_deal_alert(
+            company_name=extraction.startup_name,
+            amount=extraction.amount,
+            round_type=extraction.round_label.value,
+            lead_investor=lead_investor_name,
+            enterprise_category=extraction.enterprise_category.value if extraction.enterprise_category else None,
+            verification_snippet=extraction.verification_snippet,
+        )
+
     return deal
 
 
@@ -165,11 +189,22 @@ async def get_deals(
     fund_slug: Optional[str] = None,
     stage: Optional[str] = None,
     is_lead: Optional[bool] = None,
+    is_enterprise_ai: Optional[bool] = None,
+    enterprise_category: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[Deal]:
     """
     Fetch deals from database with optional filters.
+
+    Args:
+        fund_slug: Filter by specific fund
+        stage: Filter by round type (seed, series_a, etc.)
+        is_lead: Filter by lead status (True = tracked fund led)
+        is_enterprise_ai: Filter for Enterprise AI only (True = B2B AI)
+        enterprise_category: Filter by category (infrastructure, security, etc.)
+        limit: Max results
+        offset: Pagination offset
     """
     stmt = select(Deal).order_by(Deal.created_at.desc())
 
@@ -178,6 +213,12 @@ async def get_deals(
 
     if is_lead is not None:
         stmt = stmt.where(Deal.is_lead_confirmed == is_lead)
+
+    if is_enterprise_ai is not None:
+        stmt = stmt.where(Deal.is_enterprise_ai == is_enterprise_ai)
+
+    if enterprise_category:
+        stmt = stmt.where(Deal.enterprise_category == enterprise_category)
 
     if fund_slug:
         # Join to deal_investors to filter by fund

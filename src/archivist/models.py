@@ -80,8 +80,16 @@ class Deal(SQLModel, table=True):
     valuation: Optional[str] = None
     announced_date: Optional[date] = None
 
-    # Status
+    # Lead investor tracking
     is_lead_confirmed: bool = False  # True if we confirmed a tracked fund led
+    lead_partner_name: Optional[str] = None  # Partner who led the deal
+    verification_snippet: Optional[str] = None  # Exact quote proving lead status
+
+    # Enterprise AI classification
+    enterprise_category: Optional[str] = None  # infrastructure, security, vertical_saas, agentic, data_intelligence
+    is_enterprise_ai: bool = False  # True if B2B Enterprise AI (not consumer)
+
+    # Quality scores
     confidence_score: float = 0.0
     thesis_drift_score: float = 0.0
 

@@ -1,4 +1,4 @@
-import type { Deal, InvestorRole, InvestmentStage } from '../types';
+import type { Deal, InvestorRole, InvestmentStage, EnterpriseCategory } from '../types';
 
 interface DealApiResponse {
   id: string;
@@ -8,6 +8,12 @@ interface DealApiResponse {
   amount_invested: string;
   date: string;
   next_steps?: string;
+  // Enterprise AI fields
+  enterprise_category?: string;
+  is_enterprise_ai: boolean;
+  lead_investor?: string;
+  lead_partner?: string;
+  verification_snippet?: string;
 }
 
 interface PaginatedDealsResponse {
@@ -39,7 +45,8 @@ export function invalidateCache(): void {
   cache.clear();
 }
 
-const API_BASE = '/api';
+// Use environment variable for API base URL (supports dev proxy and production direct)
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
 export interface FetchDealsOptions {
   limit?: number;
@@ -47,6 +54,9 @@ export interface FetchDealsOptions {
   stage?: string;
   is_lead?: boolean;
   fund_slug?: string;
+  // Enterprise AI filters
+  is_enterprise_ai?: boolean;
+  enterprise_category?: string;
 }
 
 export interface PaginatedDeals {
@@ -58,7 +68,7 @@ export interface PaginatedDeals {
 }
 
 export async function fetchDeals(options: FetchDealsOptions = {}): Promise<PaginatedDeals> {
-  const { limit = 50, offset = 0, stage, is_lead, fund_slug } = options;
+  const { limit = 50, offset = 0, stage, is_lead, fund_slug, is_enterprise_ai, enterprise_category } = options;
 
   // Build query string
   const params = new URLSearchParams();
@@ -67,6 +77,8 @@ export async function fetchDeals(options: FetchDealsOptions = {}): Promise<Pagin
   if (stage) params.set('stage', stage);
   if (is_lead !== undefined) params.set('is_lead', is_lead.toString());
   if (fund_slug) params.set('fund_slug', fund_slug);
+  if (is_enterprise_ai !== undefined) params.set('is_enterprise_ai', is_enterprise_ai.toString());
+  if (enterprise_category) params.set('enterprise_category', enterprise_category);
 
   const cacheKey = `deals:${params.toString()}`;
   const cached = getCached<PaginatedDeals>(cacheKey);
@@ -91,6 +103,12 @@ export async function fetchDeals(options: FetchDealsOptions = {}): Promise<Pagin
       amountInvested: deal.amount_invested,
       date: deal.date,
       nextSteps: deal.next_steps,
+      // Enterprise AI fields
+      enterpriseCategory: deal.enterprise_category as EnterpriseCategory | undefined,
+      isEnterpriseAi: deal.is_enterprise_ai ?? false,
+      leadInvestor: deal.lead_investor,
+      leadPartner: deal.lead_partner,
+      verificationSnippet: deal.verification_snippet,
     })),
     total: data.total,
     limit: data.limit,
@@ -134,4 +152,18 @@ export async function fetchHealth() {
   }
 
   return response.json();
+}
+
+export function getExportUrl(options: Omit<FetchDealsOptions, 'limit' | 'offset'> = {}): string {
+  const { stage, is_lead, fund_slug, is_enterprise_ai, enterprise_category } = options;
+
+  const params = new URLSearchParams();
+  if (stage) params.set('stage', stage);
+  if (is_lead !== undefined) params.set('is_lead', is_lead.toString());
+  if (fund_slug) params.set('fund_slug', fund_slug);
+  if (is_enterprise_ai !== undefined) params.set('is_enterprise_ai', is_enterprise_ai.toString());
+  if (enterprise_category) params.set('enterprise_category', enterprise_category);
+
+  const queryString = params.toString();
+  return `${API_BASE}/deals/export${queryString ? '?' + queryString : ''}`;
 }
