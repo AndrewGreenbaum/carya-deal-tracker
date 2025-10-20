@@ -4,7 +4,7 @@ Storage pipeline for persisting extracted deals to the database.
 
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import select, nullslast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
@@ -208,7 +208,7 @@ async def get_deals(
         limit: Max results
         offset: Pagination offset
     """
-    stmt = select(Deal).order_by(Deal.created_at.desc())
+    stmt = select(Deal).order_by(nullslast(Deal.announced_date.desc()), Deal.created_at.desc())
 
     if stage:
         stmt = stmt.where(Deal.round_type == stage)

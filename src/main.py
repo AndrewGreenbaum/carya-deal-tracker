@@ -25,7 +25,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, nullslast
 from sqlalchemy.orm import selectinload
 
 from .config import settings, FUND_REGISTRY, get_all_funds
@@ -323,7 +323,7 @@ async def list_deals(
                     selectinload(Deal.company),
                     selectinload(Deal.investors),
                 )
-                .order_by(Deal.created_at.desc())
+                .order_by(nullslast(Deal.announced_date.desc()), Deal.created_at.desc())
                 .offset(offset)
                 .limit(limit)
             )
@@ -422,7 +422,7 @@ async def export_deals_csv(
             if enterprise_category:
                 stmt = stmt.where(Deal.enterprise_category == enterprise_category)
 
-            stmt = stmt.order_by(Deal.created_at.desc())
+            stmt = stmt.order_by(nullslast(Deal.announced_date.desc()), Deal.created_at.desc())
             result = await session.execute(stmt)
             deals = result.scalars().all()
 
