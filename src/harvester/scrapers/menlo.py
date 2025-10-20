@@ -1,10 +1,10 @@
 """
 Menlo Ventures Scraper.
 
-Source: https://menlovc.com/news
+Source: https://menlovc.com/perspective/
 Format: HTML
 
-Focus on 'Age of AI' signals.
+Perspective/blog page; focus on AI investments.
 """
 
 from typing import List, Optional
@@ -43,7 +43,7 @@ class MenloScraper(SimpleHTMLScraper):
         self.base_url = "https://menlovc.com"
 
     async def fetch(self, url: Optional[str] = None) -> str:
-        target_url = url or f"{self.base_url}/news"
+        target_url = url or f"{self.base_url}/perspective/"
         response = await self.client.get(target_url)
         response.raise_for_status()
         return response.text

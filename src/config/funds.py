@@ -75,9 +75,9 @@ FUND_REGISTRY: dict[str, FundConfig] = {
     "khosla": FundConfig(
         name="Khosla Ventures",
         slug="khosla",
-        ingestion_url="https://khoslaventures.com/news",
-        scraper_type=ScraperType.HTML,
-        extraction_notes="Deep-tech focus; look for external Business Wire redirects."
+        ingestion_url="https://www.khoslaventures.com/posts/rss.xml",
+        scraper_type=ScraperType.RSS,
+        extraction_notes="RSS feed of blog posts; deep-tech focus."
     ),
 
     "index": FundConfig(
@@ -126,9 +126,9 @@ FUND_REGISTRY: dict[str, FundConfig] = {
     "greylock": FundConfig(
         name="Greylock",
         slug="greylock",
-        ingestion_url="https://greylock.com/news",
+        ingestion_url="https://greylock.com/blog/portfolio-news/",
         scraper_type=ScraperType.HTML,
-        extraction_notes="Monitor Medium/Blog; prioritize Partner-authored posts."
+        extraction_notes="Portfolio news page; prioritize Partner-authored posts."
     ),
 
     "gv": FundConfig(
@@ -143,9 +143,9 @@ FUND_REGISTRY: dict[str, FundConfig] = {
     "menlo": FundConfig(
         name="Menlo Ventures",
         slug="menlo",
-        ingestion_url="https://menlovc.com/news",
+        ingestion_url="https://menlovc.com/perspective/",
         scraper_type=ScraperType.HTML,
-        extraction_notes="Focus on 'Age of AI' signals."
+        extraction_notes="Perspective/blog page; focus on AI investments."
     ),
 
     "usv": FundConfig(
@@ -185,9 +185,9 @@ FUND_REGISTRY: dict[str, FundConfig] = {
     "general_catalyst": FundConfig(
         name="General Catalyst",
         slug="general_catalyst",
-        ingestion_url="https://generalcatalyst.com/news",
+        ingestion_url="https://www.generalcatalyst.com/stories",
         scraper_type=ScraperType.HTML,
-        extraction_notes="Watch for 'Hatching/Co-creation' (Incubations)."
+        extraction_notes="Stories page for news; watch for 'Hatching/Co-creation' (Incubations)."
     ),
 
     "first_round": FundConfig(

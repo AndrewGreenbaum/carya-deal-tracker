@@ -1,10 +1,10 @@
 """
 Greylock Partners Scraper.
 
-Source: https://greylock.com/news
+Source: https://greylock.com/blog/portfolio-news/
 Format: HTML
 
-Monitor Medium/Blog; prioritize Partner-authored posts.
+Portfolio news page; prioritize Partner-authored posts.
 """
 
 from typing import List, Optional
@@ -40,7 +40,7 @@ class GreylockScraper(SimpleHTMLScraper):
         self.base_url = "https://greylock.com"
 
     async def fetch(self, url: Optional[str] = None) -> str:
-        target_url = url or f"{self.base_url}/news"
+        target_url = url or f"{self.base_url}/blog/portfolio-news/"
         response = await self.client.get(target_url)
         response.raise_for_status()
         return response.text

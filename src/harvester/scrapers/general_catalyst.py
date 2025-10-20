@@ -1,10 +1,10 @@
 """
 General Catalyst Scraper.
 
-Source: https://generalcatalyst.com/news
+Source: https://www.generalcatalyst.com/stories
 Format: HTML
 
-Watch for 'Hatching/Co-creation' (Incubations).
+Stories page for news; watch for 'Hatching/Co-creation' (Incubations).
 """
 
 from typing import List, Optional
@@ -37,10 +37,10 @@ class GeneralCatalystScraper(SimpleHTMLScraper):
 
     def __init__(self):
         super().__init__(FUND_REGISTRY["general_catalyst"])
-        self.base_url = "https://generalcatalyst.com"
+        self.base_url = "https://www.generalcatalyst.com"
 
     async def fetch(self, url: Optional[str] = None) -> str:
-        target_url = url or f"{self.base_url}/news"
+        target_url = url or f"{self.base_url}/stories"
         response = await self.client.get(target_url)
         response.raise_for_status()
         return response.text
