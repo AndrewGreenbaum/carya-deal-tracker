@@ -20,6 +20,9 @@ import {
   Database,
   Building2,
   Layers,
+  Globe,
+  Linkedin,
+  User,
 } from 'lucide-react';
 import type { Deal, EnterpriseCategory } from '../types';
 import { STAGE_LABELS, CATEGORY_LABELS } from '../types';
@@ -176,32 +179,75 @@ export function DealModal({ deal, onClose }: DealModalProps) {
             </div>
           </div>
 
-          {/* Investor Roles */}
+          {/* Company Links */}
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
-              Investor Roles
+              Company Links
             </label>
-            <div className="flex flex-wrap gap-2">
-              {deal.investorRoles.map((role, idx) => (
-                <span
-                  key={idx}
-                  className={`px-3 py-1 rounded text-sm ${
-                    role === 'lead'
-                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                      : role === 'stealth'
-                      ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                      : 'bg-slate-800 text-slate-400 border border-slate-700'
-                  }`}
+            <div className="flex flex-wrap gap-3">
+              {deal.companyWebsite && (
+                <a
+                  href={deal.companyWebsite}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-sm text-white transition-colors"
                 >
-                  {role === 'lead'
-                    ? 'Lead Investor'
-                    : role === 'stealth'
-                    ? 'Stealth'
-                    : 'Participant'}
-                </span>
-              ))}
+                  <Globe className="w-4 h-4 text-blue-400" />
+                  Website
+                </a>
+              )}
+              {deal.companyLinkedin && (
+                <a
+                  href={deal.companyLinkedin}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-sm text-white transition-colors"
+                >
+                  <Linkedin className="w-4 h-4 text-blue-500" />
+                  Company LinkedIn
+                </a>
+              )}
+              {!deal.companyWebsite && !deal.companyLinkedin && (
+                <span className="text-slate-500 italic text-sm">No company links available</span>
+              )}
             </div>
           </div>
+
+          {/* Founders */}
+          {deal.founders && deal.founders.length > 0 && (
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                Founders
+              </label>
+              <div className="space-y-2">
+                {deal.founders.map((founder, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between p-3 bg-slate-900/50 border border-slate-800 rounded"
+                  >
+                    <div className="flex items-center gap-2">
+                      <User className="w-4 h-4 text-slate-400" />
+                      <span className="text-white">{founder.name}</span>
+                      {founder.title && (
+                        <span className="text-slate-500 text-sm">• {founder.title}</span>
+                      )}
+                    </div>
+                    {founder.linkedinUrl && (
+                      <a
+                        href={founder.linkedinUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-sm transition-colors"
+                      >
+                        <Linkedin className="w-3 h-3" />
+                        LinkedIn
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Source Link */}
           {deal.sourceUrl && (

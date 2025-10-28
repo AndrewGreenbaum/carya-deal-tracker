@@ -25,8 +25,10 @@ import {
   RefreshCw,
   ChevronLeft,
   ChevronRight,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
-import type { Deal, EnterpriseCategory, InvestmentStage, PaginatedDeals } from '../types';
+import type { Deal, EnterpriseCategory, InvestmentStage, PaginatedDeals, SortDirection } from '../types';
 import { STAGE_LABELS } from '../types';
 
 interface DealsTableProps {
@@ -37,6 +39,8 @@ interface DealsTableProps {
   onRefresh: () => void;
   onPageChange: (offset: number) => void;
   isLoading?: boolean;
+  sortDirection: SortDirection;
+  onSortChange: (direction: SortDirection) => void;
 }
 
 export function DealsTable({
@@ -47,6 +51,8 @@ export function DealsTable({
   onRefresh,
   onPageChange,
   isLoading = false,
+  sortDirection,
+  onSortChange,
 }: DealsTableProps) {
   const currentPage = Math.floor(pagination.offset / pagination.limit) + 1;
   const totalPages = Math.ceil(pagination.total / pagination.limit);
@@ -86,7 +92,19 @@ export function DealsTable({
               <th className="px-6 py-3 border-b border-slate-800 w-1/3">
                 Verification Snippet (Claude 3.5)
               </th>
-              <th className="px-6 py-3 border-b border-slate-800 text-right">Detected</th>
+              <th
+                className="px-6 py-3 border-b border-slate-800 text-right cursor-pointer hover:bg-slate-800/50 transition-colors select-none"
+                onClick={() => onSortChange(sortDirection === 'desc' ? 'asc' : 'desc')}
+              >
+                <span className="flex items-center justify-end gap-1">
+                  Announced
+                  {sortDirection === 'desc' ? (
+                    <ArrowDown className="w-3 h-3 text-emerald-400" />
+                  ) : (
+                    <ArrowUp className="w-3 h-3 text-emerald-400" />
+                  )}
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody className="text-xs divide-y divide-slate-800/50">

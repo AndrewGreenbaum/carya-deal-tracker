@@ -33,6 +33,12 @@ export type ServiceStatus = 'live' | 'idle' | 'error' | 'processing';
 // Deal Types
 // ============================================
 
+export interface Founder {
+  name: string;
+  linkedinUrl?: string;
+  title?: string;
+}
+
 export interface Deal {
   id: string;
   startupName: string;
@@ -50,7 +56,13 @@ export interface Deal {
   // Source tracking
   sourceUrl?: string;
   sourceName?: string;
+  // Company info
+  companyWebsite?: string;
+  companyLinkedin?: string;
+  founders?: Founder[];
 }
+
+export type SortDirection = 'asc' | 'desc';
 
 export interface PaginatedDeals {
   deals: Deal[];

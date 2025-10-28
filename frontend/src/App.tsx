@@ -38,6 +38,7 @@ import type {
   DashboardStats,
   CostTracker,
   PaginatedDeals,
+  SortDirection,
 } from './types';
 
 const PAGE_SIZE = 50;
@@ -143,6 +144,9 @@ function App() {
 
   // Modal state
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
+
+  // Sort state
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   // Load system status
   const loadSystemStatus = useCallback(async () => {
@@ -279,6 +283,19 @@ function App() {
     loadDeals(newOffset);
   };
 
+  const handleSortChange = (direction: SortDirection) => {
+    setSortDirection(direction);
+    // Sort deals client-side (API already sorts by announced_date desc)
+    setDeals((prevDeals) => {
+      const sorted = [...prevDeals].sort((a, b) => {
+        const dateA = new Date(a.date || '1970-01-01').getTime();
+        const dateB = new Date(b.date || '1970-01-01').getTime();
+        return direction === 'desc' ? dateB - dateA : dateA - dateB;
+      });
+      return sorted;
+    });
+  };
+
   return (
     <div className="h-screen flex flex-col bg-[#050506] text-slate-300 font-['JetBrains_Mono',monospace]">
       {/* Header */}
@@ -331,6 +348,8 @@ function App() {
                   onRefresh={handleRefresh}
                   onPageChange={handlePageChange}
                   isLoading={loading}
+                  sortDirection={sortDirection}
+                  onSortChange={handleSortChange}
                 />
               </div>
             </>
