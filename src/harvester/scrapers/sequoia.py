@@ -2,24 +2,23 @@
 Sequoia Capital Scraper.
 
 Source: https://sequoiacap.com/stories
-Format: PLAYWRIGHT (JS hydration required)
+Format: HTML (converted from Playwright - simpler HTTP approach)
 
-Uses Playwright for full JavaScript rendering.
+Stories/news page with investment announcements.
 """
 
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
-from ..playwright_scraper import PlaywrightScraper
-from ..base_scraper import RawArticle, NormalizedArticle
+from ..base_scraper import SimpleHTMLScraper, RawArticle, NormalizedArticle
 from ...config.funds import FUND_REGISTRY
 
 
-class SequoiaScraper(PlaywrightScraper):
+class SequoiaScraper(SimpleHTMLScraper):
     """
     Scraper for Sequoia Capital news and portfolio announcements.
 
-    Uses Playwright to render JavaScript-heavy pages.
+    Uses simple HTTP requests - converted from Playwright for Railway compatibility.
     Distinguishes from HongShan/Peak XV (formerly Sequoia China/India).
     """
 
@@ -29,13 +28,9 @@ class SequoiaScraper(PlaywrightScraper):
 
     async def fetch(self, url: Optional[str] = None) -> str:
         target_url = url or f"{self.base_url}/stories"
-
-        html = await self.fetch_rendered(
-            target_url,
-            wait_selector="article, [class*='story'], [class*='post'], [class*='card']",
-            wait_ms=5000
-        )
-        return html
+        response = await self.client.get(target_url)
+        response.raise_for_status()
+        return response.text
 
     async def parse(self, html: str) -> List[RawArticle]:
         soup = BeautifulSoup(html, "lxml")
@@ -46,17 +41,26 @@ class SequoiaScraper(PlaywrightScraper):
             "article",
             ".story-card",
             "[class*='story']",
+            "[class*='Story']",
             "[class*='post']",
+            "[class*='Post']",
             "[class*='Card']",
-            "[data-testid*='story']",
+            "[class*='card']",
+            "a[href*='/article/']",
+            "a[href*='/story/']",
         ]
 
         for selector in selectors:
             for card in soup.select(selector):
                 title_el = card.select_one("h2, h3, h4, .title, [class*='title'], [class*='Title']")
                 if not title_el:
-                    continue
-                title = title_el.get_text(strip=True)
+                    # If card is an <a> tag, try getting title from its text
+                    if card.name == "a":
+                        title = card.get_text(strip=True)
+                    else:
+                        continue
+                else:
+                    title = title_el.get_text(strip=True)
 
                 if not title or len(title) < 10:
                     continue
@@ -68,7 +72,10 @@ class SequoiaScraper(PlaywrightScraper):
                 # Extract link
                 link_el = card.select_one("a[href]")
                 if not link_el:
-                    link_el = card.find_parent("a")
+                    if card.name == "a":
+                        link_el = card
+                    else:
+                        link_el = card.find_parent("a")
                 if not link_el:
                     continue
 
@@ -76,6 +83,10 @@ class SequoiaScraper(PlaywrightScraper):
 
                 if url and not url.startswith("http"):
                     url = f"{self.base_url}{url}"
+
+                # Skip non-sequoia URLs
+                if "sequoiacap.com" not in url:
+                    continue
 
                 if url in seen_urls or not url:
                     continue
@@ -99,11 +110,7 @@ class SequoiaScraper(PlaywrightScraper):
 
     async def normalize(self, raw: RawArticle) -> NormalizedArticle:
         try:
-            full_html = await self.fetch_rendered(
-                raw.url,
-                wait_selector="article, .story-content, .post-content, main",
-                wait_ms=3000
-            )
+            full_html = await self.fetch(raw.url)
             soup = BeautifulSoup(full_html, "lxml")
 
             content_el = soup.select_one(

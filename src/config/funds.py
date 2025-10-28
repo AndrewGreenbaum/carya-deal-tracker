@@ -67,7 +67,7 @@ FUND_REGISTRY: dict[str, FundConfig] = {
         name="Sequoia Capital",
         slug="sequoia",
         ingestion_url="https://sequoiacap.com/stories",
-        scraper_type=ScraperType.PLAYWRIGHT,
+        scraper_type=ScraperType.HTML,
         negative_keywords=["HongShan", "Peak XV", "Sequoia India", "Sequoia China"],
         extraction_notes="Distinguish from HongShan/Peak XV. Parse Author byline for Partner."
     ),

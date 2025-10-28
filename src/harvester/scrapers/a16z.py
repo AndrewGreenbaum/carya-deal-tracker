@@ -2,25 +2,23 @@
 a16z (Andreessen Horowitz) Scraper.
 
 Source: https://a16z.com/news-content/
-Format: PLAYWRIGHT (JavaScript-rendered content)
+Format: HTML (converted from Playwright - simpler HTTP approach)
 
-a16z uses heavy JS rendering - requires Playwright for scraping.
+a16z news page with investment announcements.
 """
 
 from typing import List, Optional
-from datetime import date
 from bs4 import BeautifulSoup
 
-from ..playwright_scraper import PlaywrightScraper
-from ..base_scraper import RawArticle, NormalizedArticle
+from ..base_scraper import SimpleHTMLScraper, RawArticle, NormalizedArticle
 from ...config.funds import FUND_REGISTRY
 
 
-class A16ZScraper(PlaywrightScraper):
+class A16ZScraper(SimpleHTMLScraper):
     """
     Scraper for a16z news and announcements.
 
-    Uses Playwright to render JavaScript-heavy pages.
+    Uses simple HTTP requests - converted from Playwright for Railway compatibility.
     """
 
     def __init__(self):
@@ -29,18 +27,14 @@ class A16ZScraper(PlaywrightScraper):
 
     async def fetch(self, url: Optional[str] = None) -> str:
         target_url = url or f"{self.base_url}/news-content/"
-
-        # Use Playwright to render the JavaScript content
-        html = await self.fetch_rendered(
-            target_url,
-            wait_selector="article, [class*='card'], [class*='post']",
-            wait_ms=5000  # Extra wait for dynamic content
-        )
-        return html
+        response = await self.client.get(target_url)
+        response.raise_for_status()
+        return response.text
 
     async def parse(self, html: str) -> List[RawArticle]:
         soup = BeautifulSoup(html, "lxml")
         articles = []
+        seen_urls = set()
 
         # a16z uses various card/article patterns
         selectors = [
@@ -50,19 +44,24 @@ class A16ZScraper(PlaywrightScraper):
             "[class*='PostCard']",
             "[class*='NewsCard']",
             "[class*='article-card']",
-            "[data-testid*='post']",
-            "[data-testid*='article']",
+            "[class*='card']",
+            "[class*='Card']",
+            "a[href*='/announcement']",
+            "a[href*='/news/']",
         ]
-
-        seen_urls = set()
 
         for selector in selectors:
             for card in soup.select(selector):
                 # Extract title
                 title_el = card.select_one("h2, h3, h4, .title, [class*='title'], [class*='Title']")
                 if not title_el:
-                    continue
-                title = title_el.get_text(strip=True)
+                    # If card is an <a> tag, try getting title from its text
+                    if card.name == "a":
+                        title = card.get_text(strip=True)
+                    else:
+                        continue
+                else:
+                    title = title_el.get_text(strip=True)
 
                 if not title or len(title) < 10:
                     continue
@@ -70,8 +69,10 @@ class A16ZScraper(PlaywrightScraper):
                 # Extract link
                 link_el = card.select_one("a[href]")
                 if not link_el:
-                    # Try parent
-                    link_el = card.find_parent("a")
+                    if card.name == "a":
+                        link_el = card
+                    else:
+                        link_el = card.find_parent("a")
                 if not link_el:
                     continue
 
@@ -81,11 +82,12 @@ class A16ZScraper(PlaywrightScraper):
                 if url and not url.startswith("http"):
                     url = f"{self.base_url}{url}"
 
-                # Skip duplicates and non-article URLs
-                if url in seen_urls or not url or "/news" not in url.lower() and "/portfolio" not in url.lower():
-                    if "/announcement" not in url.lower() and "a16z.com" not in url:
-                        continue
+                # Skip non-a16z URLs
+                if "a16z.com" not in url:
+                    continue
 
+                if url in seen_urls or not url:
+                    continue
                 seen_urls.add(url)
 
                 # Extract date
@@ -114,12 +116,7 @@ class A16ZScraper(PlaywrightScraper):
 
     async def normalize(self, raw: RawArticle) -> NormalizedArticle:
         try:
-            # Fetch full article with Playwright
-            full_html = await self.fetch_rendered(
-                raw.url,
-                wait_selector="article, .post-content, [class*='content']",
-                wait_ms=3000
-            )
+            full_html = await self.fetch(raw.url)
             soup = BeautifulSoup(full_html, "lxml")
 
             # Find main content
@@ -140,7 +137,7 @@ class A16ZScraper(PlaywrightScraper):
             if author_el:
                 author = author_el.get_text(strip=True)
 
-        except Exception as e:
+        except Exception:
             text = self._extract_text(raw.html)
             author = None
 
