@@ -51,6 +51,41 @@ from .harvester import (
 )
 from .scheduler import setup_scheduler, shutdown_scheduler
 from .scheduler import jobs as scheduler_module
+import re
+from urllib.parse import quote
+
+
+# ----- URL Generation Helpers -----
+
+def generate_company_website(company_name: str) -> str:
+    """Generate likely company website URL from company name."""
+    if not company_name or company_name.lower() in ["unknown", "error"]:
+        return None
+    # Clean company name: lowercase, remove special chars, spaces to nothing
+    clean_name = re.sub(r'[^a-zA-Z0-9]', '', company_name.lower())
+    # For AI companies, prefer .ai domain
+    return f"https://{clean_name}.ai"
+
+
+def generate_company_linkedin(company_name: str) -> str:
+    """Generate company LinkedIn URL from company name."""
+    if not company_name or company_name.lower() in ["unknown", "error"]:
+        return None
+    # Clean company name: lowercase, spaces to hyphens, remove special chars
+    clean_name = re.sub(r'[^a-zA-Z0-9\s]', '', company_name.lower())
+    clean_name = re.sub(r'\s+', '-', clean_name.strip())
+    return f"https://www.linkedin.com/company/{clean_name}"
+
+
+def generate_founder_linkedin_search(founder_name: str, company_name: str) -> str:
+    """Generate LinkedIn search URL for founder at company."""
+    if not founder_name:
+        return None
+    search_terms = founder_name
+    if company_name and company_name.lower() not in ["unknown", "error"]:
+        search_terms = f"{founder_name} {company_name}"
+    encoded = quote(search_terms)
+    return f"https://www.linkedin.com/search/results/people/?keywords={encoded}"
 
 
 # ----- Caching Infrastructure -----
@@ -369,19 +404,26 @@ async def list_deals(
                 if not investor_roles:
                     investor_roles = ["stealth"]
 
-                # Parse founders from JSON
+                # Get company name for URL generation
+                company_name = deal.company.name if deal.company else "Unknown"
+
+                # Parse founders from JSON with LinkedIn fallback
                 founders = None
                 if deal.founders_json:
                     try:
                         founders_data = json.loads(deal.founders_json)
-                        founders = [
-                            FounderResponse(
-                                name=f.get("name", "Unknown"),
+                        founders = []
+                        for f in founders_data:
+                            founder_name = f.get("name", "Unknown")
+                            # Use stored LinkedIn URL or generate search URL
+                            linkedin_url = f.get("linkedin_url")
+                            if not linkedin_url and founder_name != "Unknown":
+                                linkedin_url = generate_founder_linkedin_search(founder_name, company_name)
+                            founders.append(FounderResponse(
+                                name=founder_name,
                                 title=f.get("title"),
-                                linkedin_url=f.get("linkedin_url"),
-                            )
-                            for f in founders_data
-                        ]
+                                linkedin_url=linkedin_url,
+                            ))
                     except json.JSONDecodeError:
                         founders = None
 
@@ -393,9 +435,16 @@ async def list_deals(
                     source_url = first_article.url
                     source_name = first_article.source_fund_slug or first_article.title
 
+                # Company links with fallback URL generation
+                db_website = deal.company.website if deal.company else None
+                db_linkedin = deal.company.linkedin_url if deal.company else None
+
+                company_website = db_website or generate_company_website(company_name)
+                company_linkedin = db_linkedin or generate_company_linkedin(company_name)
+
                 responses.append(DealResponse(
                     id=str(deal.id),
-                    startup_name=deal.company.name if deal.company else "Unknown",
+                    startup_name=company_name,
                     investor_roles=investor_roles,
                     investment_stage=deal.round_type,
                     amount_invested=deal.amount or "Undisclosed",
@@ -407,13 +456,13 @@ async def list_deals(
                     lead_investor=lead_investor_name,
                     lead_partner=deal.lead_partner_name,
                     verification_snippet=deal.verification_snippet,
-                    # Company links
-                    company_website=deal.company.website if deal.company else None,
-                    company_linkedin=deal.company.linkedin_url if deal.company else None,
+                    # Company links (with fallback generation)
+                    company_website=company_website,
+                    company_linkedin=company_linkedin,
                     # Source tracking
                     source_url=source_url,
                     source_name=source_name,
-                    # Founders
+                    # Founders (with LinkedIn search URLs)
                     founders=founders,
                 ))
 

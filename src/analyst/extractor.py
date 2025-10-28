@@ -112,24 +112,31 @@ DISAMBIGUATION RULES:
 - "Sequoia" = Sequoia Capital US. Note if HongShan/Peak XV (formerly Sequoia China/India)
 
 ═══════════════════════════════════════════════════════════════════
-COMPANY INFO EXTRACTION
+COMPANY INFO EXTRACTION (ALWAYS POPULATE THESE FIELDS)
 ═══════════════════════════════════════════════════════════════════
 
-COMPANY WEBSITE:
-- Extract company website URL if explicitly mentioned (e.g., "www.acme.ai", "acme.com")
-- Include full URL with protocol (https://) if not present
-- Do NOT guess - only extract if clearly stated
+COMPANY WEBSITE (REQUIRED):
+- If explicitly mentioned in article, use that URL
+- If NOT mentioned, INFER the likely website based on company name:
+  - For AI/tech startups: https://[company-name-lowercase].ai or https://[company-name-lowercase].com
+  - Remove spaces/special chars from company name
+  - Example: "Leona" → "https://leona.ai"
+  - Example: "Unconventional AI" → "https://unconventional.ai"
 
-COMPANY LINKEDIN:
-- Extract LinkedIn company page URL if mentioned
-- Format: https://www.linkedin.com/company/[company-name]
-- Do NOT guess - only extract if explicitly mentioned
+COMPANY LINKEDIN (REQUIRED):
+- If explicitly mentioned in article, use that URL
+- If NOT mentioned, CONSTRUCT the LinkedIn company page URL:
+  - Format: https://www.linkedin.com/company/[company-name-lowercase-hyphenated]
+  - Example: "Leona" → "https://www.linkedin.com/company/leona"
+  - Example: "Function Health" → "https://www.linkedin.com/company/function-health"
 
-FOUNDERS:
+FOUNDERS (ALWAYS INCLUDE LINKEDIN):
 - Extract all founders mentioned with their names and titles
 - Common titles: CEO, CTO, Co-founder, Founder & CEO, etc.
-- Extract LinkedIn URLs if explicitly provided in the article
-- If LinkedIn URL not provided, leave linkedin_url as null
+- For EACH founder, ALWAYS provide a LinkedIn search URL:
+  - Format: https://www.linkedin.com/search/results/people/?keywords=[FirstName]%20[LastName]%20[CompanyName]
+  - Example: "Caroline Merin" at "Leona" → "https://www.linkedin.com/search/results/people/?keywords=Caroline%20Merin%20Leona"
+- This allows users to quickly find the founder's actual profile
 
 ═══════════════════════════════════════════════════════════════════
 CHAIN OF THOUGHT
