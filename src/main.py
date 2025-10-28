@@ -68,13 +68,12 @@ def generate_company_website(company_name: str) -> str:
 
 
 def generate_company_linkedin(company_name: str) -> str:
-    """Generate company LinkedIn URL from company name."""
+    """Generate company LinkedIn search URL from company name."""
     if not company_name or company_name.lower() in ["unknown", "error"]:
         return None
-    # Clean company name: lowercase, spaces to hyphens, remove special chars
-    clean_name = re.sub(r'[^a-zA-Z0-9\s]', '', company_name.lower())
-    clean_name = re.sub(r'\s+', '-', clean_name.strip())
-    return f"https://www.linkedin.com/company/{clean_name}"
+    # Use LinkedIn company search instead of direct page (more reliable)
+    encoded = quote(company_name)
+    return f"https://www.linkedin.com/search/results/companies/?keywords={encoded}"
 
 
 def generate_founder_linkedin_search(founder_name: str, company_name: str) -> str:
