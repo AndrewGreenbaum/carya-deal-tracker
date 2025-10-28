@@ -36,7 +36,7 @@ class Settings(BaseSettings):
         return v
 
     # LLM Settings
-    llm_model: str = "claude-3-5-sonnet-20241022"
+    llm_model: str = "claude-3-haiku-20240307"
     llm_temperature: float = 0.0
     llm_max_tokens: int = 4096
 
