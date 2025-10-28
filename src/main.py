@@ -58,13 +58,12 @@ from urllib.parse import quote
 # ----- URL Generation Helpers -----
 
 def generate_company_website(company_name: str) -> str:
-    """Generate likely company website URL from company name."""
+    """Generate Google search URL to find company website."""
     if not company_name or company_name.lower() in ["unknown", "error"]:
         return None
-    # Clean company name: lowercase, remove special chars, spaces to nothing
-    clean_name = re.sub(r'[^a-zA-Z0-9]', '', company_name.lower())
-    # For AI companies, prefer .ai domain
-    return f"https://{clean_name}.ai"
+    # Use Google search to find company website (more reliable than guessing domain)
+    encoded = quote(f"{company_name} official website")
+    return f"https://www.google.com/search?q={encoded}"
 
 
 def generate_company_linkedin(company_name: str) -> str:
