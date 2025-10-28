@@ -434,11 +434,22 @@ async def list_deals(
                     source_name = first_article.source_fund_slug or first_article.title
 
                 # Company links with fallback URL generation
+                # Check for invalid placeholder values that should trigger fallback
+                invalid_values = ["not mentioned", "not specified", "unknown", "n/a", "none", ""]
+
                 db_website = deal.company.website if deal.company else None
                 db_linkedin = deal.company.linkedin_url if deal.company else None
 
-                company_website = db_website or generate_company_website(company_name)
-                company_linkedin = db_linkedin or generate_company_linkedin(company_name)
+                # Use fallback if value is missing or is a placeholder
+                if not db_website or db_website.lower().strip() in invalid_values:
+                    company_website = generate_company_website(company_name)
+                else:
+                    company_website = db_website
+
+                if not db_linkedin or db_linkedin.lower().strip() in invalid_values:
+                    company_linkedin = generate_company_linkedin(company_name)
+                else:
+                    company_linkedin = db_linkedin
 
                 responses.append(DealResponse(
                     id=str(deal.id),
