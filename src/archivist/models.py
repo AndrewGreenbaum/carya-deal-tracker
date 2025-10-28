@@ -56,6 +56,7 @@ class PortfolioCompany(SQLModel, table=True):
     name: str = Field(index=True)
     description: Optional[str] = None
     website: Optional[str] = None
+    linkedin_url: Optional[str] = None  # Company LinkedIn page
     sector: Optional[str] = None
     founded_year: Optional[int] = None
     hq_location: Optional[str] = None
@@ -88,6 +89,9 @@ class Deal(SQLModel, table=True):
     # Enterprise AI classification
     enterprise_category: Optional[str] = None  # infrastructure, security, vertical_saas, agentic, data_intelligence
     is_enterprise_ai: bool = False  # True if B2B Enterprise AI (not consumer)
+
+    # Founders (stored as JSON list)
+    founders_json: Optional[str] = None  # JSON: [{"name": "...", "title": "...", "linkedin_url": "..."}]
 
     # Quality scores
     confidence_score: float = 0.0

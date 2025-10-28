@@ -13,6 +13,7 @@ OPTIMIZED:
 """
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from datetime import datetime, timedelta
@@ -40,6 +41,7 @@ from .archivist import (
     DealInvestor,
     PortfolioCompany,
 )
+from .archivist.models import Article
 from .archivist.models import StealthDetection
 from .harvester import (
     scrape_fund,
@@ -191,6 +193,13 @@ class HealthResponse(BaseModel):
     implemented_scrapers: int
 
 
+class FounderResponse(BaseModel):
+    """Founder information for API response."""
+    name: str
+    title: Optional[str] = None
+    linkedin_url: Optional[str] = None
+
+
 class DealResponse(BaseModel):
     id: str
     startup_name: str
@@ -205,6 +214,14 @@ class DealResponse(BaseModel):
     lead_investor: Optional[str] = None
     lead_partner: Optional[str] = None
     verification_snippet: Optional[str] = None
+    # Company links
+    company_website: Optional[str] = None
+    company_linkedin: Optional[str] = None
+    # Source tracking
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+    # Founders
+    founders: Optional[List[FounderResponse]] = None
 
 
 class PaginatedDealsResponse(BaseModel):
@@ -322,6 +339,7 @@ async def list_deals(
                 .options(
                     selectinload(Deal.company),
                     selectinload(Deal.investors),
+                    selectinload(Deal.articles),
                 )
                 .order_by(nullslast(Deal.announced_date.desc()), Deal.created_at.desc())
                 .offset(offset)
@@ -351,6 +369,30 @@ async def list_deals(
                 if not investor_roles:
                     investor_roles = ["stealth"]
 
+                # Parse founders from JSON
+                founders = None
+                if deal.founders_json:
+                    try:
+                        founders_data = json.loads(deal.founders_json)
+                        founders = [
+                            FounderResponse(
+                                name=f.get("name", "Unknown"),
+                                title=f.get("title"),
+                                linkedin_url=f.get("linkedin_url"),
+                            )
+                            for f in founders_data
+                        ]
+                    except json.JSONDecodeError:
+                        founders = None
+
+                # Get source info from articles
+                source_url = None
+                source_name = None
+                if deal.articles:
+                    first_article = deal.articles[0]
+                    source_url = first_article.url
+                    source_name = first_article.source_fund_slug or first_article.title
+
                 responses.append(DealResponse(
                     id=str(deal.id),
                     startup_name=deal.company.name if deal.company else "Unknown",
@@ -365,6 +407,14 @@ async def list_deals(
                     lead_investor=lead_investor_name,
                     lead_partner=deal.lead_partner_name,
                     verification_snippet=deal.verification_snippet,
+                    # Company links
+                    company_website=deal.company.website if deal.company else None,
+                    company_linkedin=deal.company.linkedin_url if deal.company else None,
+                    # Source tracking
+                    source_url=source_url,
+                    source_name=source_name,
+                    # Founders
+                    founders=founders,
                 ))
 
             return PaginatedDealsResponse(

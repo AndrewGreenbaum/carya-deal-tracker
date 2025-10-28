@@ -50,9 +50,11 @@ SYSTEM_PROMPT = """You are an expert venture capital analyst specializing in ide
 
 Your task is to analyze press releases and news articles about startup funding and extract:
 1. Key deal details (company, round type, amount)
-2. Lead vs. participating investors (with verification snippet)
-3. Whether this is an ENTERPRISE AI company (not consumer)
-4. Specifically identify if any of our TRACKED FUNDS LED the round
+2. Company website URL and LinkedIn page URL if mentioned
+3. Founders with their names, titles, and LinkedIn URLs if available
+4. Lead vs. participating investors (with verification snippet)
+5. Whether this is an ENTERPRISE AI company (not consumer)
+6. Specifically identify if any of our TRACKED FUNDS LED the round
 
 ═══════════════════════════════════════════════════════════════════
 ENTERPRISE AI CLASSIFICATION (CRITICAL - Filter Consumer Companies)
@@ -108,6 +110,26 @@ DISAMBIGUATION RULES:
 - "GV" = Google Ventures. Exclude stock ticker GV (Visionary Holdings)
 - "Thrive" = Thrive Capital. Exclude "Thrive IT Services" or "Thrive Global"
 - "Sequoia" = Sequoia Capital US. Note if HongShan/Peak XV (formerly Sequoia China/India)
+
+═══════════════════════════════════════════════════════════════════
+COMPANY INFO EXTRACTION
+═══════════════════════════════════════════════════════════════════
+
+COMPANY WEBSITE:
+- Extract company website URL if explicitly mentioned (e.g., "www.acme.ai", "acme.com")
+- Include full URL with protocol (https://) if not present
+- Do NOT guess - only extract if clearly stated
+
+COMPANY LINKEDIN:
+- Extract LinkedIn company page URL if mentioned
+- Format: https://www.linkedin.com/company/[company-name]
+- Do NOT guess - only extract if explicitly mentioned
+
+FOUNDERS:
+- Extract all founders mentioned with their names and titles
+- Common titles: CEO, CTO, Co-founder, Founder & CEO, etc.
+- Extract LinkedIn URLs if explicitly provided in the article
+- If LinkedIn URL not provided, leave linkedin_url as null
 
 ═══════════════════════════════════════════════════════════════════
 CHAIN OF THOUGHT

@@ -42,6 +42,19 @@ class EnterpriseCategory(str, Enum):
     NOT_ENTERPRISE = "not_enterprise"      # Consumer AI - EXCLUDE from tracking
 
 
+class FounderInfo(BaseModel):
+    """A founder of the startup."""
+    name: str = Field(description="Founder's full name")
+    title: Optional[str] = Field(
+        default=None,
+        description="Title/role (e.g., 'CEO', 'CTO', 'Co-founder')"
+    )
+    linkedin_url: Optional[str] = Field(
+        default=None,
+        description="LinkedIn profile URL if mentioned or can be inferred"
+    )
+
+
 class InvestorMention(BaseModel):
     """A single investor mentioned in the article."""
     name: str = Field(description="Investor/fund name as mentioned in text")
@@ -87,6 +100,22 @@ class DealExtraction(BaseModel):
     startup_description: Optional[str] = Field(
         default=None,
         description="Brief description of what the startup does"
+    )
+
+    # Company links
+    company_website: Optional[str] = Field(
+        default=None,
+        description="Company website URL if mentioned in the article"
+    )
+    company_linkedin: Optional[str] = Field(
+        default=None,
+        description="Company LinkedIn page URL if mentioned in the article"
+    )
+
+    # Founders
+    founders: List[FounderInfo] = Field(
+        default_factory=list,
+        description="List of founders mentioned in the article with their LinkedIn URLs if available"
     )
 
     # Round details

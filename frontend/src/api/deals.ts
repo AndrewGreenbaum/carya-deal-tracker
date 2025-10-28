@@ -8,6 +8,7 @@
 import type {
   Deal,
   Fund,
+  Founder,
   PaginatedDeals,
   DealFilters,
   HealthResponse,
@@ -117,6 +118,12 @@ async function apiPost<T>(path: string, body?: unknown): Promise<T> {
 // Response Mappers (snake_case -> camelCase)
 // ============================================
 
+interface FounderApiResponse {
+  name: string;
+  title?: string;
+  linkedin_url?: string;
+}
+
 interface DealApiResponse {
   id: string;
   startup_name: string;
@@ -130,6 +137,14 @@ interface DealApiResponse {
   lead_investor?: string;
   lead_partner?: string;
   verification_snippet?: string;
+  // Company links
+  company_website?: string;
+  company_linkedin?: string;
+  // Source tracking
+  source_url?: string;
+  source_name?: string;
+  // Founders
+  founders?: FounderApiResponse[];
 }
 
 interface PaginatedDealsApiResponse {
@@ -141,6 +156,13 @@ interface PaginatedDealsApiResponse {
 }
 
 function mapDeal(api: DealApiResponse): Deal {
+  // Map founders from snake_case to camelCase
+  const founders: Founder[] | undefined = api.founders?.map((f) => ({
+    name: f.name,
+    title: f.title,
+    linkedinUrl: f.linkedin_url,
+  }));
+
   return {
     id: api.id,
     startupName: api.startup_name,
@@ -154,6 +176,14 @@ function mapDeal(api: DealApiResponse): Deal {
     leadInvestor: api.lead_investor,
     leadPartner: api.lead_partner,
     verificationSnippet: api.verification_snippet,
+    // Company links
+    companyWebsite: api.company_website,
+    companyLinkedin: api.company_linkedin,
+    // Source tracking
+    sourceUrl: api.source_url,
+    sourceName: api.source_name,
+    // Founders
+    founders,
   };
 }
 

@@ -2,6 +2,7 @@
 Storage pipeline for persisting extracted deals to the database.
 """
 
+import json
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import select, nullslast
@@ -24,6 +25,8 @@ async def get_or_create_company(
     name: str,
     description: Optional[str] = None,
     sector: Optional[str] = None,
+    website: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
 ) -> PortfolioCompany:
     """Get existing company or create new one."""
     stmt = select(PortfolioCompany).where(PortfolioCompany.name == name)
@@ -31,12 +34,22 @@ async def get_or_create_company(
     company = result.scalar_one_or_none()
 
     if company:
+        # Update existing company with new info if we have it
+        if website and not company.website:
+            company.website = website
+        if linkedin_url and not company.linkedin_url:
+            company.linkedin_url = linkedin_url
+        if description and not company.description:
+            company.description = description
+        company.updated_at = datetime.utcnow()
         return company
 
     company = PortfolioCompany(
         name=name,
         description=description,
         sector=sector,
+        website=website,
+        linkedin_url=linkedin_url,
     )
     session.add(company)
     await session.flush()
@@ -83,12 +96,27 @@ async def save_deal(
     - DealInvestor records for all investors
     - Article record linked to the deal
     """
-    # Get or create company
+    # Get or create company with website and LinkedIn
     company = await get_or_create_company(
         session,
         name=extraction.startup_name,
         description=extraction.startup_description,
+        website=extraction.company_website,
+        linkedin_url=extraction.company_linkedin,
     )
+
+    # Convert founders to JSON for storage
+    founders_json = None
+    if extraction.founders:
+        founders_data = [
+            {
+                "name": f.name,
+                "title": f.title,
+                "linkedin_url": f.linkedin_url,
+            }
+            for f in extraction.founders
+        ]
+        founders_json = json.dumps(founders_data)
 
     # Create deal with enterprise AI classification
     deal = Deal(
@@ -102,6 +130,7 @@ async def save_deal(
         verification_snippet=extraction.verification_snippet,
         enterprise_category=extraction.enterprise_category.value if extraction.enterprise_category else None,
         is_enterprise_ai=extraction.is_enterprise_ai,
+        founders_json=founders_json,
         confidence_score=extraction.confidence_score,
         thesis_drift_score=extraction.thesis_drift_score,
     )
