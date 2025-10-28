@@ -55,35 +55,26 @@ import re
 from urllib.parse import quote
 
 
-# ----- URL Generation Helpers -----
+# ----- URL Validation Helpers -----
 
-def generate_company_website(company_name: str) -> str:
-    """Generate Google search URL to find company website."""
-    if not company_name or company_name.lower() in ["unknown", "error"]:
-        return None
-    # Use Google search to find company website (more reliable than guessing domain)
-    encoded = quote(f"{company_name} official website")
-    return f"https://www.google.com/search?q={encoded}"
-
-
-def generate_company_linkedin(company_name: str) -> str:
-    """Generate company LinkedIn search URL from company name."""
-    if not company_name or company_name.lower() in ["unknown", "error"]:
-        return None
-    # Use LinkedIn company search instead of direct page (more reliable)
-    encoded = quote(company_name)
-    return f"https://www.linkedin.com/search/results/companies/?keywords={encoded}"
-
-
-def generate_founder_linkedin_search(founder_name: str, company_name: str) -> str:
-    """Generate LinkedIn search URL for founder at company."""
-    if not founder_name:
-        return None
-    search_terms = founder_name
-    if company_name and company_name.lower() not in ["unknown", "error"]:
-        search_terms = f"{founder_name} {company_name}"
-    encoded = quote(search_terms)
-    return f"https://www.linkedin.com/search/results/people/?keywords={encoded}"
+def is_valid_url(url: str) -> bool:
+    """Check if URL is a real URL (not a search URL or placeholder)."""
+    if not url:
+        return False
+    url_lower = url.lower().strip()
+    # Invalid placeholders
+    invalid_values = ["not mentioned", "not specified", "unknown", "n/a", "none", ""]
+    if url_lower in invalid_values:
+        return False
+    # Must start with http
+    if not url_lower.startswith("http"):
+        return False
+    # Reject search URLs - we want real direct URLs only
+    if "google.com/search" in url_lower:
+        return False
+    if "linkedin.com/search" in url_lower:
+        return False
+    return True
 
 
 # ----- Caching Infrastructure -----
@@ -402,10 +393,10 @@ async def list_deals(
                 if not investor_roles:
                     investor_roles = ["stealth"]
 
-                # Get company name for URL generation
+                # Get company name
                 company_name = deal.company.name if deal.company else "Unknown"
 
-                # Parse founders from JSON with LinkedIn fallback
+                # Parse founders from JSON - only use REAL LinkedIn URLs
                 founders = None
                 if deal.founders_json:
                     try:
@@ -413,10 +404,10 @@ async def list_deals(
                         founders = []
                         for f in founders_data:
                             founder_name = f.get("name", "Unknown")
-                            # Use stored LinkedIn URL or generate search URL
+                            # Only use LinkedIn URL if it's a real direct profile URL
                             linkedin_url = f.get("linkedin_url")
-                            if not linkedin_url and founder_name != "Unknown":
-                                linkedin_url = generate_founder_linkedin_search(founder_name, company_name)
+                            if not is_valid_url(linkedin_url):
+                                linkedin_url = None  # Return null, not a search URL
                             founders.append(FounderResponse(
                                 name=founder_name,
                                 title=f.get("title"),
@@ -433,23 +424,13 @@ async def list_deals(
                     source_url = first_article.url
                     source_name = first_article.source_fund_slug or first_article.title
 
-                # Company links with fallback URL generation
-                # Check for invalid placeholder values that should trigger fallback
-                invalid_values = ["not mentioned", "not specified", "unknown", "n/a", "none", ""]
-
+                # Company links - only use REAL URLs, not search URLs
                 db_website = deal.company.website if deal.company else None
                 db_linkedin = deal.company.linkedin_url if deal.company else None
 
-                # Use fallback if value is missing or is a placeholder
-                if not db_website or db_website.lower().strip() in invalid_values:
-                    company_website = generate_company_website(company_name)
-                else:
-                    company_website = db_website
-
-                if not db_linkedin or db_linkedin.lower().strip() in invalid_values:
-                    company_linkedin = generate_company_linkedin(company_name)
-                else:
-                    company_linkedin = db_linkedin
+                # Only return URL if it's a valid direct URL
+                company_website = db_website if is_valid_url(db_website) else None
+                company_linkedin = db_linkedin if is_valid_url(db_linkedin) else None
 
                 responses.append(DealResponse(
                     id=str(deal.id),

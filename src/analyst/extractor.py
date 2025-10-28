@@ -112,31 +112,28 @@ DISAMBIGUATION RULES:
 - "Sequoia" = Sequoia Capital US. Note if HongShan/Peak XV (formerly Sequoia China/India)
 
 ═══════════════════════════════════════════════════════════════════
-COMPANY INFO EXTRACTION (ALWAYS POPULATE THESE FIELDS)
+COMPANY INFO EXTRACTION (ONLY EXTRACT IF EXPLICITLY MENTIONED)
 ═══════════════════════════════════════════════════════════════════
 
-COMPANY WEBSITE (REQUIRED):
-- If explicitly mentioned in article, use that URL
-- If NOT mentioned, INFER the likely website based on company name:
-  - For AI/tech startups: https://[company-name-lowercase].ai or https://[company-name-lowercase].com
-  - Remove spaces/special chars from company name
-  - Example: "Leona" → "https://leona.ai"
-  - Example: "Unconventional AI" → "https://unconventional.ai"
+IMPORTANT: Only extract URLs that are EXPLICITLY mentioned in the article.
+DO NOT guess, infer, or construct URLs. If not mentioned, leave as null.
 
-COMPANY LINKEDIN (REQUIRED):
-- If explicitly mentioned in article, use that URL
-- If NOT mentioned, CONSTRUCT the LinkedIn company page URL:
-  - Format: https://www.linkedin.com/company/[company-name-lowercase-hyphenated]
-  - Example: "Leona" → "https://www.linkedin.com/company/leona"
-  - Example: "Function Health" → "https://www.linkedin.com/company/function-health"
+COMPANY WEBSITE:
+- ONLY extract if the actual URL is mentioned in the article
+- Example: "visit acme.ai" → "https://acme.ai"
+- If NOT mentioned in article → set to null (do NOT guess)
 
-FOUNDERS (ALWAYS INCLUDE LINKEDIN):
+COMPANY LINKEDIN:
+- ONLY extract if the LinkedIn URL is explicitly mentioned
+- Must be a direct company page URL like: https://www.linkedin.com/company/acme
+- If NOT mentioned in article → set to null (do NOT construct)
+
+FOUNDERS:
 - Extract all founders mentioned with their names and titles
 - Common titles: CEO, CTO, Co-founder, Founder & CEO, etc.
-- For EACH founder, ALWAYS provide a LinkedIn search URL:
-  - Format: https://www.linkedin.com/search/results/people/?keywords=[FirstName]%20[LastName]%20[CompanyName]
-  - Example: "Caroline Merin" at "Leona" → "https://www.linkedin.com/search/results/people/?keywords=Caroline%20Merin%20Leona"
-- This allows users to quickly find the founder's actual profile
+- linkedin_url: ONLY include if the founder's actual LinkedIn profile URL is mentioned
+  - Must be a direct profile URL like: https://www.linkedin.com/in/john-smith
+  - If NOT mentioned → set to null (do NOT create search URLs)
 
 ═══════════════════════════════════════════════════════════════════
 CHAIN OF THOUGHT
