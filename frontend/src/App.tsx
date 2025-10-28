@@ -220,11 +220,25 @@ function App() {
           ? Math.round((enterpriseDeals / result.deals.length) * 100)
           : 0;
 
+        // Calculate verification rate (deals with verification snippets)
+        const verifiedDeals = result.deals.filter((d) => d.verificationSnippet && d.verificationSnippet.trim().length > 0).length;
+        const verificationRate = result.deals.length > 0
+          ? Math.round((verifiedDeals / result.deals.length) * 100)
+          : 0;
+
+        // Estimate tokens used (rough estimate: ~500 tokens per deal extraction)
+        const estimatedTokens = result.total * 500;
+        const tokensFormatted = estimatedTokens > 1000
+          ? `${(estimatedTokens / 1000).toFixed(1)}K`
+          : estimatedTokens.toString();
+
         setStats((prev) => ({
           ...prev,
           newDeals24h: newDeals,
           enterpriseAiRatio: ratio,
-          verificationRate: 100,
+          verificationRate: verificationRate,
+          tokensUsed: tokensFormatted,
+          claudeCalls: result.total,
         }));
 
         setError(null);
