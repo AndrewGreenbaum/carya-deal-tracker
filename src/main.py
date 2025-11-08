@@ -943,10 +943,17 @@ async def run_brave_search_scraper_endpoint(
     api_key: str = Depends(verify_api_key),
 ):
     """
-    Run Brave Search API scraper.
+    Run Brave Search API scraper with 2x expanded coverage.
 
-    Searches for funding news with "led by" language for tracked funds.
+    Searches for funding news with "led by" AND participation language for tracked funds.
     Requires BRAVE_SEARCH_KEY to be configured.
+
+    Query breakdown:
+    - 18 fund lead queries
+    - 18 fund participation queries
+    - 1 enterprise AI query
+    - 1 stealth query
+    = 38 queries total
     """
     from .harvester.scrapers.brave_search import BraveSearchScraper
 
@@ -955,17 +962,22 @@ async def run_brave_search_scraper_endpoint(
 
     try:
         async with BraveSearchScraper() as scraper:
-            fund_results = await scraper.search_all_funds(freshness=freshness)
-
-            total_results = sum(len(results) for results in fund_results.values())
-
-            articles = await scraper.scrape_all(freshness=freshness)
+            # Run full scrape with 2x coverage (participation + stealth)
+            articles = await scraper.scrape_all(
+                freshness=freshness,
+                include_enterprise=True,
+                include_participation=True,
+                include_stealth=True,
+            )
 
         cache.invalidate("deals")
 
+        # Query count: 18 lead + 18 participation + 1 enterprise + 1 stealth = 38
+        queries_executed = 38
+
         return BraveSearchResponse(
-            queries_executed=len(fund_results),
-            results_found=total_results,
+            queries_executed=queries_executed,
+            results_found=len(articles),  # Before dedup
             articles_generated=len(articles),
         )
 

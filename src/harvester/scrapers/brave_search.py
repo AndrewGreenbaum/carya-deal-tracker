@@ -91,6 +91,18 @@ LEAD_PHRASES = [
     "spearheaded by",
 ]
 
+# Participation/announcement phrases (catches non-lead mentions)
+PARTICIPATION_PHRASES = [
+    "invests in",
+    "invested in",
+    "backs",
+    "backed",
+    "joins",
+    "participated",
+    "announces investment",
+    "portfolio company",
+]
+
 # Funding keywords
 FUNDING_KEYWORDS = [
     "raises",
@@ -102,6 +114,24 @@ FUNDING_KEYWORDS = [
     "seed round",
     "million",
 ]
+
+# Stealth/early signal keywords
+STEALTH_KEYWORDS = [
+    "stealth mode",
+    "emerges from stealth",
+    "comes out of stealth",
+    "exits stealth",
+    "stealth startup",
+]
+
+# Enterprise AI category queries (one per category)
+ENTERPRISE_CATEGORY_QUERIES = {
+    "infrastructure": '"AI infrastructure" OR "LLMOps" OR "MLOps" OR "vector database"',
+    "security": '"AI security" OR "cybersecurity AI" OR "AI threat detection"',
+    "vertical_saas": '"AI SaaS" OR "enterprise AI" OR "B2B AI"',
+    "agentic": '"AI agents" OR "agentic AI" OR "AI automation" OR "AI copilot"',
+    "data_intelligence": '"AI analytics" OR "enterprise search AI" OR "knowledge management AI"',
+}
 
 
 @dataclass
@@ -139,17 +169,19 @@ class BraveSearchScraper:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.client.aclose()
 
-    def _build_fund_query(self, fund_slug: str) -> str:
-        """Build optimized search query for a specific fund's lead deals."""
+    def _build_fund_query(self, fund_slug: str, query_type: str = "lead") -> str:
+        """Build optimized search query for a specific fund.
+
+        Args:
+            fund_slug: Fund identifier
+            query_type: "lead" for lead investor queries, "participation" for broader coverage
+        """
         fund_names = FUND_SEARCH_NAMES.get(fund_slug, [])
         if not fund_names:
             return ""
 
         # Build fund name alternatives (OR)
         name_query = " OR ".join([f'"{name}"' for name in fund_names])
-
-        # Build lead phrases (OR)
-        lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES[:3]])
 
         # Build funding keywords (OR)
         funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:4]])
@@ -158,21 +190,42 @@ class BraveSearchScraper:
         exclusions = EXCLUSION_TERMS.get(fund_slug, [])
         exclusion_query = " ".join(exclusions) if exclusions else ""
 
-        # Optimized query: (fund names) AND (lead phrases) AND (funding keywords) - exclusions
-        query = f'({name_query}) AND ({lead_query}) AND ({funding_query})'
+        if query_type == "lead":
+            # Lead query: fund + lead phrases + funding
+            lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES[:3]])
+            query = f'({name_query}) AND ({lead_query}) AND ({funding_query})'
+        else:
+            # Participation query: fund + participation phrases + funding (catches more)
+            participation_query = " OR ".join([f'"{phrase}"' for phrase in PARTICIPATION_PHRASES[:4]])
+            query = f'({name_query}) AND ({participation_query}) AND ({funding_query})'
+
         if exclusion_query:
             query = f'{query} {exclusion_query}'
 
         return query
 
-    def _build_enterprise_query(self) -> str:
-        """Build optimized Enterprise AI funding query."""
-        # Use top 6 enterprise keywords for broader coverage
-        keywords = " OR ".join([f'"{kw}"' for kw in ENTERPRISE_KEYWORDS[:6]])
+    def _build_enterprise_query(self, category: str = None) -> str:
+        """Build optimized Enterprise AI funding query.
+
+        Args:
+            category: Optional specific category (infrastructure, security, etc.)
+        """
+        if category and category in ENTERPRISE_CATEGORY_QUERIES:
+            keywords = ENTERPRISE_CATEGORY_QUERIES[category]
+        else:
+            # Use top 6 enterprise keywords for broader coverage
+            keywords = " OR ".join([f'"{kw}"' for kw in ENTERPRISE_KEYWORDS[:6]])
+
         lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES[:3]])
         funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:4]])
 
         return f'({keywords}) AND ({funding_query}) AND ({lead_query})'
+
+    def _build_stealth_query(self) -> str:
+        """Build query for stealth startup funding news."""
+        stealth_query = " OR ".join([f'"{kw}"' for kw in STEALTH_KEYWORDS[:3]])
+        funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:4]])
+        return f'({stealth_query}) AND ({funding_query}) AND ("AI" OR "startup")'
 
     async def search_news(
         self,
@@ -268,6 +321,7 @@ class BraveSearchScraper:
         self,
         fund_slug: str,
         freshness: str = "pw",
+        query_type: str = "lead",
     ) -> List[BraveSearchResult]:
         """
         Search for funding news about a specific tracked fund.
@@ -275,11 +329,12 @@ class BraveSearchScraper:
         Args:
             fund_slug: The fund to search for (e.g., 'a16z', 'sequoia')
             freshness: pd=past day, pw=past week, pm=past month
+            query_type: "lead" or "participation"
 
         Returns:
             List of search results
         """
-        query = self._build_fund_query(fund_slug)
+        query = self._build_fund_query(fund_slug, query_type)
         if not query:
             return []
 
@@ -288,9 +343,14 @@ class BraveSearchScraper:
     async def search_all_funds(
         self,
         freshness: str = "pw",
+        include_participation: bool = True,
     ) -> Dict[str, List[BraveSearchResult]]:
         """
-        Search for all 18 tracked funds.
+        Search for all 18 tracked funds with optional 2x coverage.
+
+        Args:
+            freshness: pd=past day, pw=past week, pm=past month
+            include_participation: If True, runs both lead AND participation queries (2x)
 
         Returns:
             Dict mapping fund_slug to list of results
@@ -298,11 +358,16 @@ class BraveSearchScraper:
         results: Dict[str, List[BraveSearchResult]] = {}
 
         for fund_slug in FUND_SEARCH_NAMES.keys():
-            fund_results = await self.search_for_fund(fund_slug, freshness)
-            results[fund_slug] = fund_results
-
-            # Rate limit
+            # Lead query (primary)
+            lead_results = await self.search_for_fund(fund_slug, freshness, "lead")
+            results[fund_slug] = lead_results
             await asyncio.sleep(0.3)
+
+            # Participation query (2x expansion)
+            if include_participation:
+                participation_results = await self.search_for_fund(fund_slug, freshness, "participation")
+                results[f"{fund_slug}_participation"] = participation_results
+                await asyncio.sleep(0.3)
 
         return results
 
@@ -317,6 +382,18 @@ class BraveSearchScraper:
         """
         query = self._build_enterprise_query()
         return await self.search_news(query, count=50, freshness=freshness)
+
+    async def search_stealth(
+        self,
+        freshness: str = "pw",
+    ) -> List[BraveSearchResult]:
+        """
+        Search for stealth startup funding news.
+
+        Catches early signals before official announcements.
+        """
+        query = self._build_stealth_query()
+        return await self.search_news(query, count=30, freshness=freshness)
 
     async def to_normalized_article(
         self,
@@ -344,33 +421,47 @@ class BraveSearchScraper:
         self,
         freshness: str = "pw",
         include_enterprise: bool = True,
+        include_participation: bool = True,
+        include_stealth: bool = True,
     ) -> List[NormalizedArticle]:
         """
-        Full scraping pipeline.
+        Full scraping pipeline with 2x expanded coverage.
 
         Args:
             freshness: pd=past day, pw=past week, pm=past month
             include_enterprise: Also search for general Enterprise AI deals
+            include_participation: Run participation queries (2x fund coverage)
+            include_stealth: Search for stealth startup news
 
         Returns:
             Deduplicated list of NormalizedArticle objects
+
+        Query breakdown (when all options enabled):
+        - 18 fund lead queries
+        - 18 fund participation queries
+        - 1 enterprise AI query
+        - 1 stealth query
+        = 38 queries total (2x coverage)
         """
         all_articles: List[NormalizedArticle] = []
         seen_urls: set = set()
 
-        # Search for each tracked fund
-        fund_results = await self.search_all_funds(freshness)
+        # Search for each tracked fund (lead + participation = 36 queries)
+        fund_results = await self.search_all_funds(freshness, include_participation)
 
         for fund_slug, results in fund_results.items():
+            # Strip "_participation" suffix for actual fund_slug
+            actual_fund_slug = fund_slug.replace("_participation", "")
+
             for result in results:
                 if result.url in seen_urls:
                     continue
                 seen_urls.add(result.url)
 
-                article = await self.to_normalized_article(result, fund_slug)
+                article = await self.to_normalized_article(result, actual_fund_slug)
                 all_articles.append(article)
 
-        # Also search for broad Enterprise AI deals
+        # Search for broad Enterprise AI deals (1 query)
         if include_enterprise:
             enterprise_results = await self.search_enterprise_ai(freshness)
 
@@ -380,6 +471,19 @@ class BraveSearchScraper:
                 seen_urls.add(result.url)
 
                 article = await self.to_normalized_article(result, "")
+                all_articles.append(article)
+
+        # Search for stealth startups (1 query)
+        if include_stealth:
+            stealth_results = await self.search_stealth(freshness)
+
+            for result in stealth_results:
+                if result.url in seen_urls:
+                    continue
+                seen_urls.add(result.url)
+
+                article = await self.to_normalized_article(result, "")
+                article.tags.append("stealth")
                 all_articles.append(article)
 
         return all_articles
