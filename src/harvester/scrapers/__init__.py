@@ -38,6 +38,9 @@ from .ycombinator import YCombinatorScraper, run_ycombinator_scraper
 from .github_trending import GitHubTrendingScraper, run_github_trending_scraper
 from .hackernews import HackerNewsScraper, run_hackernews_scraper
 
+# Stealth Detection
+from .linkedin_jobs import LinkedInJobsScraper, run_linkedin_jobs_scraper
+
 __all__ = [
     # Original 5
     "A16ZScraper",
@@ -86,4 +89,7 @@ __all__ = [
     "run_github_trending_scraper",
     "HackerNewsScraper",
     "run_hackernews_scraper",
+    # Stealth Detection
+    "LinkedInJobsScraper",
+    "run_linkedin_jobs_scraper",
 ]

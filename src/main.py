@@ -1318,6 +1318,53 @@ async def run_hackernews_scraper_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ----- LinkedIn Jobs (Stealth Detection) -----
+
+class LinkedInJobsResponse(BaseModel):
+    queries_executed: int
+    stealth_signals_found: int
+    fund_matches: int
+    total_jobs: int
+
+
+@app.post("/scrapers/linkedin-jobs", response_model=LinkedInJobsResponse)
+async def run_linkedin_jobs_scraper_endpoint(
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run LinkedIn Jobs scraper for stealth startup detection.
+
+    Searches for job posts mentioning:
+    - "stealth startup" / "stealth mode"
+    - "backed by [VC name]" for tracked funds
+    - "recently funded" startups
+
+    Uses Brave Search API (requires BRAVE_SEARCH_KEY).
+    ~17 queries per run.
+    """
+    from .harvester.scrapers.linkedin_jobs import LinkedInJobsScraper
+
+    if not settings.brave_search_key:
+        raise HTTPException(status_code=400, detail="BRAVE_SEARCH_KEY not configured")
+
+    try:
+        async with LinkedInJobsScraper() as scraper:
+            articles = await scraper.scrape_all()
+
+        stealth_count = len([a for a in articles if 'stealth' in a.tags])
+        fund_matches = len([a for a in articles if a.fund_slug])
+
+        return LinkedInJobsResponse(
+            queries_executed=17,  # Number of STEALTH_JOB_QUERIES
+            stealth_signals_found=stealth_count,
+            fund_matches=fund_matches,
+            total_jobs=len(articles),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ----- All Sources Combined -----
 
 class AllSourcesResponse(BaseModel):
@@ -1330,6 +1377,7 @@ class AllSourcesResponse(BaseModel):
     ycombinator: Optional[YCombinatorResponse] = None
     github_trending: Optional[GitHubTrendingResponse] = None
     hackernews: Optional[HackerNewsResponse] = None
+    linkedin_jobs: Optional[LinkedInJobsResponse] = None
 
 
 @app.post("/scrapers/all-sources", response_model=AllSourcesResponse)
@@ -1493,6 +1541,25 @@ async def run_all_sources(
         )
     except Exception:
         results["hackernews"] = None
+
+    # LinkedIn Jobs - Stealth Detection (if Brave Search configured)
+    if settings.brave_search_key:
+        try:
+            from .harvester.scrapers.linkedin_jobs import LinkedInJobsScraper
+            async with LinkedInJobsScraper() as scraper:
+                articles = await scraper.scrape_all()
+            stealth_count = len([a for a in articles if 'stealth' in a.tags])
+            fund_matches = len([a for a in articles if a.fund_slug])
+            results["linkedin_jobs"] = LinkedInJobsResponse(
+                queries_executed=17,
+                stealth_signals_found=stealth_count,
+                fund_matches=fund_matches,
+                total_jobs=len(articles),
+            )
+        except Exception:
+            results["linkedin_jobs"] = None
+    else:
+        results["linkedin_jobs"] = None
 
     cache.invalidate("deals")
 
