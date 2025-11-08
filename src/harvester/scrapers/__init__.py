@@ -29,6 +29,15 @@ from .firecrawl_scraper import FirecrawlScraper, scrape_with_firecrawl, run_fire
 from .google_alerts import GoogleAlertsScraper, run_google_alerts_scraper, get_alert_setup_instructions
 from .twitter_monitor import TwitterMonitor, run_twitter_monitor, get_twitter_setup_instructions
 
+# RSS Feeds
+from .techcrunch_rss import TechCrunchScraper, run_techcrunch_scraper
+from .fortune_term_sheet import FortuneTermSheetScraper, run_fortune_scraper
+
+# Community/Early Signal Sources
+from .ycombinator import YCombinatorScraper, run_ycombinator_scraper
+from .github_trending import GitHubTrendingScraper, run_github_trending_scraper
+from .hackernews import HackerNewsScraper, run_hackernews_scraper
+
 __all__ = [
     # Original 5
     "A16ZScraper",
@@ -65,4 +74,16 @@ __all__ = [
     "TwitterMonitor",
     "run_twitter_monitor",
     "get_twitter_setup_instructions",
+    # RSS Feeds
+    "TechCrunchScraper",
+    "run_techcrunch_scraper",
+    "FortuneTermSheetScraper",
+    "run_fortune_scraper",
+    # Community/Early Signal Sources
+    "YCombinatorScraper",
+    "run_ycombinator_scraper",
+    "GitHubTrendingScraper",
+    "run_github_trending_scraper",
+    "HackerNewsScraper",
+    "run_hackernews_scraper",
 ]

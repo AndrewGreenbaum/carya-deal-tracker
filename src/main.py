@@ -1106,6 +1106,193 @@ async def get_twitter_setup():
     return {"instructions": get_twitter_setup_instructions()}
 
 
+# ----- RSS Feed Scrapers -----
+
+class TechCrunchResponse(BaseModel):
+    articles_found: int
+    funding_articles: int
+
+
+@app.post("/scrapers/techcrunch", response_model=TechCrunchResponse)
+async def run_techcrunch_scraper_endpoint(
+    hours_back: int = Query(168, ge=1, le=720, description="Hours to look back (default 7 days)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run TechCrunch RSS scraper.
+
+    Fetches startup and venture articles from TechCrunch RSS feeds.
+    Filters for funding-related content mentioning tracked funds.
+    FREE - no API key required.
+    """
+    from .harvester.scrapers.techcrunch_rss import TechCrunchScraper
+
+    try:
+        async with TechCrunchScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=hours_back)
+
+        cache.invalidate("deals")
+
+        return TechCrunchResponse(
+            articles_found=len(articles),
+            funding_articles=len([a for a in articles if a.fund_slug]),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class FortuneResponse(BaseModel):
+    articles_found: int
+    funding_articles: int
+
+
+@app.post("/scrapers/fortune", response_model=FortuneResponse)
+async def run_fortune_scraper_endpoint(
+    hours_back: int = Query(168, ge=1, le=720, description="Hours to look back (default 7 days)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run Fortune Term Sheet RSS scraper.
+
+    Fetches deal-focused content from Fortune's Term Sheet newsletter feed.
+    One of the best curated sources for funding news.
+    FREE - no API key required.
+    """
+    from .harvester.scrapers.fortune_term_sheet import FortuneTermSheetScraper
+
+    try:
+        async with FortuneTermSheetScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=hours_back)
+
+        cache.invalidate("deals")
+
+        return FortuneResponse(
+            articles_found=len(articles),
+            funding_articles=len([a for a in articles if a.fund_slug]),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----- Community/Early Signal Scrapers -----
+
+class YCombinatorResponse(BaseModel):
+    companies_found: int
+    blog_posts_found: int
+    total_articles: int
+
+
+@app.post("/scrapers/ycombinator", response_model=YCombinatorResponse)
+async def run_ycombinator_scraper_endpoint(
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run Y Combinator scraper.
+
+    Fetches companies from recent YC batches (Demo Day = 200+ companies twice/year).
+    Also monitors YC blog for announcements.
+    FREE - no API key required.
+    """
+    from .harvester.scrapers.ycombinator import YCombinatorScraper
+
+    try:
+        async with YCombinatorScraper() as scraper:
+            articles = await scraper.scrape_all()
+
+        # Count by type
+        companies = len([a for a in articles if 'demo_day' in a.tags])
+        blog_posts = len([a for a in articles if 'blog' in a.tags])
+
+        cache.invalidate("deals")
+
+        return YCombinatorResponse(
+            companies_found=companies,
+            blog_posts_found=blog_posts,
+            total_articles=len(articles),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class GitHubTrendingResponse(BaseModel):
+    repos_found: int
+    enterprise_devtools: int
+
+
+@app.post("/scrapers/github-trending", response_model=GitHubTrendingResponse)
+async def run_github_trending_scraper_endpoint(
+    since: str = Query("daily", description="Time range: daily, weekly, monthly"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run GitHub Trending scraper.
+
+    Fetches trending repositories - dev tools often appear before funding announcements.
+    Filters for enterprise dev tools (AI, infrastructure, DevOps, etc.).
+    FREE - no API key required.
+    """
+    from .harvester.scrapers.github_trending import GitHubTrendingScraper
+
+    try:
+        async with GitHubTrendingScraper() as scraper:
+            # Get all repos first (unfiltered)
+            all_repos = await scraper.fetch_all_trending(since=since)
+            # Then get filtered articles
+            articles = await scraper.scrape_all(since=since, filter_enterprise=True)
+
+        return GitHubTrendingResponse(
+            repos_found=len(all_repos),
+            enterprise_devtools=len(articles),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class HackerNewsResponse(BaseModel):
+    launch_hn_posts: int
+    show_hn_posts: int
+    funding_posts: int
+    total_articles: int
+
+
+@app.post("/scrapers/hackernews", response_model=HackerNewsResponse)
+async def run_hackernews_scraper_endpoint(
+    hours_back: int = Query(168, ge=1, le=720, description="Hours to look back (default 7 days)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run Hacker News scraper.
+
+    Monitors HN for Launch HN posts (startup launches) and funding news.
+    Launch posts often precede/coincide with funding announcements.
+    FREE - uses public HN Algolia API.
+    """
+    from .harvester.scrapers.hackernews import HackerNewsScraper
+
+    try:
+        async with HackerNewsScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=hours_back)
+
+        # Count by type
+        launch_hn = len([a for a in articles if 'launch_hn' in a.tags])
+        show_hn = len([a for a in articles if 'show_hn' in a.tags])
+        funding = len([a for a in articles if a.fund_slug])
+
+        return HackerNewsResponse(
+            launch_hn_posts=launch_hn,
+            show_hn_posts=show_hn,
+            funding_posts=funding,
+            total_articles=len(articles),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ----- All Sources Combined -----
 
 class AllSourcesResponse(BaseModel):
@@ -1113,6 +1300,11 @@ class AllSourcesResponse(BaseModel):
     brave_search: Optional[BraveSearchResponse] = None
     google_alerts: Optional[GoogleAlertsResponse] = None
     twitter: Optional[TwitterMonitorResponse] = None
+    techcrunch: Optional[TechCrunchResponse] = None
+    fortune: Optional[FortuneResponse] = None
+    ycombinator: Optional[YCombinatorResponse] = None
+    github_trending: Optional[GitHubTrendingResponse] = None
+    hackernews: Optional[HackerNewsResponse] = None
 
 
 @app.post("/scrapers/all-sources", response_model=AllSourcesResponse)
@@ -1201,6 +1393,75 @@ async def run_all_sources(
             results["twitter"] = None
     else:
         results["twitter"] = None
+
+    # TechCrunch RSS (always runs - free)
+    try:
+        from .harvester.scrapers.techcrunch_rss import TechCrunchScraper
+        async with TechCrunchScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+        results["techcrunch"] = TechCrunchResponse(
+            articles_found=len(articles),
+            funding_articles=len([a for a in articles if a.fund_slug]),
+        )
+    except Exception:
+        results["techcrunch"] = None
+
+    # Fortune Term Sheet (always runs - free)
+    try:
+        from .harvester.scrapers.fortune_term_sheet import FortuneTermSheetScraper
+        async with FortuneTermSheetScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+        results["fortune"] = FortuneResponse(
+            articles_found=len(articles),
+            funding_articles=len([a for a in articles if a.fund_slug]),
+        )
+    except Exception:
+        results["fortune"] = None
+
+    # Y Combinator (always runs - free)
+    try:
+        from .harvester.scrapers.ycombinator import YCombinatorScraper
+        async with YCombinatorScraper() as scraper:
+            articles = await scraper.scrape_all()
+        companies = len([a for a in articles if 'demo_day' in a.tags])
+        blog_posts = len([a for a in articles if 'blog' in a.tags])
+        results["ycombinator"] = YCombinatorResponse(
+            companies_found=companies,
+            blog_posts_found=blog_posts,
+            total_articles=len(articles),
+        )
+    except Exception:
+        results["ycombinator"] = None
+
+    # GitHub Trending (always runs - free)
+    try:
+        from .harvester.scrapers.github_trending import GitHubTrendingScraper
+        async with GitHubTrendingScraper() as scraper:
+            all_repos = await scraper.fetch_all_trending(since="daily")
+            articles = await scraper.scrape_all(since="daily", filter_enterprise=True)
+        results["github_trending"] = GitHubTrendingResponse(
+            repos_found=len(all_repos),
+            enterprise_devtools=len(articles),
+        )
+    except Exception:
+        results["github_trending"] = None
+
+    # Hacker News (always runs - free)
+    try:
+        from .harvester.scrapers.hackernews import HackerNewsScraper
+        async with HackerNewsScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+        launch_hn = len([a for a in articles if 'launch_hn' in a.tags])
+        show_hn = len([a for a in articles if 'show_hn' in a.tags])
+        funding = len([a for a in articles if a.fund_slug])
+        results["hackernews"] = HackerNewsResponse(
+            launch_hn_posts=launch_hn,
+            show_hn_posts=show_hn,
+            funding_posts=funding,
+            total_articles=len(articles),
+        )
+    except Exception:
+        results["hackernews"] = None
 
     cache.invalidate("deals")
 
