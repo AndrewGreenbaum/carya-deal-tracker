@@ -41,6 +41,7 @@ from .archivist import (
     DealInvestor,
     PortfolioCompany,
 )
+from .archivist.models import Fund
 from .archivist.models import Article
 from .archivist.models import StealthDetection
 from .harvester import (
@@ -352,6 +353,12 @@ async def list_deals(
             if enterprise_category:
                 base_stmt = base_stmt.where(Deal.enterprise_category == enterprise_category)
 
+            # Filter by fund_slug - join through DealInvestor to Fund
+            if fund_slug:
+                base_stmt = base_stmt.join(DealInvestor, Deal.id == DealInvestor.deal_id).join(
+                    Fund, DealInvestor.fund_id == Fund.id
+                ).where(Fund.slug == fund_slug).distinct()
+
             # Get total count for pagination
             count_stmt = select(func.count()).select_from(base_stmt.subquery())
             total_result = await session.execute(count_stmt)
@@ -510,6 +517,12 @@ async def export_deals_csv(
                 stmt = stmt.where(Deal.is_enterprise_ai == is_enterprise_ai)
             if enterprise_category:
                 stmt = stmt.where(Deal.enterprise_category == enterprise_category)
+
+            # Filter by fund_slug - join through DealInvestor to Fund
+            if fund_slug:
+                stmt = stmt.join(DealInvestor, Deal.id == DealInvestor.deal_id).join(
+                    Fund, DealInvestor.fund_id == Fund.id
+                ).where(Fund.slug == fund_slug).distinct()
 
             stmt = stmt.order_by(nullslast(Deal.announced_date.desc()), Deal.created_at.desc())
             result = await session.execute(stmt)
