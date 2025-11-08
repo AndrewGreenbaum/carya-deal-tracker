@@ -1369,15 +1369,21 @@ async def run_all_sources(
     except Exception:
         results["sec_edgar"] = SECEdgarResponse(filings_found=0, filings_with_tracked_funds=0, articles_generated=0)
 
-    # Brave Search (if configured)
+    # Brave Search (if configured) - 2x coverage with participation + stealth
     if settings.brave_search_key:
         try:
             freshness = "pd" if days <= 1 else ("pw" if days <= 7 else "pm")
             async with BraveSearchScraper() as scraper:
-                articles = await scraper.scrape_all(freshness=freshness)
+                articles = await scraper.scrape_all(
+                    freshness=freshness,
+                    include_enterprise=True,
+                    include_participation=True,
+                    include_stealth=True,
+                )
 
+            # 18 lead + 18 participation + 1 enterprise + 1 stealth = 38 queries
             results["brave_search"] = BraveSearchResponse(
-                queries_executed=18,
+                queries_executed=38,
                 results_found=len(articles),
                 articles_generated=len(articles),
             )
