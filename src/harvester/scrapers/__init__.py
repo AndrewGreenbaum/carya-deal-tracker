@@ -22,13 +22,12 @@ from .felicis import FelicisScraper
 from .general_catalyst import GeneralCatalystScraper
 from .first_round import FirstRoundScraper
 
-# News aggregator (multi-source)
-from .news_aggregator import NewsAggregatorScraper, run_news_aggregator
-
-# New data sources
+# Data sources
 from .sec_edgar import SECEdgarScraper, run_sec_edgar_scraper
 from .brave_search import BraveSearchScraper, run_brave_search_scraper
 from .firecrawl_scraper import FirecrawlScraper, scrape_with_firecrawl, run_firecrawl_scraper
+from .google_alerts import GoogleAlertsScraper, run_google_alerts_scraper, get_alert_setup_instructions
+from .twitter_monitor import TwitterMonitor, run_twitter_monitor, get_twitter_setup_instructions
 
 __all__ = [
     # Original 5
@@ -51,10 +50,7 @@ __all__ = [
     "FelicisScraper",
     "GeneralCatalystScraper",
     "FirstRoundScraper",
-    # News aggregator
-    "NewsAggregatorScraper",
-    "run_news_aggregator",
-    # New data sources
+    # Data sources
     "SECEdgarScraper",
     "run_sec_edgar_scraper",
     "BraveSearchScraper",
@@ -62,4 +58,11 @@ __all__ = [
     "FirecrawlScraper",
     "scrape_with_firecrawl",
     "run_firecrawl_scraper",
+    # Social/Alerts
+    "GoogleAlertsScraper",
+    "run_google_alerts_scraper",
+    "get_alert_setup_instructions",
+    "TwitterMonitor",
+    "run_twitter_monitor",
+    "get_twitter_setup_instructions",
 ]

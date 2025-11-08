@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { Home, Ghost, BarChart3, Zap, ChevronDown, ChevronUp } from 'lucide-react';
+import { Home, ChevronDown, ChevronUp } from 'lucide-react';
 import type { FilterState, EnterpriseCategory, Fund, ViewType, CostTracker } from '../types';
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
@@ -75,24 +75,6 @@ export function CommandSidebar({
             label="Dashboard"
             active={currentView === 'dashboard'}
             onClick={() => onViewChange('dashboard')}
-          />
-          <NavItem
-            icon={<Ghost className="w-4 h-4" />}
-            label="Stealth Tracker"
-            active={currentView === 'stealth'}
-            onClick={() => onViewChange('stealth')}
-          />
-          <NavItem
-            icon={<Zap className="w-4 h-4" />}
-            label="Scrapers"
-            active={currentView === 'scrapers'}
-            onClick={() => onViewChange('scrapers')}
-          />
-          <NavItem
-            icon={<BarChart3 className="w-4 h-4" />}
-            label="Analytics"
-            disabled
-            onClick={() => {}}
           />
         </div>
       </nav>

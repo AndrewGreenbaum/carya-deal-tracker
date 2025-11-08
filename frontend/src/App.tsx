@@ -212,9 +212,8 @@ function App() {
         });
 
         // Calculate stats from the results
-        const now = new Date();
-        const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        const newDeals = result.deals.filter((d) => d.date && new Date(d.date) > yesterday).length;
+        // Use total count as "companies scanned" - this is the total in the database
+        const totalCompaniesScanned = result.total;
         const enterpriseDeals = result.deals.filter((d) => d.isEnterpriseAi).length;
         const ratio = result.deals.length > 0
           ? Math.round((enterpriseDeals / result.deals.length) * 100)
@@ -234,7 +233,8 @@ function App() {
 
         setStats((prev) => ({
           ...prev,
-          newDeals24h: newDeals,
+          newDeals24h: totalCompaniesScanned,
+          newDealsTrend: 0, // Clear trend since we're showing total now
           enterpriseAiRatio: ratio,
           verificationRate: verificationRate,
           tokensUsed: tokensFormatted,

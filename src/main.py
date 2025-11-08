@@ -871,88 +871,7 @@ async def run_all_scrapers(
     ]
 
 
-# ----- News Aggregator Endpoints -----
-
-class NewsAggregatorResponse(BaseModel):
-    articles_fetched: int
-    articles_processed: int
-    enterprise_ai_deals: int
-    lead_deals: int
-    deals_saved: int
-    skipped_consumer: int
-    skipped_participant: int
-    errors: int
-
-
-@app.post("/scrapers/news", response_model=NewsAggregatorResponse)
-async def run_news_aggregator(
-    days: int = Query(30, ge=1, le=365, description="Number of days to fetch"),
-    api_key: str = Depends(verify_api_key),
-):
-    """
-    Run news aggregator to fetch funding news from TechCrunch, Fortune, etc.
-
-    Searches for Enterprise AI deals led by tracked funds.
-    Requires NEWSAPI_KEY to be configured.
-    """
-    from datetime import date, timedelta
-    from .harvester.backfill import backfill_deals
-
-    from_date = date.today() - timedelta(days=days)
-    to_date = date.today()
-
-    try:
-        stats = await backfill_deals(
-            from_date=from_date,
-            to_date=to_date,
-            dry_run=False,
-            verbose=False,
-        )
-
-        # Invalidate deals cache
-        cache.invalidate("deals")
-
-        return NewsAggregatorResponse(**stats)
-
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/backfill", response_model=NewsAggregatorResponse)
-async def run_backfill(
-    months: int = Query(12, ge=1, le=12, description="Number of months to backfill"),
-    dry_run: bool = Query(False, description="Preview without saving"),
-    api_key: str = Depends(verify_api_key),
-):
-    """
-    Run historical backfill for Enterprise AI deals.
-
-    Fetches up to 12 months of funding news from NewsAPI.
-    NOTE: NewsAPI Developer plan required for >1 month history.
-    """
-    from .harvester.backfill import backfill_monthly_batches
-
-    try:
-        stats = await backfill_monthly_batches(
-            months=months,
-            dry_run=dry_run,
-            verbose=False,
-        )
-
-        if not dry_run:
-            cache.invalidate("deals")
-
-        return NewsAggregatorResponse(**stats)
-
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ----- New Data Source Endpoints -----
+# ----- Data Source Endpoints -----
 
 class SECEdgarResponse(BaseModel):
     filings_found: int
@@ -1082,10 +1001,118 @@ async def run_firecrawl_scraper_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ----- Google Alerts Endpoints -----
+
+class GoogleAlertsResponse(BaseModel):
+    feeds_configured: int
+    articles_found: int
+    setup_instructions: Optional[str] = None
+
+
+@app.post("/scrapers/google-alerts", response_model=GoogleAlertsResponse)
+async def run_google_alerts_scraper(
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run Google Alerts RSS scraper.
+
+    Fetches articles from configured Google Alerts RSS feeds.
+    Set GOOGLE_ALERTS_FEEDS environment variable with comma-separated feed URLs.
+    """
+    from .harvester.scrapers.google_alerts import GoogleAlertsScraper, get_alert_setup_instructions
+
+    feed_urls = []
+    if settings.google_alerts_feeds:
+        feed_urls = [f.strip() for f in settings.google_alerts_feeds.split(',') if f.strip()]
+
+    if not feed_urls:
+        return GoogleAlertsResponse(
+            feeds_configured=0,
+            articles_found=0,
+            setup_instructions=get_alert_setup_instructions(),
+        )
+
+    try:
+        async with GoogleAlertsScraper(feed_urls) as scraper:
+            articles = await scraper.scrape_all()
+
+        return GoogleAlertsResponse(
+            feeds_configured=len(feed_urls),
+            articles_found=len(articles),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/scrapers/google-alerts/setup")
+async def get_google_alerts_setup():
+    """Get setup instructions for Google Alerts."""
+    from .harvester.scrapers.google_alerts import get_alert_setup_instructions
+    return {"instructions": get_alert_setup_instructions()}
+
+
+# ----- Twitter Monitor Endpoints -----
+
+class TwitterMonitorResponse(BaseModel):
+    tweets_found: int
+    api_calls_used: int
+    configured: bool
+    setup_instructions: Optional[str] = None
+
+
+@app.post("/scrapers/twitter", response_model=TwitterMonitorResponse)
+async def run_twitter_monitor(
+    hours_back: int = Query(168, ge=1, le=168, description="Hours to look back (max 7 days)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run Twitter/X monitor for VC funding announcements.
+
+    Monitors official VC accounts and searches for funding news.
+    Requires TWITTER_BEARER_TOKEN environment variable.
+
+    Free tier limit: ~100 API calls per run (conservative to stay under 1,500/month)
+    """
+    from .harvester.scrapers.twitter_monitor import TwitterMonitor, get_twitter_setup_instructions
+
+    if not settings.twitter_bearer_token:
+        return TwitterMonitorResponse(
+            tweets_found=0,
+            api_calls_used=0,
+            configured=False,
+            setup_instructions=get_twitter_setup_instructions(),
+        )
+
+    try:
+        async with TwitterMonitor() as monitor:
+            articles = await monitor.scrape_all(hours_back=hours_back)
+            api_calls = monitor._request_count
+
+        return TwitterMonitorResponse(
+            tweets_found=len(articles),
+            api_calls_used=api_calls,
+            configured=True,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/scrapers/twitter/setup")
+async def get_twitter_setup():
+    """Get setup instructions for Twitter API."""
+    from .harvester.scrapers.twitter_monitor import get_twitter_setup_instructions
+    return {"instructions": get_twitter_setup_instructions()}
+
+
+# ----- All Sources Combined -----
+
 class AllSourcesResponse(BaseModel):
     sec_edgar: SECEdgarResponse
     brave_search: Optional[BraveSearchResponse] = None
-    newsapi: NewsAggregatorResponse
+    google_alerts: Optional[GoogleAlertsResponse] = None
+    twitter: Optional[TwitterMonitorResponse] = None
 
 
 @app.post("/scrapers/all-sources", response_model=AllSourcesResponse)
@@ -1099,14 +1126,15 @@ async def run_all_sources(
     Fetches from:
     1. SEC EDGAR (Form D filings) - always runs
     2. Brave Search (if configured)
-    3. NewsAPI (if configured)
+    3. Google Alerts (if configured)
+    4. Twitter (if configured)
 
     This is the recommended endpoint for comprehensive deal discovery.
     """
-    from datetime import date, timedelta
-    from .harvester.backfill import backfill_deals
     from .harvester.scrapers.sec_edgar import SECEdgarScraper
     from .harvester.scrapers.brave_search import BraveSearchScraper
+    from .harvester.scrapers.google_alerts import GoogleAlertsScraper
+    from .harvester.scrapers.twitter_monitor import TwitterMonitor
 
     results = {}
 
@@ -1121,7 +1149,7 @@ async def run_all_sources(
             filings_with_tracked_funds=tracked_count,
             articles_generated=len(filings),
         )
-    except Exception as e:
+    except Exception:
         results["sec_edgar"] = SECEdgarResponse(filings_found=0, filings_with_tracked_funds=0, articles_generated=0)
 
     # Brave Search (if configured)
@@ -1141,30 +1169,38 @@ async def run_all_sources(
     else:
         results["brave_search"] = None
 
-    # NewsAPI
-    try:
-        from_date = date.today() - timedelta(days=days)
-        to_date = date.today()
+    # Google Alerts (if configured)
+    if settings.google_alerts_feeds:
+        try:
+            feed_urls = [f.strip() for f in settings.google_alerts_feeds.split(',') if f.strip()]
+            async with GoogleAlertsScraper(feed_urls) as scraper:
+                articles = await scraper.scrape_all()
 
-        stats = await backfill_deals(
-            from_date=from_date,
-            to_date=to_date,
-            dry_run=False,
-            verbose=False,
-        )
+            results["google_alerts"] = GoogleAlertsResponse(
+                feeds_configured=len(feed_urls),
+                articles_found=len(articles),
+            )
+        except Exception:
+            results["google_alerts"] = None
+    else:
+        results["google_alerts"] = None
 
-        results["newsapi"] = NewsAggregatorResponse(**stats)
-    except Exception:
-        results["newsapi"] = NewsAggregatorResponse(
-            articles_fetched=0,
-            articles_processed=0,
-            enterprise_ai_deals=0,
-            lead_deals=0,
-            deals_saved=0,
-            skipped_consumer=0,
-            skipped_participant=0,
-            errors=0,
-        )
+    # Twitter (if configured)
+    if settings.twitter_bearer_token:
+        try:
+            async with TwitterMonitor() as monitor:
+                articles = await monitor.scrape_all(hours_back=days * 24)
+                api_calls = monitor._request_count
+
+            results["twitter"] = TwitterMonitorResponse(
+                tweets_found=len(articles),
+                api_calls_used=api_calls,
+                configured=True,
+            )
+        except Exception:
+            results["twitter"] = None
+    else:
+        results["twitter"] = None
 
     cache.invalidate("deals")
 

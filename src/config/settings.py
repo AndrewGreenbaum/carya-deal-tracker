@@ -14,9 +14,10 @@ class Settings(BaseSettings):
     # API Keys
     anthropic_api_key: str = ""
     openai_api_key: str = ""
-    newsapi_key: str = ""  # NewsAPI.org for TechCrunch, Fortune, BusinessWire
     brave_search_key: str = ""  # Brave Search API for news discovery
     firecrawl_api_key: str = ""  # Firecrawl for JS-heavy PR sites
+    twitter_bearer_token: str = ""  # Twitter API v2 Bearer Token
+    google_alerts_feeds: str = ""  # Comma-separated Google Alerts RSS feed URLs
 
     # Frontend URL for CORS (production)
     frontend_url: str = ""  # e.g., https://your-frontend.railway.app
@@ -36,7 +37,7 @@ class Settings(BaseSettings):
         return v
 
     # LLM Settings
-    llm_model: str = "claude-3-5-haiku-20241022"
+    llm_model: str = "claude-3-haiku-20240307"
     llm_temperature: float = 0.0
     llm_max_tokens: int = 4096
 

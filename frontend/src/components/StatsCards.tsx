@@ -18,13 +18,12 @@ interface StatsCardsProps {
 export function StatsCards({ stats }: StatsCardsProps) {
   return (
     <div className="grid grid-cols-4 gap-4 p-6 border-b border-slate-800 bg-[#0a0a0c]">
-      {/* New Deals (24h) */}
+      {/* Total Deals Scanned */}
       <StatCard
-        title="New Deals (24h)"
-        value={stats.newDeals24h.toString().padStart(2, '0')}
+        title="Total Deals"
+        value={stats.newDeals24h.toString()}
         icon={<Zap className="w-4 h-4 text-yellow-500" />}
-        trend={stats.newDealsTrend}
-        trendLabel={`${stats.newDealsTrend >= 0 ? '+' : ''}${stats.newDealsTrend} from yesterday`}
+        subtitle="Companies scanned"
       />
 
       {/* Enterprise AI Ratio */}

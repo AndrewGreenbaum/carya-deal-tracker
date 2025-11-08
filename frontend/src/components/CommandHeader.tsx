@@ -51,8 +51,7 @@ export function CommandHeader({
       <div className="flex items-center gap-4">
         <div className="w-3 h-3 bg-emerald-500 rounded-full pulse-glow" />
         <h1 className="text-xl font-bold tracking-tighter text-white">
-          BUD_TRACKER{' '}
-          <span className="text-emerald-500 text-xs align-top">v1.2</span>
+          bud tracker _ DIRTY FUCKING THEO
         </h1>
       </div>
 
