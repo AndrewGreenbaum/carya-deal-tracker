@@ -28,18 +28,18 @@ ALGOLIA_APP_ID = "45BWZJ1SGC"
 ALGOLIA_API_KEY = "<SET_IN_ENV>"
 ALGOLIA_INDEX = "YCCompany_production"
 
-# YC batch identifiers (format: S/W + Year, e.g., S24, W24)
+# YC batch identifiers (format: "Winter 2024", "Summer 2024", etc.)
 def get_current_batches() -> List[str]:
-    """Get recent YC batch identifiers."""
+    """Get recent YC batch identifiers in Algolia format."""
     now = datetime.utcnow()
-    year = now.year % 100  # 2024 -> 24
+    year = now.year
     batches = []
 
-    # Current and previous 2 batches (Winter and Summer)
+    # Current and previous batches (Winter, Summer, Fall)
     for y in range(year + 1, year - 2, -1):
-        batches.extend([f"W{y}", f"S{y}"])
+        batches.extend([f"Winter {y}", f"Fall {y}", f"Summer {y}"])
 
-    return batches[:6]  # Last 6 batches
+    return batches[:8]  # Last 8 batches
 
 
 YC_URLS = {
