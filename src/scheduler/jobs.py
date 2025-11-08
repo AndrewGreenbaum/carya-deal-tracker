@@ -1,7 +1,7 @@
 """
 APScheduler job definitions for automated scraping.
 
-Runs daily scraping of all 18 VC funds with:
+Runs hourly scraping of all 18 VC funds with:
 - Staggered execution to avoid rate limits
 - Error isolation per fund
 - Webhook notifications on completion
@@ -26,15 +26,15 @@ logger = logging.getLogger(__name__)
 scheduler: Optional[AsyncIOScheduler] = None
 
 
-async def daily_scrape_job():
+async def hourly_scrape_job():
     """
-    Main daily scraping job.
+    Main hourly scraping job.
 
     Scrapes all 18 implemented funds with parallel execution
-    and sends summary notification. Runs once per day at 6 AM UTC.
+    and sends summary notification. Runs every hour at :00.
     """
     job_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    logger.info(f"[{job_id}] Starting daily scrape job")
+    logger.info(f"[{job_id}] Starting hourly scrape job")
 
     start_time = datetime.utcnow()
 
@@ -86,7 +86,7 @@ def setup_scheduler() -> AsyncIOScheduler:
     Initialize and start the APScheduler.
 
     Configures:
-    - Daily scrape job (at 6:00 AM UTC)
+    - Hourly scrape job (every hour at :00)
     - Job store in memory (stateless)
     - Timezone: UTC
     """
@@ -101,17 +101,17 @@ def setup_scheduler() -> AsyncIOScheduler:
         }
     )
 
-    # Add daily scrape job - runs at 6:00 AM UTC every day
+    # Add hourly scrape job - runs every hour at :00
     scheduler.add_job(
-        daily_scrape_job,
-        trigger=CronTrigger(hour=6, minute=0),  # Daily at 6:00 AM UTC
-        id="daily_scrape",
-        name="Daily VC Fund Scrape",
+        hourly_scrape_job,
+        trigger=CronTrigger(minute=0),  # Every hour at :00
+        id="hourly_scrape",
+        name="Hourly VC Fund Scrape",
         replace_existing=True,
     )
 
     scheduler.start()
-    logger.info("Scheduler started with daily scrape job (6:00 AM UTC)")
+    logger.info("Scheduler started with hourly scrape job (every hour at :00)")
 
     # List scheduled jobs
     for job in scheduler.get_jobs():
