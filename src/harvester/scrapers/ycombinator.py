@@ -5,15 +5,15 @@ Y Combinator runs 2 batches per year (Winter & Summer), each with ~200 companies
 Demo Day = 200+ companies launching twice per year, often raising funding soon after.
 
 Data Sources:
-1. YC Company Directory: https://www.ycombinator.com/companies
-2. YC Blog: https://www.ycombinator.com/blog
+1. YC Company Directory via Algolia API
+2. YC Blog RSS: https://www.ycombinator.com/blog/feed
 3. YC Top Companies: https://www.ycombinator.com/topcompanies
-4. Hacker News "Launch HN" posts
 """
 
 import asyncio
 import re
 import httpx
+import feedparser
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta
 from typing import List, Optional, Dict, Any
@@ -23,6 +23,11 @@ from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
 
 
+# YC Algolia API configuration (public, extracted from their website)
+ALGOLIA_APP_ID = "45BWZJ1SGC"
+ALGOLIA_API_KEY = "<SET_IN_ENV>"
+ALGOLIA_INDEX = "YCCompany_production"
+
 # YC batch identifiers (format: S/W + Year, e.g., S24, W24)
 def get_current_batches() -> List[str]:
     """Get recent YC batch identifiers."""
@@ -30,16 +35,15 @@ def get_current_batches() -> List[str]:
     year = now.year % 100  # 2024 -> 24
     batches = []
 
-    # Current and previous 2 batches
-    for y in range(year, year - 2, -1):
-        batches.extend([f"S{y}", f"W{y}"])
+    # Current and previous 2 batches (Winter and Summer)
+    for y in range(year + 1, year - 2, -1):
+        batches.extend([f"W{y}", f"S{y}"])
 
-    return batches[:4]  # Last 4 batches
+    return batches[:6]  # Last 6 batches
 
 
 YC_URLS = {
-    "companies": "https://www.ycombinator.com/companies",
-    "blog": "https://www.ycombinator.com/blog",
+    "blog_rss": "https://www.ycombinator.com/blog/rss/",
     "top_companies": "https://www.ycombinator.com/topcompanies",
 }
 
@@ -76,10 +80,10 @@ class YCombinatorScraper:
     """
     Scraper for Y Combinator companies and news.
 
+    Uses Algolia API for company data (same as YC website).
     Tracks:
     - Demo Day batches (200+ companies twice/year)
-    - YC blog for announcements
-    - Top companies list
+    - YC blog RSS for announcements
     """
 
     def __init__(self):
@@ -87,7 +91,7 @@ class YCombinatorScraper:
             timeout=30,
             headers={
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept": "application/json",
             }
         )
         self.current_batches = get_current_batches()
@@ -98,129 +102,98 @@ class YCombinatorScraper:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.client.aclose()
 
-    async def fetch_companies_page(self, batch: Optional[str] = None) -> str:
-        """Fetch YC companies page."""
+    async def fetch_companies_algolia(self, batch: str, hits_per_page: int = 100) -> List[YCCompany]:
+        """Fetch companies from Algolia API for a specific batch."""
         try:
-            url = YC_URLS["companies"]
-            if batch:
-                url = f"{url}?batch={batch}"
+            url = f"https://{ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{ALGOLIA_INDEX}/query"
 
-            response = await self.client.get(url)
+            headers = {
+                "X-Algolia-Application-Id": ALGOLIA_APP_ID,
+                "X-Algolia-API-Key": ALGOLIA_API_KEY,
+                "Content-Type": "application/json",
+            }
+
+            # Search for companies in specific batch
+            payload = {
+                "query": "",
+                "hitsPerPage": hits_per_page,
+                "facetFilters": [f"batch:{batch}"],
+            }
+
+            response = await self.client.post(url, json=payload, headers=headers)
             response.raise_for_status()
-            return response.text
+
+            data = response.json()
+            companies = []
+
+            for hit in data.get("hits", []):
+                companies.append(YCCompany(
+                    name=hit.get("name", ""),
+                    url=f"https://www.ycombinator.com/companies/{hit.get('slug', '')}",
+                    description=hit.get("one_liner", ""),
+                    batch=hit.get("batch", batch),
+                    industry=", ".join(hit.get("industries", [])) if hit.get("industries") else "",
+                    location=hit.get("all_locations", ""),
+                    website=hit.get("website", ""),
+                    status=hit.get("status", ""),
+                ))
+
+            return companies
+
         except Exception as e:
-            print(f"Error fetching YC companies: {e}")
-            return ""
-
-    async def parse_companies(self, html: str) -> List[YCCompany]:
-        """Parse companies from YC directory page."""
-        companies = []
-        soup = BeautifulSoup(html, 'lxml')
-
-        # YC uses React/Next.js with JSON data in script tags
-        script_tags = soup.find_all('script', type='application/json')
-        for script in script_tags:
-            try:
-                import json
-                data = json.loads(script.string)
-                # Navigate through the nested structure
-                if isinstance(data, dict) and 'props' in data:
-                    page_props = data.get('props', {}).get('pageProps', {})
-                    company_list = page_props.get('companies', [])
-
-                    for c in company_list:
-                        companies.append(YCCompany(
-                            name=c.get('name', ''),
-                            url=f"https://www.ycombinator.com/companies/{c.get('slug', '')}",
-                            description=c.get('one_liner', ''),
-                            batch=c.get('batch', ''),
-                            industry=c.get('industry', ''),
-                            location=c.get('location', ''),
-                            website=c.get('website', ''),
-                            status=c.get('status', ''),
-                        ))
-            except (json.JSONDecodeError, KeyError, TypeError):
-                continue
-
-        # Fallback: parse HTML directly if JSON not found
-        if not companies:
-            for company_el in soup.select('[class*="company-"]'):
-                name_el = company_el.select_one('h2, .company-name')
-                desc_el = company_el.select_one('p, .company-description')
-                link_el = company_el.select_one('a[href*="/companies/"]')
-
-                if name_el and link_el:
-                    companies.append(YCCompany(
-                        name=name_el.get_text(strip=True),
-                        url=link_el.get('href', ''),
-                        description=desc_el.get_text(strip=True) if desc_el else '',
-                        batch='',
-                        industry='',
-                        location=None,
-                        website=None,
-                        status=None,
-                    ))
-
-        return companies
+            print(f"Error fetching YC companies from Algolia for batch {batch}: {e}")
+            return []
 
     async def fetch_recent_batch_companies(self) -> List[YCCompany]:
-        """Fetch companies from recent YC batches."""
+        """Fetch companies from recent YC batches using Algolia."""
         all_companies = []
         seen_names = set()
 
         for batch in self.current_batches:
-            html = await self.fetch_companies_page(batch=batch)
-            companies = await self.parse_companies(html)
+            companies = await self.fetch_companies_algolia(batch)
 
             for company in companies:
-                if company.name not in seen_names:
+                if company.name and company.name not in seen_names:
                     seen_names.add(company.name)
                     all_companies.append(company)
 
-            await asyncio.sleep(1)  # Rate limit
+            print(f"YC batch {batch}: {len(companies)} companies")
+            await asyncio.sleep(0.5)  # Rate limit
 
         return all_companies
 
     async def fetch_blog_posts(self) -> List[YCBlogPost]:
-        """Fetch recent YC blog posts."""
+        """Fetch recent YC blog posts from RSS feed."""
         posts = []
 
         try:
-            response = await self.client.get(YC_URLS["blog"])
+            response = await self.client.get(YC_URLS["blog_rss"])
             response.raise_for_status()
 
-            soup = BeautifulSoup(response.text, 'lxml')
+            feed = feedparser.parse(response.text)
 
-            for article in soup.select('article, .post, .blog-post'):
-                title_el = article.select_one('h1, h2, h3, .title')
-                link_el = article.select_one('a')
-                desc_el = article.select_one('p, .excerpt, .summary')
-                date_el = article.select_one('time, .date')
+            for entry in feed.entries[:20]:  # Last 20 posts
+                # Parse publication date
+                pub_date = None
+                if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                    pub_date = datetime(*entry.published_parsed[:6])
 
-                if title_el and link_el:
-                    pub_date = None
-                    if date_el:
-                        date_str = date_el.get('datetime') or date_el.get_text(strip=True)
-                        try:
-                            from dateutil import parser as date_parser
-                            pub_date = date_parser.parse(date_str)
-                        except (ValueError, TypeError):
-                            pass
+                # Get description
+                description = entry.get('summary', '')
+                if description:
+                    soup = BeautifulSoup(description, 'lxml')
+                    description = soup.get_text(strip=True)[:500]
 
-                    url = link_el.get('href', '')
-                    if not url.startswith('http'):
-                        url = f"https://www.ycombinator.com{url}"
-
-                    posts.append(YCBlogPost(
-                        title=title_el.get_text(strip=True),
-                        url=url,
-                        description=desc_el.get_text(strip=True) if desc_el else '',
-                        published=pub_date,
-                        author=None,
-                    ))
+                posts.append(YCBlogPost(
+                    title=entry.get('title', ''),
+                    url=entry.get('link', ''),
+                    description=description,
+                    published=pub_date,
+                    author=entry.get('author', None),
+                ))
 
         except Exception as e:
-            print(f"Error fetching YC blog: {e}")
+            print(f"Error fetching YC blog RSS: {e}")
 
         return posts
 
