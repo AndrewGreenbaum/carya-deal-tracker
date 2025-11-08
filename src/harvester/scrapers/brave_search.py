@@ -25,40 +25,82 @@ from ...config.funds import FUND_REGISTRY
 BRAVE_NEWS_API = "https://api.search.brave.com/res/v1/news/search"
 BRAVE_WEB_API = "https://api.search.brave.com/res/v1/web/search"
 
-# Fund name variations for search queries
+# Fund name variations for search queries (primary name + alternates)
 FUND_SEARCH_NAMES = {
-    "founders_fund": "Founders Fund",
-    "benchmark": "Benchmark Capital",
-    "sequoia": "Sequoia Capital",
-    "khosla": "Khosla Ventures",
-    "index": "Index Ventures",
-    "a16z": "Andreessen Horowitz",
-    "insight": "Insight Partners",
-    "bessemer": "Bessemer Venture Partners",
-    "redpoint": "Redpoint Ventures",
-    "greylock": "Greylock Partners",
-    "gv": "Google Ventures",
-    "menlo": "Menlo Ventures",
-    "usv": "Union Square Ventures",
-    "thrive": "Thrive Capital",
-    "accel": "Accel",
-    "felicis": "Felicis Ventures",
-    "general_catalyst": "General Catalyst",
-    "first_round": "First Round Capital",
+    "founders_fund": ["Founders Fund", "Peter Thiel"],
+    "benchmark": ["Benchmark", "Benchmark Capital"],
+    "sequoia": ["Sequoia Capital", "Sequoia"],
+    "khosla": ["Khosla Ventures", "Vinod Khosla"],
+    "index": ["Index Ventures"],
+    "a16z": ["Andreessen Horowitz", "a16z"],
+    "insight": ["Insight Partners"],
+    "bessemer": ["Bessemer Venture Partners", "Bessemer", "BVP"],
+    "redpoint": ["Redpoint Ventures", "Redpoint"],
+    "greylock": ["Greylock Partners", "Greylock"],
+    "gv": ["Google Ventures", "GV"],
+    "menlo": ["Menlo Ventures"],
+    "usv": ["Union Square Ventures", "USV"],
+    "thrive": ["Thrive Capital"],
+    "accel": ["Accel Partners", "Accel"],
+    "felicis": ["Felicis Ventures", "Felicis"],
+    "general_catalyst": ["General Catalyst", "GC"],
+    "first_round": ["First Round Capital", "First Round"],
 }
 
-# Enterprise AI keywords
+# Exclusion terms to filter noise
+EXCLUSION_TERMS = {
+    "gv": ["-NYSE", "-stock", "-ticker", "-dividend"],  # Exclude GV stock ticker
+    "thrive": ["-\"Thrive Global\"", "-\"Thrive IT\"", "-wellness"],  # Wrong Thrive
+    "sequoia": ["-\"Sequoia National\"", "-HongShan", "-\"Peak XV\""],  # Wrong Sequoia
+    "benchmark": ["-benchmark.com", "-benchmarking"],  # Generic benchmark word
+    "accel": ["-accelerate", "-acceleration"],  # Generic accel word
+}
+
+# Enterprise AI keywords - optimized for high-signal results
 ENTERPRISE_KEYWORDS = [
-    "enterprise AI",
-    "B2B AI",
+    # Infrastructure & DevTools
     "AI infrastructure",
     "LLMOps",
-    "AI security",
+    "MLOps",
+    "vector database",
+    "AI developer tools",
+    # Security
+    "AI security startup",
     "cybersecurity AI",
-    "AI SaaS",
-    "AI platform",
+    # Vertical SaaS
+    "AI SaaS startup",
+    "enterprise AI startup",
+    "B2B AI startup",
+    # Agentic
+    "AI agents startup",
     "agentic AI",
-    "AI workflow",
+    "AI automation startup",
+    "AI copilot startup",
+    # Data Intelligence
+    "AI analytics startup",
+    "enterprise search AI",
+]
+
+# Lead investor phrases - all variations used in funding news
+LEAD_PHRASES = [
+    "led by",
+    "led the round",
+    "led the investment",
+    "leading the round",
+    "lead investor",
+    "spearheaded by",
+]
+
+# Funding keywords
+FUNDING_KEYWORDS = [
+    "raises",
+    "raised",
+    "funding",
+    "Series A",
+    "Series B",
+    "Series C",
+    "seed round",
+    "million",
 ]
 
 
@@ -98,18 +140,39 @@ class BraveSearchScraper:
         await self.client.aclose()
 
     def _build_fund_query(self, fund_slug: str) -> str:
-        """Build search query for a specific fund's lead deals."""
-        fund_name = FUND_SEARCH_NAMES.get(fund_slug, "")
-        if not fund_name:
+        """Build optimized search query for a specific fund's lead deals."""
+        fund_names = FUND_SEARCH_NAMES.get(fund_slug, [])
+        if not fund_names:
             return ""
 
-        # Query: Fund name + lead language + funding keywords
-        return f'"{fund_name}" AND ("led by" OR "led the" OR "leading the round") AND ("funding" OR "raises" OR "Series")'
+        # Build fund name alternatives (OR)
+        name_query = " OR ".join([f'"{name}"' for name in fund_names])
+
+        # Build lead phrases (OR)
+        lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES[:3]])
+
+        # Build funding keywords (OR)
+        funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:4]])
+
+        # Get exclusion terms for this fund
+        exclusions = EXCLUSION_TERMS.get(fund_slug, [])
+        exclusion_query = " ".join(exclusions) if exclusions else ""
+
+        # Optimized query: (fund names) AND (lead phrases) AND (funding keywords) - exclusions
+        query = f'({name_query}) AND ({lead_query}) AND ({funding_query})'
+        if exclusion_query:
+            query = f'{query} {exclusion_query}'
+
+        return query
 
     def _build_enterprise_query(self) -> str:
-        """Build broad Enterprise AI funding query."""
-        keywords = " OR ".join([f'"{kw}"' for kw in ENTERPRISE_KEYWORDS[:5]])
-        return f'({keywords}) AND ("funding" OR "raises" OR "Series") AND ("led by")'
+        """Build optimized Enterprise AI funding query."""
+        # Use top 6 enterprise keywords for broader coverage
+        keywords = " OR ".join([f'"{kw}"' for kw in ENTERPRISE_KEYWORDS[:6]])
+        lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES[:3]])
+        funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:4]])
+
+        return f'({keywords}) AND ({funding_query}) AND ({lead_query})'
 
     async def search_news(
         self,
