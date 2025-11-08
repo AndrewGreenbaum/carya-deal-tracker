@@ -1,7 +1,7 @@
 """
 APScheduler job definitions for automated scraping.
 
-Runs hourly scraping of all 18 VC funds with:
+Runs scraping every 4 hours of all 18 VC funds with:
 - Staggered execution to avoid rate limits
 - Error isolation per fund
 - Webhook notifications on completion
@@ -26,15 +26,15 @@ logger = logging.getLogger(__name__)
 scheduler: Optional[AsyncIOScheduler] = None
 
 
-async def hourly_scrape_job():
+async def scheduled_scrape_job():
     """
-    Main hourly scraping job.
+    Main scheduled scraping job.
 
     Scrapes all 18 implemented funds with parallel execution
-    and sends summary notification. Runs every hour at :00.
+    and sends summary notification. Runs every 4 hours.
     """
     job_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    logger.info(f"[{job_id}] Starting hourly scrape job")
+    logger.info(f"[{job_id}] Starting scheduled scrape job")
 
     start_time = datetime.utcnow()
 
@@ -86,7 +86,7 @@ def setup_scheduler() -> AsyncIOScheduler:
     Initialize and start the APScheduler.
 
     Configures:
-    - Hourly scrape job (every hour at :00)
+    - Scrape job every 4 hours (at 0:00, 4:00, 8:00, 12:00, 16:00, 20:00 UTC)
     - Job store in memory (stateless)
     - Timezone: UTC
     """
@@ -101,17 +101,17 @@ def setup_scheduler() -> AsyncIOScheduler:
         }
     )
 
-    # Add hourly scrape job - runs every hour at :00
+    # Add scrape job - runs every 4 hours at :00
     scheduler.add_job(
-        hourly_scrape_job,
-        trigger=CronTrigger(minute=0),  # Every hour at :00
-        id="hourly_scrape",
-        name="Hourly VC Fund Scrape",
+        scheduled_scrape_job,
+        trigger=CronTrigger(hour='*/4', minute=0),  # Every 4 hours
+        id="scheduled_scrape",
+        name="VC Fund Scrape (4-hourly)",
         replace_existing=True,
     )
 
     scheduler.start()
-    logger.info("Scheduler started with hourly scrape job (every hour at :00)")
+    logger.info("Scheduler started with 4-hourly scrape job")
 
     # List scheduled jobs
     for job in scheduler.get_jobs():
