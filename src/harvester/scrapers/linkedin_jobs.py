@@ -1,16 +1,16 @@
 """
-LinkedIn Jobs Scraper - Stealth Startup Detection.
+Stealth Startup Detector - Catch Deals Before They're Announced.
 
-Stealth startups HIRE before they ANNOUNCE. This scraper monitors
-LinkedIn job postings for signals of stealth/newly-funded companies.
+Monitors the web for signals of stealth/newly-funded companies
+that haven't made public announcements yet.
 
 Key signals:
-- Jobs mentioning "stealth startup" or "stealth mode"
-- Jobs at companies "backed by [VC name]"
-- Recent company founding + aggressive hiring
-- Job descriptions mentioning recent funding
+- "Emerges from stealth" / "exits stealth" announcements
+- Companies "backed by [VC name]" in stealth mode
+- Stealth startups hiring (founding teams)
+- Early funding news before official PR
 
-Uses Brave Search API to find LinkedIn job posts (avoids LinkedIn blocks).
+Uses Brave Search API to find stealth startup signals.
 """
 
 import asyncio
@@ -27,30 +27,33 @@ from ...config.settings import settings
 # Brave Search API (reuse existing key)
 BRAVE_WEB_API = "https://api.search.brave.com/res/v1/web/search"
 
-# Stealth job search queries
+# Stealth job search queries - broader search without site: restriction
+# Brave Search doesn't index LinkedIn Jobs well, so we search for stealth company news instead
 STEALTH_JOB_QUERIES = [
-    # Direct stealth mentions
-    'site:linkedin.com/jobs "stealth startup"',
-    'site:linkedin.com/jobs "stealth mode" startup',
-    'site:linkedin.com/jobs "well-funded startup" AI',
-    'site:linkedin.com/jobs "recently funded" startup',
+    # Stealth company hiring news (catches PR about hiring)
+    '"stealth startup" hiring',
+    '"stealth mode" startup hiring engineers',
+    '"stealth startup" founding team AI',
+    '"well-funded startup" hiring "AI"',
 
-    # VC-backed company jobs (most valuable)
-    'site:linkedin.com/jobs "backed by Sequoia"',
-    'site:linkedin.com/jobs "backed by a16z"',
-    'site:linkedin.com/jobs "backed by Andreessen"',
-    'site:linkedin.com/jobs "backed by Founders Fund"',
-    'site:linkedin.com/jobs "backed by Benchmark"',
-    'site:linkedin.com/jobs "backed by Greylock"',
-    'site:linkedin.com/jobs "backed by Thrive"',
-    'site:linkedin.com/jobs "backed by Accel"',
-    'site:linkedin.com/jobs "backed by Index"',
-    'site:linkedin.com/jobs "backed by Bessemer"',
+    # VC-backed stealth (most valuable signals)
+    '"backed by Sequoia" stealth',
+    '"backed by a16z" stealth',
+    '"backed by Andreessen Horowitz" stealth',
+    '"backed by Founders Fund" stealth',
+    '"backed by Benchmark" stealth',
+    '"backed by Greylock" stealth',
+
+    # Stealth funding announcements
+    '"emerges from stealth" funding',
+    '"exits stealth" raises',
+    '"comes out of stealth" million',
+    '"launches from stealth" series',
 
     # Enterprise AI stealth
-    'site:linkedin.com/jobs "stealth" "enterprise AI"',
-    'site:linkedin.com/jobs "stealth" "B2B SaaS"',
-    'site:linkedin.com/jobs "stealth" "AI infrastructure"',
+    '"stealth" "enterprise AI" startup',
+    '"stealth" "B2B" AI company',
+    '"stealth" "AI infrastructure" startup',
 ]
 
 # Fund slug mapping for detection
@@ -145,18 +148,19 @@ class LinkedInJobsScraper:
             return []
 
     def parse_job_result(self, result: Dict[str, Any]) -> Optional[LinkedInJob]:
-        """Parse Brave search result into LinkedInJob."""
+        """Parse Brave search result into LinkedInJob (or stealth signal)."""
         try:
             url = result.get("url", "")
             title = result.get("title", "")
             description = result.get("description", "")
 
-            # Only process LinkedIn job URLs
-            if "linkedin.com/jobs" not in url.lower():
+            # Skip if no content
+            if not title or not url:
                 return None
 
-            # Extract company name from title (usually "Job Title at Company")
+            # Extract company name from title or description
             company_name = ""
+            # Try common patterns
             if " at " in title:
                 parts = title.split(" at ")
                 if len(parts) >= 2:
@@ -165,6 +169,8 @@ class LinkedInJobsScraper:
                 parts = title.split(" - ")
                 if len(parts) >= 2:
                     company_name = parts[1].split(" | ")[0].strip()
+            elif ":" in title:
+                company_name = title.split(":")[0].strip()
 
             # Check if stealth
             text_lower = f"{title} {description}".lower()
