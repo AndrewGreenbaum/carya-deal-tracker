@@ -1365,6 +1365,84 @@ async def run_linkedin_jobs_scraper_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ----- Tech Funding News -----
+
+class TechFundingNewsResponse(BaseModel):
+    feeds_scraped: int
+    articles_found: int
+    funding_articles: int
+    fund_matches: int
+
+
+@app.post("/scrapers/tech-funding-news", response_model=TechFundingNewsResponse)
+async def run_tech_funding_news_endpoint(
+    hours_back: int = Query(168, ge=1, le=720, description="Hours to look back (default 7 days)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run Tech Funding News scraper.
+
+    Premium source for startup funding news. Covers SaaS, AI, FinTech.
+    Multiple category feeds for comprehensive coverage.
+    FREE - uses public RSS feeds.
+    """
+    from .harvester.scrapers.tech_funding_news import TechFundingNewsScraper
+
+    try:
+        async with TechFundingNewsScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=hours_back)
+
+        fund_matches = len([a for a in articles if a.fund_slug])
+
+        return TechFundingNewsResponse(
+            feeds_scraped=5,  # main + 4 categories
+            articles_found=len(articles),
+            funding_articles=len(articles),  # Already filtered for funding
+            fund_matches=fund_matches,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----- Ventureburn -----
+
+class VentureburnResponse(BaseModel):
+    articles_found: int
+    funding_articles: int
+    fund_matches: int
+
+
+@app.post("/scrapers/ventureburn", response_model=VentureburnResponse)
+async def run_ventureburn_endpoint(
+    hours_back: int = Query(168, ge=1, le=720, description="Hours to look back (default 7 days)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run Ventureburn scraper.
+
+    Covers emerging markets startup news (Africa, global).
+    Filters out crypto noise, focuses on VC funding.
+    FREE - uses public RSS feed.
+    """
+    from .harvester.scrapers.ventureburn import VentureburnScraper
+
+    try:
+        async with VentureburnScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=hours_back)
+
+        fund_matches = len([a for a in articles if a.fund_slug])
+
+        return VentureburnResponse(
+            articles_found=len(articles),
+            funding_articles=len(articles),  # Already filtered
+            fund_matches=fund_matches,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ----- All Sources Combined -----
 
 class AllSourcesResponse(BaseModel):
@@ -1378,6 +1456,8 @@ class AllSourcesResponse(BaseModel):
     github_trending: Optional[GitHubTrendingResponse] = None
     hackernews: Optional[HackerNewsResponse] = None
     linkedin_jobs: Optional[LinkedInJobsResponse] = None
+    tech_funding_news: Optional[TechFundingNewsResponse] = None
+    ventureburn: Optional[VentureburnResponse] = None
 
 
 @app.post("/scrapers/all-sources", response_model=AllSourcesResponse)
@@ -1560,6 +1640,35 @@ async def run_all_sources(
             results["linkedin_jobs"] = None
     else:
         results["linkedin_jobs"] = None
+
+    # Tech Funding News (always runs - free RSS)
+    try:
+        from .harvester.scrapers.tech_funding_news import TechFundingNewsScraper
+        async with TechFundingNewsScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+        fund_matches = len([a for a in articles if a.fund_slug])
+        results["tech_funding_news"] = TechFundingNewsResponse(
+            feeds_scraped=5,
+            articles_found=len(articles),
+            funding_articles=len(articles),
+            fund_matches=fund_matches,
+        )
+    except Exception:
+        results["tech_funding_news"] = None
+
+    # Ventureburn (always runs - free RSS)
+    try:
+        from .harvester.scrapers.ventureburn import VentureburnScraper
+        async with VentureburnScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+        fund_matches = len([a for a in articles if a.fund_slug])
+        results["ventureburn"] = VentureburnResponse(
+            articles_found=len(articles),
+            funding_articles=len(articles),
+            fund_matches=fund_matches,
+        )
+    except Exception:
+        results["ventureburn"] = None
 
     cache.invalidate("deals")
 

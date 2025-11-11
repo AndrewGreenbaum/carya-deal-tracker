@@ -41,6 +41,10 @@ from .hackernews import HackerNewsScraper, run_hackernews_scraper
 # Stealth Detection
 from .linkedin_jobs import LinkedInJobsScraper, run_linkedin_jobs_scraper
 
+# Additional News Sources
+from .tech_funding_news import TechFundingNewsScraper, run_tech_funding_news_scraper
+from .ventureburn import VentureburnScraper, run_ventureburn_scraper
+
 __all__ = [
     # Original 5
     "A16ZScraper",
@@ -92,4 +96,9 @@ __all__ = [
     # Stealth Detection
     "LinkedInJobsScraper",
     "run_linkedin_jobs_scraper",
+    # Additional News Sources
+    "TechFundingNewsScraper",
+    "run_tech_funding_news_scraper",
+    "VentureburnScraper",
+    "run_ventureburn_scraper",
 ]
