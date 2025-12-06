@@ -940,20 +940,28 @@ class BraveSearchResponse(BaseModel):
 @app.post("/scrapers/brave-search", response_model=BraveSearchResponse)
 async def run_brave_search_scraper_endpoint(
     freshness: str = Query("pw", description="pd=past day, pw=past week, pm=past month"),
+    include_regional: bool = Query(False, description="Include 10 regional market searches"),
+    include_early_signals: bool = Query(False, description="Include early signal detection (hiring, expansion)"),
     api_key: str = Depends(verify_api_key),
 ):
     """
-    Run Brave Search API scraper with 2x expanded coverage.
+    Run Brave Search API scraper with expanded coverage options.
 
     Searches for funding news with "led by" AND participation language for tracked funds.
     Requires BRAVE_SEARCH_KEY to be configured.
 
-    Query breakdown:
+    Query breakdown (base):
     - 18 fund lead queries
     - 18 fund participation queries
     - 1 enterprise AI query
     - 1 stealth query
-    = 38 queries total
+    = 38 queries (base)
+
+    Optional expansions:
+    - include_regional: +10 queries (Europe, UK, Germany, France, Asia, India, Singapore, LATAM, Brazil, Israel)
+    - include_early_signals: +12 queries (hiring signals, expansion news)
+
+    Full expansion = 60 queries total
     """
     from .harvester.scrapers.brave_search import BraveSearchScraper
 
@@ -962,23 +970,86 @@ async def run_brave_search_scraper_endpoint(
 
     try:
         async with BraveSearchScraper() as scraper:
-            # Run full scrape with 2x coverage (participation + stealth)
+            # Run full scrape with expanded options
             articles = await scraper.scrape_all(
                 freshness=freshness,
                 include_enterprise=True,
                 include_participation=True,
                 include_stealth=True,
+                include_regional=include_regional,
+                include_early_signals=include_early_signals,
             )
 
         cache.invalidate("deals")
 
-        # Query count: 18 lead + 18 participation + 1 enterprise + 1 stealth = 38
-        queries_executed = 38
+        # Calculate query count
+        queries_executed = 38  # Base: 18 lead + 18 participation + 1 enterprise + 1 stealth
+        if include_regional:
+            queries_executed += 10  # 10 regions
+        if include_early_signals:
+            queries_executed += 12  # 12 early signal queries
 
         return BraveSearchResponse(
             queries_executed=queries_executed,
             results_found=len(articles),  # Before dedup
             articles_generated=len(articles),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class FastScanResponse(BaseModel):
+    """Response for fast-scan endpoint."""
+    queries_executed: int
+    results_found: int
+    scan_type: str
+    freshness: str
+
+
+@app.post("/scrapers/fast-scan", response_model=FastScanResponse)
+async def run_fast_scan_endpoint(
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Fast scan for real-time deal detection (run hourly).
+
+    Lightweight scan using past-day freshness for faster detection:
+    - 18 fund lead queries only (no participation)
+    - 12 early signal queries (hiring, expansion)
+    - 1 stealth query
+    = 31 queries with pd (past day) freshness
+
+    Designed to run every hour for near real-time detection.
+    Use /scrapers/brave-search with full options for comprehensive weekly scans.
+    """
+    from .harvester.scrapers.brave_search import BraveSearchScraper
+
+    if not settings.brave_search_key:
+        raise HTTPException(status_code=400, detail="BRAVE_SEARCH_KEY not configured")
+
+    try:
+        async with BraveSearchScraper() as scraper:
+            # Fast scan: lead queries + early signals only, past day
+            articles = await scraper.scrape_all(
+                freshness="pd",  # Past day for speed
+                include_enterprise=False,  # Skip for speed
+                include_participation=False,  # Skip for speed
+                include_stealth=True,
+                include_regional=False,
+                include_early_signals=True,  # Key for fast detection
+            )
+
+        cache.invalidate("deals")
+
+        # Query count: 18 lead + 1 stealth + 12 early signals = 31
+        queries_executed = 31
+
+        return FastScanResponse(
+            queries_executed=queries_executed,
+            results_found=len(articles),
+            scan_type="fast",
+            freshness="pd",
         )
 
     except Exception as e:

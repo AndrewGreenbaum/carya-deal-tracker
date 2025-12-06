@@ -26,6 +26,7 @@ BRAVE_NEWS_API = "https://api.search.brave.com/res/v1/news/search"
 BRAVE_WEB_API = "https://api.search.brave.com/res/v1/web/search"
 
 # Fund name variations for search queries (primary name + alternates)
+# Core 18 tracked funds
 FUND_SEARCH_NAMES = {
     "founders_fund": ["Founders Fund", "Peter Thiel"],
     "benchmark": ["Benchmark", "Benchmark Capital"],
@@ -122,6 +123,40 @@ STEALTH_KEYWORDS = [
     "comes out of stealth",
     "exits stealth",
     "stealth startup",
+]
+
+# Regional funding queries for broader international coverage
+REGIONAL_QUERIES = {
+    "europe": '"Series A" OR "Series B" Europe startup funding led',
+    "uk": '"Series A" OR "Series B" UK startup funding led',
+    "germany": '"Series A" OR "Series B" Germany startup funding led',
+    "france": '"Series A" OR "Series B" France startup funding led',
+    "asia": '"Series A" OR "Series B" Asia startup funding led',
+    "india": '"Series A" OR "Series B" India startup funding led',
+    "singapore": '"Series A" OR "Series B" Singapore startup funding led',
+    "latam": '"Series A" OR "Series B" Latin America startup funding led',
+    "brazil": '"Series A" OR "Series B" Brazil startup funding led',
+    "israel": '"Series A" OR "Series B" Israel startup funding led',
+}
+
+# Early signal queries (detect before official announcements)
+EARLY_SIGNAL_QUERIES = [
+    # Hiring signals
+    '"stealth startup" hiring AI engineer',
+    '"backed by" "stealth" hiring',
+    '"well-funded" startup hiring AI',
+    '"recently raised" hiring engineering',
+    # Acquisition/M&A signals
+    'AI startup acquisition announced',
+    '"acquired by" AI startup',
+    # Company updates that hint at funding
+    '"announces expansion" AI startup',
+    '"opens office" AI startup funded',
+    '"hires" "former" Google AI startup',
+    '"hires" "former" Meta AI startup',
+    # Press release patterns
+    '"today announced" funding AI',
+    '"secures funding" AI enterprise',
 ]
 
 # Enterprise AI category queries (one per category)
@@ -395,6 +430,46 @@ class BraveSearchScraper:
         query = self._build_stealth_query()
         return await self.search_news(query, count=30, freshness=freshness)
 
+    async def search_regional(
+        self,
+        freshness: str = "pw",
+    ) -> Dict[str, List[BraveSearchResult]]:
+        """
+        Search for regional funding news (10 regions).
+
+        Covers Europe, UK, Germany, France, Asia, India, Singapore, LATAM, Brazil, Israel.
+        """
+        results: Dict[str, List[BraveSearchResult]] = {}
+
+        for region, query in REGIONAL_QUERIES.items():
+            region_results = await self.search_news(query, count=20, freshness=freshness)
+            results[region] = region_results
+            await asyncio.sleep(0.3)
+
+        return results
+
+    async def search_early_signals(
+        self,
+        freshness: str = "pd",  # Past day for early signals
+    ) -> List[BraveSearchResult]:
+        """
+        Search for early signals (hiring, expansion) that hint at funding.
+
+        Uses past day freshness for faster detection.
+        """
+        all_results: List[BraveSearchResult] = []
+        seen_urls: set = set()
+
+        for query in EARLY_SIGNAL_QUERIES:
+            results = await self.search_news(query, count=10, freshness=freshness)
+            for r in results:
+                if r.url not in seen_urls:
+                    seen_urls.add(r.url)
+                    all_results.append(r)
+            await asyncio.sleep(0.2)
+
+        return all_results
+
     async def to_normalized_article(
         self,
         result: BraveSearchResult,
@@ -423,25 +498,31 @@ class BraveSearchScraper:
         include_enterprise: bool = True,
         include_participation: bool = True,
         include_stealth: bool = True,
+        include_regional: bool = False,
+        include_early_signals: bool = False,
     ) -> List[NormalizedArticle]:
         """
-        Full scraping pipeline with 2x expanded coverage.
+        Full scraping pipeline with expanded coverage options.
 
         Args:
             freshness: pd=past day, pw=past week, pm=past month
             include_enterprise: Also search for general Enterprise AI deals
             include_participation: Run participation queries (2x fund coverage)
             include_stealth: Search for stealth startup news
+            include_regional: Search 10 regional markets
+            include_early_signals: Search for hiring/expansion signals
 
         Returns:
             Deduplicated list of NormalizedArticle objects
 
         Query breakdown (when all options enabled):
         - 18 fund lead queries
-        - 18 fund participation queries
+        - 18 fund participation queries (if enabled)
         - 1 enterprise AI query
         - 1 stealth query
-        = 38 queries total (2x coverage)
+        - 10 regional queries (if enabled)
+        - 12 early signal queries (if enabled)
+        = 38-60 queries depending on options
         """
         all_articles: List[NormalizedArticle] = []
         seen_urls: set = set()
@@ -484,6 +565,33 @@ class BraveSearchScraper:
 
                 article = await self.to_normalized_article(result, "")
                 article.tags.append("stealth")
+                all_articles.append(article)
+
+        # Search regional markets (10 queries)
+        if include_regional:
+            regional_results = await self.search_regional(freshness)
+
+            for region, results in regional_results.items():
+                for result in results:
+                    if result.url in seen_urls:
+                        continue
+                    seen_urls.add(result.url)
+
+                    article = await self.to_normalized_article(result, "")
+                    article.tags.extend(["regional", region])
+                    all_articles.append(article)
+
+        # Search early signals (12 queries, uses past day)
+        if include_early_signals:
+            early_results = await self.search_early_signals("pd")
+
+            for result in early_results:
+                if result.url in seen_urls:
+                    continue
+                seen_urls.add(result.url)
+
+                article = await self.to_normalized_article(result, "")
+                article.tags.append("early_signal")
                 all_articles.append(article)
 
         return all_articles
