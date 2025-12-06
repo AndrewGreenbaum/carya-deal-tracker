@@ -1436,6 +1436,164 @@ async def run_linkedin_jobs_scraper_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ----- Tier 1 Stealth Detection Scrapers -----
+
+class PortfolioDiffResponse(BaseModel):
+    funds_checked: int
+    new_companies_found: int
+    total_articles: int
+
+
+@app.post("/scrapers/portfolio-diff", response_model=PortfolioDiffResponse)
+async def run_portfolio_diff_scraper_endpoint(
+    fund_slugs: Optional[str] = Query(None, description="Comma-separated fund slugs (default: all 18)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run VC Portfolio Page Diff scraper.
+
+    Monitors VC fund portfolio pages for new company additions.
+    VCs often add companies to portfolios BEFORE public announcements.
+    FREE - no API key required (scrapes public portfolio pages).
+
+    Tier 1 stealth detection - one of the BEST free sources.
+    """
+    from .harvester.scrapers.portfolio_diff import PortfolioDiffScraper
+
+    try:
+        slugs = None
+        if fund_slugs:
+            slugs = [s.strip() for s in fund_slugs.split(',') if s.strip()]
+
+        async with PortfolioDiffScraper() as scraper:
+            articles = await scraper.scrape_all(fund_slugs=slugs)
+
+        funds_checked = len(slugs) if slugs else 18  # 18 funds in PORTFOLIO_URLS
+
+        cache.invalidate("deals")
+
+        return PortfolioDiffResponse(
+            funds_checked=funds_checked,
+            new_companies_found=len(articles),
+            total_articles=len(articles),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class USPTOTrademarkResponse(BaseModel):
+    trademarks_found: int
+    tech_trademarks: int
+    total_articles: int
+
+
+@app.post("/scrapers/uspto-trademarks", response_model=USPTOTrademarkResponse)
+async def run_uspto_trademark_scraper_endpoint(
+    days_back: int = Query(7, ge=1, le=30, description="Days to look back"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run USPTO Trademark scraper.
+
+    Monitors USPTO for new trademark applications that might indicate:
+    - New startup names (company formation)
+    - New product launches
+    - Stealth companies emerging
+
+    Trademark applications are PUBLIC and often filed BEFORE announcements.
+    Uses Brave Search API (requires BRAVE_SEARCH_KEY).
+
+    Filters for tech classes:
+    - Class 9: Software, computers, electronics
+    - Class 35: Business services, SaaS
+    - Class 42: Technology services, cloud computing
+    """
+    from .harvester.scrapers.uspto_trademarks import USPTOTrademarkScraper
+
+    if not settings.brave_search_key:
+        raise HTTPException(status_code=400, detail="BRAVE_SEARCH_KEY not configured")
+
+    try:
+        async with USPTOTrademarkScraper() as scraper:
+            # Get all trademarks first
+            trademarks = await scraper.search_recent_trademarks(days_back=days_back)
+            # Get filtered articles (tech only)
+            articles = await scraper.scrape_all(days_back=days_back, tech_only=True)
+
+        cache.invalidate("deals")
+
+        return USPTOTrademarkResponse(
+            trademarks_found=len(trademarks),
+            tech_trademarks=len(articles),
+            total_articles=len(articles),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DelawareCorpsResponse(BaseModel):
+    entities_found: int
+    tech_entities: int
+    high_signal_entities: int
+    total_articles: int
+
+
+@app.post("/scrapers/delaware-corps", response_model=DelawareCorpsResponse)
+async def run_delaware_corps_scraper_endpoint(
+    days_back: int = Query(7, ge=1, le=30, description="Days to look back"),
+    min_score: int = Query(3, ge=0, le=10, description="Minimum score to include"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run Delaware Division of Corporations scraper.
+
+    Monitors Delaware for new tech company formations.
+    ~67% of Fortune 500 and most VC-backed startups incorporate in Delaware.
+
+    Scoring signals:
+    - Tech company name pattern (+3)
+    - Startup-friendly registered agent like Stripe Atlas, Clerky (+5)
+    - Recent formation (+2)
+    - AI/ML in name (+2)
+
+    Uses Brave Search + OpenCorporates API.
+    Requires BRAVE_SEARCH_KEY for best results.
+    """
+    from .harvester.scrapers.delaware_corps import DelawareCorpsScraper
+
+    if not settings.brave_search_key:
+        raise HTTPException(status_code=400, detail="BRAVE_SEARCH_KEY not configured")
+
+    try:
+        async with DelawareCorpsScraper() as scraper:
+            # Get all articles (already filtered by score)
+            articles = await scraper.scrape_all(days_back=days_back, min_score=min_score)
+
+            # Also get raw entities for counts
+            brave_entities = await scraper.search_recent_incorporations(days_back=days_back)
+            agg_entities = await scraper.search_aggregators()
+
+        all_entities = len(brave_entities) + len(agg_entities)
+        tech_entities = len([e for e in brave_entities if e.has_tech_name] +
+                          [e for e in agg_entities if e.has_tech_name])
+        high_signal = len([e for e in brave_entities if e.has_startup_agent] +
+                         [e for e in agg_entities if e.has_startup_agent])
+
+        cache.invalidate("deals")
+
+        return DelawareCorpsResponse(
+            entities_found=all_entities,
+            tech_entities=tech_entities,
+            high_signal_entities=high_signal,
+            total_articles=len(articles),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ----- Tech Funding News -----
 
 class TechFundingNewsResponse(BaseModel):
@@ -1529,6 +1687,10 @@ class AllSourcesResponse(BaseModel):
     linkedin_jobs: Optional[LinkedInJobsResponse] = None
     tech_funding_news: Optional[TechFundingNewsResponse] = None
     ventureburn: Optional[VentureburnResponse] = None
+    # Tier 1 Stealth Detection
+    portfolio_diff: Optional[PortfolioDiffResponse] = None
+    uspto_trademarks: Optional[USPTOTrademarkResponse] = None
+    delaware_corps: Optional[DelawareCorpsResponse] = None
 
 
 @app.post("/scrapers/all-sources", response_model=AllSourcesResponse)
@@ -1740,6 +1902,62 @@ async def run_all_sources(
         )
     except Exception:
         results["ventureburn"] = None
+
+    # ----- Tier 1 Stealth Detection -----
+
+    # Portfolio Diff (always runs - free, scrapes public portfolio pages)
+    try:
+        from .harvester.scrapers.portfolio_diff import PortfolioDiffScraper
+        async with PortfolioDiffScraper() as scraper:
+            articles = await scraper.scrape_all()
+        results["portfolio_diff"] = PortfolioDiffResponse(
+            funds_checked=18,
+            new_companies_found=len(articles),
+            total_articles=len(articles),
+        )
+    except Exception:
+        results["portfolio_diff"] = None
+
+    # USPTO Trademarks (if Brave Search configured)
+    if settings.brave_search_key:
+        try:
+            from .harvester.scrapers.uspto_trademarks import USPTOTrademarkScraper
+            async with USPTOTrademarkScraper() as scraper:
+                trademarks = await scraper.search_recent_trademarks(days_back=days)
+                articles = await scraper.scrape_all(days_back=days, tech_only=True)
+            results["uspto_trademarks"] = USPTOTrademarkResponse(
+                trademarks_found=len(trademarks),
+                tech_trademarks=len(articles),
+                total_articles=len(articles),
+            )
+        except Exception:
+            results["uspto_trademarks"] = None
+    else:
+        results["uspto_trademarks"] = None
+
+    # Delaware Corps (if Brave Search configured)
+    if settings.brave_search_key:
+        try:
+            from .harvester.scrapers.delaware_corps import DelawareCorpsScraper
+            async with DelawareCorpsScraper() as scraper:
+                articles = await scraper.scrape_all(days_back=days, min_score=3)
+                brave_entities = await scraper.search_recent_incorporations(days_back=days)
+                agg_entities = await scraper.search_aggregators()
+            all_entities = len(brave_entities) + len(agg_entities)
+            tech_entities = len([e for e in brave_entities if e.has_tech_name] +
+                              [e for e in agg_entities if e.has_tech_name])
+            high_signal = len([e for e in brave_entities if e.has_startup_agent] +
+                             [e for e in agg_entities if e.has_startup_agent])
+            results["delaware_corps"] = DelawareCorpsResponse(
+                entities_found=all_entities,
+                tech_entities=tech_entities,
+                high_signal_entities=high_signal,
+                total_articles=len(articles),
+            )
+        except Exception:
+            results["delaware_corps"] = None
+    else:
+        results["delaware_corps"] = None
 
     cache.invalidate("deals")
 

@@ -40,6 +40,9 @@ from .hackernews import HackerNewsScraper, run_hackernews_scraper
 
 # Stealth Detection
 from .linkedin_jobs import LinkedInJobsScraper, run_linkedin_jobs_scraper
+from .portfolio_diff import PortfolioDiffScraper, run_portfolio_diff_scraper
+from .uspto_trademarks import USPTOTrademarkScraper, run_uspto_trademark_scraper
+from .delaware_corps import DelawareCorpsScraper, run_delaware_corps_scraper
 
 # Additional News Sources
 from .tech_funding_news import TechFundingNewsScraper, run_tech_funding_news_scraper
@@ -96,6 +99,12 @@ __all__ = [
     # Stealth Detection
     "LinkedInJobsScraper",
     "run_linkedin_jobs_scraper",
+    "PortfolioDiffScraper",
+    "run_portfolio_diff_scraper",
+    "USPTOTrademarkScraper",
+    "run_uspto_trademark_scraper",
+    "DelawareCorpsScraper",
+    "run_delaware_corps_scraper",
     # Additional News Sources
     "TechFundingNewsScraper",
     "run_tech_funding_news_scraper",
