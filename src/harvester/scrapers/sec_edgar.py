@@ -51,6 +51,21 @@ SEC_FUND_PATTERNS = {
     "first_round": ["first round capital"],
 }
 
+# Industries likely to be VC-backed (for stealth detection)
+VC_LIKELY_INDUSTRIES = [
+    "Technology",
+    "Computers",
+    "Software",
+    "Telecommunications",
+    "Biotechnology",
+    "Health Care",
+    "Energy",
+    "Manufacturing",
+]
+
+# Minimum amount to consider as likely VC-backed (filters out small raises)
+MIN_VC_AMOUNT = 500_000  # $500K+
+
 
 @dataclass
 class FormDFiling:
@@ -250,6 +265,46 @@ class SECEdgarScraper:
 
         return None
 
+    def is_likely_vc_backed(self, filing: FormDFiling) -> bool:
+        """
+        Heuristic check if filing is likely a VC-backed startup.
+
+        Criteria:
+        - Industry is in VC_LIKELY_INDUSTRIES (tech/software/biotech)
+        - Amount raised >= $500K (filters small raises)
+        - First sale indicator (new round, not amendment)
+
+        Returns True if likely VC-backed, False otherwise.
+        """
+        # Check industry
+        industry_match = False
+        if filing.industry:
+            for vc_industry in VC_LIKELY_INDUSTRIES:
+                if vc_industry.lower() in filing.industry.lower():
+                    industry_match = True
+                    break
+
+        # Check amount (parse from string like "$1,000,000")
+        amount_ok = False
+        if filing.amount_raised:
+            try:
+                amount_str = filing.amount_raised.replace("$", "").replace(",", "")
+                amount = int(amount_str)
+                amount_ok = amount >= MIN_VC_AMOUNT
+            except (ValueError, TypeError):
+                amount_ok = False
+        elif filing.total_offering:
+            try:
+                amount_str = filing.total_offering.replace("$", "").replace(",", "")
+                amount = int(amount_str)
+                amount_ok = amount >= MIN_VC_AMOUNT
+            except (ValueError, TypeError):
+                amount_ok = False
+
+        # Return True if industry matches AND amount is significant
+        # OR if it's a first sale (new funding round)
+        return (industry_match and amount_ok) or filing.is_first_sale
+
     async def to_normalized_article(
         self,
         filing: FormDFiling,
@@ -293,6 +348,7 @@ class SECEdgarScraper:
         self,
         hours: int = 24,
         fetch_details: bool = True,
+        include_likely_vc: bool = True,
     ) -> List[NormalizedArticle]:
         """
         Full scraping pipeline for SEC EDGAR Form D filings.
@@ -300,11 +356,15 @@ class SECEdgarScraper:
         Args:
             hours: Look back this many hours
             fetch_details: Whether to fetch full filing XML for details
+            include_likely_vc: Include filings that are likely VC-backed (tech + $500K+)
+                              This catches stealth companies before news announcements
 
         Returns:
-            List of NormalizedArticle objects
+            List of NormalizedArticle objects (fund-matched + likely VC-backed)
         """
         articles = []
+        articles_fund_matched = []
+        articles_likely_vc = []
         seen_ciks = set()
 
         # Fetch recent filings
@@ -324,10 +384,20 @@ class SECEdgarScraper:
             # Check for tracked fund match
             fund_slug = self.match_tracked_fund(filing)
 
-            # Convert to article
-            article = await self.to_normalized_article(filing, fund_slug)
-            articles.append(article)
+            if fund_slug:
+                # Fund-matched filing (high confidence)
+                article = await self.to_normalized_article(filing, fund_slug)
+                article.tags.append("fund_matched")
+                articles_fund_matched.append(article)
+            elif include_likely_vc and self.is_likely_vc_backed(filing):
+                # Likely VC-backed (stealth detection)
+                article = await self.to_normalized_article(filing, None)
+                article.tags.append("likely_vc")
+                article.tags.append("stealth_candidate")
+                articles_likely_vc.append(article)
 
+        # Combine: fund-matched first, then likely VC
+        articles = articles_fund_matched + articles_likely_vc
         return articles
 
 
