@@ -307,6 +307,116 @@ class DelawareCorpsScraper:
 
         return entities
 
+    async def search_by_company_name(
+        self,
+        company_name: str,
+        fuzzy_match: bool = True,
+    ) -> Optional[DelawareEntity]:
+        """
+        Search for a specific company in Delaware registry.
+
+        Used for cross-referencing SEC Form D filings with Delaware data.
+
+        Args:
+            company_name: Company name to search for
+            fuzzy_match: If True, returns best match even if not exact
+
+        Returns:
+            DelawareEntity if found, None otherwise
+        """
+        if not company_name or len(company_name) < 2:
+            return None
+
+        # Clean company name for search
+        clean_name = company_name.strip()
+        # Remove common suffixes for better matching
+        clean_name = re.sub(r'\s*(Inc\.?|LLC|Corp\.?|Corporation|Ltd\.?)$', '', clean_name, flags=re.IGNORECASE).strip()
+
+        try:
+            # Try OpenCorporates API first (more reliable)
+            response = await self.client.get(
+                "https://api.opencorporates.com/v0.4/companies/search",
+                params={
+                    "q": clean_name,
+                    "jurisdiction_code": "us_de",
+                    "per_page": 5,
+                }
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                companies = data.get("results", {}).get("companies", [])
+
+                for company in companies:
+                    c = company.get("company", {})
+                    name = c.get("name", "")
+
+                    # Check for exact or fuzzy match
+                    name_lower = name.lower()
+                    search_lower = clean_name.lower()
+
+                    is_match = False
+                    if search_lower in name_lower or name_lower in search_lower:
+                        is_match = True
+                    elif fuzzy_match:
+                        # Check if main words match
+                        search_words = set(search_lower.split())
+                        name_words = set(name_lower.split())
+                        if len(search_words & name_words) >= min(2, len(search_words)):
+                            is_match = True
+
+                    if is_match:
+                        inc_date = c.get("incorporation_date")
+                        formation_date = None
+                        if inc_date:
+                            try:
+                                formation_date = datetime.strptime(inc_date, "%Y-%m-%d").date()
+                            except ValueError:
+                                pass
+
+                        agent_name = c.get("registered_agent_name", "")
+
+                        return DelawareEntity(
+                            entity_name=name,
+                            entity_type=c.get("company_type", "Corporation"),
+                            file_number=c.get("company_number"),
+                            formation_date=formation_date,
+                            registered_agent=agent_name,
+                            status=c.get("current_status", "Active"),
+                            source_url=c.get("opencorporates_url", ""),
+                            has_tech_name=self._has_tech_name(name),
+                            has_startup_agent=self._has_startup_agent(agent_name),
+                        )
+
+        except Exception as e:
+            print(f"OpenCorporates company lookup error: {e}")
+
+        return None
+
+    async def search_companies_batch(
+        self,
+        company_names: List[str],
+        delay_seconds: float = 0.5,
+    ) -> Dict[str, Optional[DelawareEntity]]:
+        """
+        Search for multiple companies in Delaware registry.
+
+        Args:
+            company_names: List of company names to search
+            delay_seconds: Delay between API calls (rate limiting)
+
+        Returns:
+            Dict mapping company name to DelawareEntity (or None if not found)
+        """
+        results = {}
+
+        for name in company_names:
+            entity = await self.search_by_company_name(name)
+            results[name] = entity
+            await asyncio.sleep(delay_seconds)  # Rate limit
+
+        return results
+
     def entity_to_article(self, entity: DelawareEntity) -> NormalizedArticle:
         """Convert Delaware entity to NormalizedArticle."""
         signals = []

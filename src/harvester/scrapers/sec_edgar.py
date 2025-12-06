@@ -83,6 +83,7 @@ class FormDFiling:
     investors: List[str] = field(default_factory=list)
     is_first_sale: bool = False
     industry: Optional[str] = None
+    state_of_incorporation: Optional[str] = None  # For Delaware filtering
 
 
 class SECEdgarScraper:
@@ -243,6 +244,16 @@ class SECEdgarScraper:
             if industry_elem is not None:
                 filing.industry = industry_elem.text
 
+            # Extract state of incorporation (for Delaware filtering)
+            # Try multiple possible XML paths
+            state_elem = root.find(".//issuer/issuerStateOrCountry", ns)
+            if state_elem is None:
+                state_elem = root.find(".//issuerStateOrCountry", ns)
+            if state_elem is None:
+                state_elem = root.find(".//stateOrCountryOfIncorporation", ns)
+            if state_elem is not None and state_elem.text:
+                filing.state_of_incorporation = state_elem.text.upper()
+
             return filing
 
         except Exception as e:
@@ -328,10 +339,17 @@ class SECEdgarScraper:
             text_parts.append(f"Related Persons: {', '.join(filing.investors)}")
         if filing.industry:
             text_parts.append(f"Industry: {filing.industry}")
+        if filing.state_of_incorporation:
+            text_parts.append(f"State of Incorporation: {filing.state_of_incorporation}")
         if filing.is_first_sale:
             text_parts.append("Note: This is the FIRST sale under this offering.")
 
         text_parts.append(f"\nSEC Filing URL: {filing.filing_url}")
+
+        # Build tags
+        tags = ["sec", "form_d", filing.form_type]
+        if filing.state_of_incorporation == "DE":
+            tags.append("delaware")
 
         return NormalizedArticle(
             url=filing.filing_url,
@@ -339,7 +357,7 @@ class SECEdgarScraper:
             text="\n".join(text_parts),
             published_date=filing.filing_date,
             author="SEC EDGAR",
-            tags=["sec", "form_d", filing.form_type],
+            tags=tags,
             fund_slug=fund_slug or "",
             fetched_at=datetime.utcnow(),
         )

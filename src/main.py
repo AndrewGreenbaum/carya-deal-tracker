@@ -1594,6 +1594,130 @@ async def run_delaware_corps_scraper_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ----- SEC + Delaware Cross-Reference -----
+
+class LeadScoreBreakdown(BaseModel):
+    delaware: Optional[int] = None
+    first_sale: Optional[int] = None
+    tech_industry: Optional[int] = None
+    amount_5m_plus: Optional[int] = None
+    amount_1m_plus: Optional[int] = None
+    amount_500k_plus: Optional[int] = None
+    vc_fund_match: Optional[int] = None
+    startup_agent: Optional[int] = None
+    tech_name: Optional[int] = None
+
+
+class HighPriorityLeadResponse(BaseModel):
+    company_name: str
+    cik: str
+    filing_date: str
+    filing_url: str
+    state_of_incorporation: Optional[str]
+    amount_raised: Optional[str]
+    total_offering: Optional[str]
+    is_first_sale: bool
+    industry: Optional[str]
+    score: int
+    priority: str
+    score_breakdown: LeadScoreBreakdown
+    is_delaware: bool
+    is_tech_industry: bool
+    has_vc_fund_match: bool
+    has_startup_agent: bool
+    matched_fund_slug: Optional[str]
+    registered_agent: Optional[str]
+
+
+class SECDelawareCrossrefResponse(BaseModel):
+    leads_found: int
+    high_priority: int
+    strong_signal: int
+    watch_list: int
+    leads: List[HighPriorityLeadResponse]
+
+
+@app.post("/scrapers/sec-delaware-crossref", response_model=SECDelawareCrossrefResponse)
+async def run_sec_delaware_crossref_endpoint(
+    days_back: int = Query(30, ge=1, le=90, description="Days to look back"),
+    min_score: int = Query(3, ge=0, le=15, description="Minimum score to include"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run SEC Form D + Delaware cross-reference for high-priority leads.
+
+    Combines SEC Form D filings with Delaware registry data using multi-signal scoring:
+
+    **Scoring:**
+    - Delaware incorporation: +2
+    - First sale (new round): +3
+    - Tech industry: +2
+    - Amount $5M+: +3, $1M+: +2, $500K+: +1
+    - Tracked VC fund match: +5
+    - Startup-friendly agent (Stripe Atlas, Clerky): +5
+    - Tech company name: +2
+
+    **Priority Tiers:**
+    - HIGH (10+): Strong VC-backed signals
+    - STRONG (7-9): Good indicators
+    - WATCH (3-6): Worth monitoring
+
+    Uses SEC EDGAR (FREE) + OpenCorporates API (FREE with rate limits).
+    """
+    from .harvester.scrapers.sec_delaware_crossref import get_high_priority_leads
+
+    try:
+        leads = await get_high_priority_leads(
+            days_back=days_back,
+            min_score=min_score,
+            delaware_only=True,
+            tech_only=True,
+            min_amount=500_000,
+        )
+
+        # Count by priority
+        high_count = len([l for l in leads if l.priority == "HIGH"])
+        strong_count = len([l for l in leads if l.priority == "STRONG"])
+        watch_count = len([l for l in leads if l.priority == "WATCH"])
+
+        # Convert to response format
+        lead_responses = []
+        for lead in leads:
+            lead_responses.append(HighPriorityLeadResponse(
+                company_name=lead.company_name,
+                cik=lead.cik,
+                filing_date=lead.filing_date.isoformat(),
+                filing_url=lead.filing_url,
+                state_of_incorporation=lead.state_of_incorporation,
+                amount_raised=lead.amount_raised,
+                total_offering=lead.total_offering,
+                is_first_sale=lead.is_first_sale,
+                industry=lead.industry,
+                score=lead.score,
+                priority=lead.priority,
+                score_breakdown=LeadScoreBreakdown(**lead.score_breakdown),
+                is_delaware=lead.is_delaware,
+                is_tech_industry=lead.is_tech_industry,
+                has_vc_fund_match=lead.has_vc_fund_match,
+                has_startup_agent=lead.has_startup_agent,
+                matched_fund_slug=lead.matched_fund_slug,
+                registered_agent=lead.delaware_entity.registered_agent if lead.delaware_entity else None,
+            ))
+
+        cache.invalidate("deals")
+
+        return SECDelawareCrossrefResponse(
+            leads_found=len(leads),
+            high_priority=high_count,
+            strong_signal=strong_count,
+            watch_list=watch_count,
+            leads=lead_responses,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ----- Tech Funding News -----
 
 class TechFundingNewsResponse(BaseModel):

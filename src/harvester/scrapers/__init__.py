@@ -44,6 +44,16 @@ from .portfolio_diff import PortfolioDiffScraper, run_portfolio_diff_scraper
 from .uspto_trademarks import USPTOTrademarkScraper, run_uspto_trademark_scraper
 from .delaware_corps import DelawareCorpsScraper, run_delaware_corps_scraper
 
+# Cross-Reference (SEC + Delaware)
+from .sec_delaware_crossref import (
+    HighPriorityLead,
+    get_high_priority_leads,
+    run_crossref_scan,
+    PRIORITY_HIGH,
+    PRIORITY_STRONG,
+    PRIORITY_WATCH,
+)
+
 # Additional News Sources
 from .tech_funding_news import TechFundingNewsScraper, run_tech_funding_news_scraper
 from .ventureburn import VentureburnScraper, run_ventureburn_scraper
@@ -105,6 +115,13 @@ __all__ = [
     "run_uspto_trademark_scraper",
     "DelawareCorpsScraper",
     "run_delaware_corps_scraper",
+    # Cross-Reference (SEC + Delaware)
+    "HighPriorityLead",
+    "get_high_priority_leads",
+    "run_crossref_scan",
+    "PRIORITY_HIGH",
+    "PRIORITY_STRONG",
+    "PRIORITY_WATCH",
     # Additional News Sources
     "TechFundingNewsScraper",
     "run_tech_funding_news_scraper",
