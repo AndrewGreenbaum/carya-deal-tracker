@@ -101,12 +101,16 @@ class SECEdgarScraper:
     """
 
     def __init__(self):
+        # SEC requires a User-Agent with contact info for automated tools
+        # See: https://www.sec.gov/os/accessing-edgar-data
         self.client = httpx.AsyncClient(
             timeout=30,
             headers={
-                "User-Agent": "BudTracker/1.0 (Investment Research Bot)",
+                "User-Agent": "BudTracker/1.0 (contact@budtracker.io; Investment Research)",
                 "Accept": "application/atom+xml, application/xml, text/xml",
-            }
+                "Accept-Encoding": "gzip, deflate",
+            },
+            follow_redirects=True,  # SEC redirects to new URL structure
         )
 
     async def __aenter__(self):
@@ -211,48 +215,61 @@ class SECEdgarScraper:
             if response.status_code != 200:
                 return filing
 
-            # Parse XML
+            # Parse XML - SEC Form D uses no namespace prefix
             root = ET.fromstring(response.text)
-            ns = {"": "http://www.sec.gov/edgar/document/formd"}
 
-            # Extract offering amount
-            offering_elem = root.find(".//totalOfferingAmount", ns)
-            if offering_elem is not None and offering_elem.text:
-                filing.total_offering = f"${int(offering_elem.text):,}"
+            # Extract offering amount (look in offeringSalesAmounts section)
+            offering_elem = root.find(".//totalOfferingAmount")
+            if offering_elem is not None and offering_elem.text and offering_elem.text.strip():
+                try:
+                    filing.total_offering = f"${int(float(offering_elem.text)):,}"
+                except (ValueError, TypeError):
+                    pass
 
-            amount_sold_elem = root.find(".//totalAmountSold", ns)
-            if amount_sold_elem is not None and amount_sold_elem.text:
-                filing.amount_raised = f"${int(amount_sold_elem.text):,}"
+            amount_sold_elem = root.find(".//totalAmountSold")
+            if amount_sold_elem is not None and amount_sold_elem.text and amount_sold_elem.text.strip():
+                try:
+                    filing.amount_raised = f"${int(float(amount_sold_elem.text)):,}"
+                except (ValueError, TypeError):
+                    pass
 
-            # Extract related persons (investors)
-            for person in root.findall(".//relatedPersonInfo", ns):
-                name_elem = person.find(".//relatedPersonName", ns)
-                if name_elem is not None:
-                    first = name_elem.find(".//firstName", ns)
-                    last = name_elem.find(".//lastName", ns)
-                    name = f"{first.text if first is not None else ''} {last.text if last is not None else ''}".strip()
-                    if name:
-                        filing.investors.append(name)
+            # Extract related persons (investors) - look for names in relatedPersonsList
+            for person in root.findall(".//relatedPersonInfo"):
+                first_elem = person.find(".//firstName")
+                last_elem = person.find(".//lastName")
+                first = first_elem.text if first_elem is not None and first_elem.text else ""
+                last = last_elem.text if last_elem is not None and last_elem.text else ""
+                name = f"{first} {last}".strip()
+                if name and name not in filing.investors:
+                    filing.investors.append(name)
 
-            # Check if first sale
-            first_sale_elem = root.find(".//isFirstSale", ns)
-            if first_sale_elem is not None:
-                filing.is_first_sale = first_sale_elem.text == "true"
+            # Check if first sale - look in typeOfFiling
+            # For Form D, we check if this is the first filing (not an amendment)
+            amendment_elem = root.find(".//isAmendment")
+            if amendment_elem is not None and amendment_elem.text:
+                filing.is_first_sale = amendment_elem.text.lower() != "true"
+            else:
+                # If no amendment flag, check if form type is D (not D/A)
+                filing.is_first_sale = filing.form_type == "D"
 
-            # Extract industry
-            industry_elem = root.find(".//industryGroup/industryGroupType", ns)
-            if industry_elem is not None:
+            # Extract industry from industryGroup
+            industry_elem = root.find(".//industryGroupType")
+            if industry_elem is not None and industry_elem.text:
                 filing.industry = industry_elem.text
 
-            # Extract state of incorporation (for Delaware filtering)
-            # Try multiple possible XML paths
-            state_elem = root.find(".//issuer/issuerStateOrCountry", ns)
+            # Extract state of incorporation (jurisdictionOfInc in SEC XML)
+            state_elem = root.find(".//jurisdictionOfInc")
             if state_elem is None:
-                state_elem = root.find(".//issuerStateOrCountry", ns)
-            if state_elem is None:
-                state_elem = root.find(".//stateOrCountryOfIncorporation", ns)
+                state_elem = root.find(".//issuerStateOrCountry")
             if state_elem is not None and state_elem.text:
-                filing.state_of_incorporation = state_elem.text.upper()
+                # Convert full name to state code if needed
+                state_text = state_elem.text.strip().upper()
+                if state_text == "DELAWARE":
+                    filing.state_of_incorporation = "DE"
+                elif len(state_text) == 2:
+                    filing.state_of_incorporation = state_text
+                else:
+                    filing.state_of_incorporation = state_text
 
             return filing
 
