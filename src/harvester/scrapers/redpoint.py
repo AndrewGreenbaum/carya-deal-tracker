@@ -1,10 +1,11 @@
 """
 Redpoint Ventures Scraper.
 
-Source: https://redpoint.com/content-hub/
-Format: HTML
+Source: https://www.redpoint.com/content-hub/
+Format: HTML (React/Gatsby - requires www. prefix)
 
-Filter by tag 'Funding News'.
+The content hub has funding news articles with card-module classes.
+Filter for articles linking to /content-hub/category/funding-news/.
 """
 
 from typing import List, Optional
@@ -18,16 +19,18 @@ class RedpointScraper(SimpleHTMLScraper):
     """
     Scraper for Redpoint Ventures content hub.
 
-    Key: Filter by 'Funding News' tag.
+    Key: Uses www.redpoint.com (redirects from non-www).
+    Looks for card-module elements with funding news.
     """
 
     def __init__(self):
         super().__init__(FUND_REGISTRY["redpoint"])
-        self.base_url = "https://redpoint.com"
+        # IMPORTANT: Must use www. prefix - site redirects without it
+        self.base_url = "https://www.redpoint.com"
 
     async def fetch(self, url: Optional[str] = None) -> str:
         target_url = url or f"{self.base_url}/content-hub/"
-        response = await self.client.get(target_url)
+        response = await self.client.get(target_url, follow_redirects=True)
         response.raise_for_status()
         return response.text
 
@@ -36,19 +39,21 @@ class RedpointScraper(SimpleHTMLScraper):
         articles = []
         seen_urls = set()
 
+        # Updated selectors for Redpoint's Gatsby-based site
         selectors = [
+            "[class*='card-module']",  # Main card container
+            "[class*='Card']",
             "article",
             ".content-item",
-            ".post-card",
-            ".news-item",
-            "[class*='content']",
-            "[class*='article']",
-            ".card",
         ]
 
         for selector in selectors:
             for card in soup.select(selector):
-                title_el = card.select_one("h2, h3, h4, .title, [class*='title'], a")
+                # Find title - Redpoint uses card-module--title class
+                title_el = card.select_one(
+                    "[class*='title'], h2, h3, h4, "
+                    "[class*='Title'], [class*='headline']"
+                )
                 if not title_el:
                     continue
                 title = title_el.get_text(strip=True)
@@ -56,7 +61,13 @@ class RedpointScraper(SimpleHTMLScraper):
                 if not title or len(title) < 10:
                     continue
 
-                link_el = card.select_one("a[href]")
+                # Find link - prioritize content-hub links
+                link_el = card.select_one(
+                    "a[href*='/content-hub/'], "
+                    "a[href*='/blog/'], "
+                    "[class*='cardLink'], "
+                    "a[href]"
+                )
                 if not link_el:
                     link_el = card.find_parent("a")
                 if not link_el:
@@ -64,36 +75,50 @@ class RedpointScraper(SimpleHTMLScraper):
 
                 url = link_el.get("href", "")
 
+                # Make absolute URL
                 if url and not url.startswith("http"):
                     url = f"{self.base_url}{url}"
 
+                # Skip category pages and non-content URLs
+                if "/category/" in url and "funding-news" not in url:
+                    continue
                 if url in seen_urls or not url:
                     continue
+
+                # Must be a Redpoint content URL
+                if "redpoint.com" not in url:
+                    continue
+
                 seen_urls.add(url)
 
+                # Extract date if available
                 date_el = card.select_one("time, .date, [class*='date']")
                 pub_date = None
                 if date_el:
                     date_str = date_el.get("datetime") or date_el.get_text(strip=True)
                     pub_date = self._parse_date(date_str)
 
-                # Extract tags for filtering
+                # Extract category/overline for tagging
                 tags = []
-                for tag_el in card.select(".tag, .category, [class*='tag'], [class*='category']"):
-                    tag_text = tag_el.get_text(strip=True)
+                overline_el = card.select_one(
+                    "[class*='overline'], [class*='category'], "
+                    "[class*='tag'], .category"
+                )
+                if overline_el:
+                    tag_text = overline_el.get_text(strip=True).lower()
                     if tag_text:
-                        tags.append(tag_text.lower())
+                        tags.append(tag_text)
 
-                # Check if this is funding news (required keyword)
+                # Check if this is funding news
                 card_text = card.get_text(strip=True).lower()
                 is_funding_news = (
-                    "funding news" in card_text or
-                    "funding" in tags or
-                    "funding news" in tags or
+                    "funding" in card_text or
+                    "series" in card_text or
+                    "investment" in card_text or
+                    "leading" in title.lower() or
                     any("funding" in t for t in tags)
                 )
 
-                # Include article, noting if it's funding news
                 if is_funding_news:
                     tags.append("funding_news")
 
@@ -113,7 +138,7 @@ class RedpointScraper(SimpleHTMLScraper):
             text = self._extract_text(full_html)
 
             # Flag funding news articles
-            if "funding_news" in raw.tags:
+            if "funding_news" in (raw.tags or []):
                 text = f"[FUNDING NEWS]\n{text}"
 
         except Exception:

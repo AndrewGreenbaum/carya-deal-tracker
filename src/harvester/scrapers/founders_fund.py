@@ -1,13 +1,19 @@
 """
 Founders Fund Scraper.
 
-Source: https://foundersfund.com/news/
+Source: https://foundersfund.com/ (homepage + portfolio)
 Format: PLAYWRIGHT (JS hydration required)
 
-Uses Playwright for full JavaScript rendering.
-Also monitors /portfolio/ for stealth additions via DOM-diffing.
+NOTE: Founders Fund does NOT have a /news/ page. The site has:
+- Homepage with featured content
+- /portfolio/ page with company logos
+- Blog posts at paths like /2023/08/diversity-myth-30-years-later/
+
+This scraper monitors the homepage for blog post links and the
+portfolio page for new company additions (stealth detection).
 """
 
+from datetime import date
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
@@ -18,10 +24,10 @@ from ...config.funds import FUND_REGISTRY
 
 class FoundersFundScraper(PlaywrightScraper):
     """
-    Scraper for Founders Fund news and portfolio announcements.
+    Scraper for Founders Fund portfolio and blog content.
 
     Uses Playwright to render JavaScript-heavy pages.
-    Supports stealth detection via portfolio page monitoring.
+    Scrapes homepage for blog links and portfolio for company detection.
     """
 
     def __init__(self):
@@ -29,90 +35,106 @@ class FoundersFundScraper(PlaywrightScraper):
         self.base_url = "https://foundersfund.com"
 
     async def fetch(self, url: Optional[str] = None) -> str:
-        target_url = url or f"{self.base_url}/news/"
+        """Fetch homepage which has links to blog posts."""
+        target_url = url or self.base_url
 
         html = await self.fetch_rendered(
             target_url,
-            wait_selector="article, .news-item, [class*='post'], [class*='article'], [class*='card']",
+            wait_selector="a[href*='/20'], [class*='post'], [class*='article']",
             wait_ms=5000
         )
         return html
 
     async def parse(self, html: str) -> List[RawArticle]:
+        """Parse homepage for blog post links (paths like /2023/08/...)."""
         soup = BeautifulSoup(html, "lxml")
         articles = []
         seen_urls = set()
 
-        selectors = [
-            "article",
-            ".news-item",
-            "[class*='post']",
-            "[class*='article']",
-            "[class*='Card']",
-            "[class*='news']",
-        ]
+        # Find all links that look like blog posts (year/month pattern)
+        for link in soup.select("a[href]"):
+            href = link.get("href", "")
 
-        for selector in selectors:
-            for card in soup.select(selector):
-                title_el = card.select_one("h2, h3, h4, .title, [class*='title'], [class*='Title']")
-                if not title_el:
-                    continue
-                title = title_el.get_text(strip=True)
+            # Blog posts have paths like /2023/08/title-slug/
+            if not href:
+                continue
 
-                if not title or len(title) < 10:
-                    continue
+            # Make absolute URL
+            if href.startswith("/"):
+                url = f"{self.base_url}{href}"
+            elif href.startswith("http"):
+                url = href
+            else:
+                continue
 
-                # Skip non-funding content
-                if not self._is_funding_related(title):
-                    continue
+            # Must be a Founders Fund blog post
+            if "foundersfund.com" not in url:
+                continue
 
-                # Extract link
-                link_el = card.select_one("a[href]")
-                if not link_el:
-                    link_el = card.find_parent("a")
-                if not link_el:
-                    continue
+            # Check for year/month pattern in URL
+            import re
+            if not re.search(r'/20\d{2}/\d{2}/', url):
+                continue
 
-                url = link_el.get("href", "")
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
 
-                if url and not url.startswith("http"):
-                    url = f"{self.base_url}{url}"
+            # Get title from link text or nearby heading
+            title = link.get_text(strip=True)
+            if not title or len(title) < 10:
+                # Try to find a heading nearby
+                parent = link.find_parent(["div", "article", "section"])
+                if parent:
+                    heading = parent.select_one("h1, h2, h3, h4")
+                    if heading:
+                        title = heading.get_text(strip=True)
 
-                if url in seen_urls or not url:
-                    continue
-                seen_urls.add(url)
+            if not title or len(title) < 10:
+                # Use URL slug as title
+                slug = url.rstrip("/").split("/")[-1]
+                title = slug.replace("-", " ").title()
 
-                # Extract date
-                date_el = card.select_one("time, .date, [class*='date'], [class*='Date']")
-                pub_date = None
-                if date_el:
-                    date_str = date_el.get("datetime") or date_el.get_text(strip=True)
-                    pub_date = self._parse_date(date_str)
-
-                articles.append(RawArticle(
-                    url=url,
-                    title=title,
-                    html=str(card),
-                    published_date=pub_date,
-                ))
+            articles.append(RawArticle(
+                url=url,
+                title=title,
+                html=str(link.parent) if link.parent else str(link),
+                published_date=self._extract_date_from_url(url),
+            ))
 
         return articles
 
+    def _extract_date_from_url(self, url: str) -> Optional[date]:
+        """Extract date from URL like /2023/08/title/."""
+        import re
+        match = re.search(r'/(\d{4})/(\d{2})/', url)
+        if match:
+            try:
+                year = int(match.group(1))
+                month = int(match.group(2))
+                return date(year, month, 1)
+            except (ValueError, TypeError):
+                pass
+        return None
+
     async def normalize(self, raw: RawArticle) -> NormalizedArticle:
+        """Fetch and extract content from individual blog post."""
         try:
             full_html = await self.fetch_rendered(
                 raw.url,
-                wait_selector="article, .post-content, .entry-content, main",
+                wait_selector="article, .post-content, .entry-content, main, .content",
                 wait_ms=3000
             )
             soup = BeautifulSoup(full_html, "lxml")
 
+            # Find main content
             content_el = soup.select_one(
-                "article, .post-content, .entry-content, [class*='Content'], main"
+                "article, .post-content, .entry-content, [class*='Content'], main, .content"
             )
 
             if content_el:
-                for el in content_el.select("nav, header, footer, .share, script, style"):
+                # Remove non-content elements
+                for el in content_el.select("nav, header, footer, .share, script, style, .sidebar"):
                     el.decompose()
                 text = content_el.get_text(separator="\n", strip=True)
             else:
@@ -128,16 +150,6 @@ class FoundersFundScraper(PlaywrightScraper):
             published_date=raw.published_date,
         )
 
-    def _is_funding_related(self, title: str) -> bool:
-        """Check if title suggests funding news."""
-        keywords = [
-            "raises", "raised", "funding", "investment", "series",
-            "seed", "round", "portfolio", "backs", "backed", "led",
-            "million", "billion", "$", "announces", "investment"
-        ]
-        title_lower = title.lower()
-        return any(kw in title_lower for kw in keywords)
-
     async def fetch_portfolio(self) -> List[str]:
         """
         Fetch current portfolio companies for stealth detection.
@@ -147,18 +159,30 @@ class FoundersFundScraper(PlaywrightScraper):
         try:
             html = await self.fetch_rendered(
                 f"{self.base_url}/portfolio/",
-                wait_selector="[class*='company'], [class*='portfolio'], [class*='grid']",
+                wait_selector="[class*='company'], [class*='portfolio'], [class*='grid'], img[alt]",
                 wait_ms=5000
             )
             soup = BeautifulSoup(html, "lxml")
 
             companies = []
+
+            # Try multiple selectors for company names
             for el in soup.select("[class*='company'], [class*='portfolio'], [class*='Company']"):
                 name_el = el.select_one("h3, h4, .name, [class*='name'], [class*='Name']")
                 if name_el:
-                    companies.append(name_el.get_text(strip=True))
+                    name = name_el.get_text(strip=True)
+                    if name and len(name) > 1:
+                        companies.append(name)
 
-            return companies
+            # Also check image alt text (common pattern for portfolio pages)
+            for img in soup.select("img[alt]"):
+                alt = img.get("alt", "").strip()
+                if alt and len(alt) > 1 and len(alt) < 50:
+                    # Skip generic alt text
+                    if alt.lower() not in ("logo", "image", "company", "portfolio"):
+                        companies.append(alt)
+
+            return list(set(companies))  # Dedupe
         except Exception:
             return []
 

@@ -44,10 +44,10 @@ FUND_REGISTRY: dict[str, FundConfig] = {
     "founders_fund": FundConfig(
         name="Founders Fund",
         slug="founders_fund",
-        ingestion_url="https://foundersfund.com/news/",
+        ingestion_url="https://foundersfund.com/",
         scraper_type=ScraperType.PLAYWRIGHT,
         stealth_monitor_path="/portfolio/",
-        extraction_notes="Use DOM-diffing on /portfolio/ for stealth detection."
+        extraction_notes="Homepage + blog posts (/YYYY/MM/ pattern). No /news/ page exists."
     ),
 
     "benchmark": FundConfig(
@@ -117,18 +117,18 @@ FUND_REGISTRY: dict[str, FundConfig] = {
     "redpoint": FundConfig(
         name="Redpoint",
         slug="redpoint",
-        ingestion_url="https://redpoint.com/content-hub/",
+        ingestion_url="https://www.redpoint.com/content-hub/",
         scraper_type=ScraperType.HTML,
         required_keywords=["Funding News"],
-        extraction_notes="Filter by tag 'Funding News'."
+        extraction_notes="MUST use www. prefix. Filter by 'Funding News' tag. Gatsby/React site."
     ),
 
     "greylock": FundConfig(
         name="Greylock",
         slug="greylock",
-        ingestion_url="https://greylock.com/blog/portfolio-news/",
+        ingestion_url="https://greylock.com/portfolio-news/",
         scraper_type=ScraperType.PLAYWRIGHT,
-        extraction_notes="Portfolio news page; requires Playwright for JS rendering."
+        extraction_notes="Portfolio news page with inline content (no individual URLs). Requires Playwright."
     ),
 
     "gv": FundConfig(

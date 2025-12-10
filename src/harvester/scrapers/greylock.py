@@ -1,13 +1,21 @@
 """
 Greylock Partners Scraper.
 
-Source: https://greylock.com/blog/portfolio-news/
+Source: https://greylock.com/portfolio-news/
 Format: PLAYWRIGHT (JavaScript-rendered content)
 
-Portfolio news page; requires Playwright for JS rendering.
+NOTE: The Greylock portfolio news page displays ALL content inline.
+- Investment announcements are in h2 elements within .item/.item_small divs
+- There are NO individual article URLs - all links point back to /portfolio-news/
+- Content must be scraped directly from the page, not by following links
+
+This scraper extracts inline investment announcements and creates
+virtual article entries from the page content.
 """
 
+from datetime import date
 from typing import List, Optional
+import hashlib
 from bs4 import BeautifulSoup
 
 from ..playwright_scraper import PlaywrightScraper
@@ -20,7 +28,7 @@ class GreylockScraper(PlaywrightScraper):
     Scraper for Greylock portfolio news page.
 
     Uses Playwright to render JavaScript-heavy pages.
-    Prioritizes Partner-authored posts.
+    Extracts inline investment announcements (no individual article URLs).
     """
 
     # Known Greylock partners
@@ -42,138 +50,131 @@ class GreylockScraper(PlaywrightScraper):
         self.base_url = "https://greylock.com"
 
     async def fetch(self, url: Optional[str] = None) -> str:
-        target_url = url or f"{self.base_url}/blog/portfolio-news/"
+        # Use /portfolio-news/ not /blog/portfolio-news/
+        target_url = url or f"{self.base_url}/portfolio-news/"
 
         # Use Playwright to render the JavaScript content
         html = await self.fetch_rendered(
             target_url,
-            wait_selector="article, [class*='post'], [class*='card'], [class*='blog']",
+            wait_selector=".item, .item_small, h2, [class*='item']",
             wait_ms=5000
         )
         return html
 
     async def parse(self, html: str) -> List[RawArticle]:
+        """
+        Parse inline investment announcements from the portfolio news page.
+
+        Since all content is inline (no individual article URLs), we create
+        virtual articles from the h2 titles and surrounding content.
+        """
         soup = BeautifulSoup(html, "lxml")
         articles = []
-        seen_urls = set()
+        seen_titles = set()
 
-        # Try multiple selectors for Greylock's layout
-        selectors = [
-            "article",
-            ".post-card",
-            ".blog-post",
-            "[class*='post']",
-            "[class*='Post']",
-            "[class*='card']",
-            "[class*='Card']",
-            "[class*='blog']",
-            "[class*='Blog']",
-            "a[href*='/blog/']",
-        ]
+        # Find all investment announcement items
+        # Greylock uses .item and .item_small classes with h2 titles
+        for item in soup.select(".item, .item_small"):
+            # Get the h2 title
+            title_el = item.select_one("h2")
+            if not title_el:
+                continue
 
-        for selector in selectors:
-            for card in soup.select(selector):
-                # Extract title
-                title_el = card.select_one("h2, h3, h4, .title, [class*='title'], [class*='Title'], a")
-                if not title_el:
-                    continue
-                title = title_el.get_text(strip=True)
+            title = title_el.get_text(strip=True)
+            if not title or len(title) < 10:
+                continue
 
-                if not title or len(title) < 10:
-                    continue
+            # Skip if we've seen this title
+            if title in seen_titles:
+                continue
+            seen_titles.add(title)
 
-                # Extract link
-                link_el = card.select_one("a[href]")
-                if not link_el:
-                    if card.name == "a":
-                        link_el = card
-                    else:
-                        link_el = card.find_parent("a")
-                if not link_el:
-                    continue
+            # Check if this is an investment/funding announcement
+            if not self._is_investment_news(title):
+                continue
 
-                url = link_el.get("href", "")
+            # Get the full text content of this item
+            item_text = item.get_text(separator="\n", strip=True)
 
-                # Make URL absolute
-                if url and not url.startswith("http"):
-                    url = f"{self.base_url}{url}"
+            # Extract company name from title
+            company_name = self._extract_company_name(title)
 
-                # Skip non-blog URLs
-                if "/blog/" not in url and "/portfolio-news" not in url:
-                    continue
+            # Create a unique URL for this inline content
+            # Use hash of title since there's no real URL
+            title_hash = hashlib.md5(title.encode()).hexdigest()[:8]
+            virtual_url = f"{self.base_url}/portfolio-news/#{title_hash}"
 
-                if url in seen_urls or not url:
-                    continue
-                seen_urls.add(url)
+            # Try to extract author/partner
+            author = None
+            author_el = item.select_one(
+                "[class*='author'], [class*='Author'], .byline, "
+                "[class*='partner'], [class*='Partner']"
+            )
+            if author_el:
+                author = author_el.get_text(strip=True)
 
-                # Extract author
-                author = None
-                author_el = card.select_one(".author, [class*='author'], [class*='Author'], .byline")
-                if author_el:
-                    author = author_el.get_text(strip=True)
-
-                # Extract date
-                date_el = card.select_one("time, .date, [class*='date'], [class*='Date']")
-                pub_date = None
-                if date_el:
-                    date_str = date_el.get("datetime") or date_el.get_text(strip=True)
-                    pub_date = self._parse_date(date_str)
-
-                # Extract tags
-                tags = []
-                for tag_el in card.select(".tag, .category, [class*='tag'], [class*='category']"):
-                    tag_text = tag_el.get_text(strip=True).lower()
-                    if tag_text:
-                        tags.append(tag_text)
-
-                articles.append(RawArticle(
-                    url=url,
-                    title=title,
-                    html=str(card),
-                    published_date=pub_date,
-                    author=author,
-                    tags=tags,
-                ))
+            # Create article from inline content
+            articles.append(RawArticle(
+                url=virtual_url,
+                title=title,
+                html=str(item),
+                published_date=date.today(),  # No dates on inline content
+                author=author,
+                tags=["greylock", "investment", company_name.lower()] if company_name else ["greylock", "investment"],
+            ))
 
         return articles
 
+    def _is_investment_news(self, title: str) -> bool:
+        """Check if title indicates an investment announcement."""
+        title_lower = title.lower()
+        investment_keywords = [
+            "investment in",
+            "investing in",
+            "introducing",
+            "our investment",
+            "congrats",
+            "congratulations",
+            "welcome",
+        ]
+        return any(kw in title_lower for kw in investment_keywords)
+
+    def _extract_company_name(self, title: str) -> Optional[str]:
+        """Extract company name from title like 'Our Investment in Acme' or 'Introducing: Acme'."""
+        import re
+
+        # Pattern: "Our Investment in CompanyName"
+        match = re.search(r'investment\s+in\s+([A-Z][A-Za-z0-9\s]+?)(?:\s*[-:!]|\s*$)', title, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+
+        # Pattern: "Introducing CompanyName" or "Introducing: CompanyName"
+        match = re.search(r'introducing[:\s]+([A-Z][A-Za-z0-9\s]+?)(?:\s*[-:!]|\s*$)', title, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+
+        # Pattern: "Congrats, CompanyName!"
+        match = re.search(r'congrats?,?\s+([A-Z][A-Za-z0-9\s]+?)(?:\s*[!]|\s*$)', title, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+
+        return None
+
     async def normalize(self, raw: RawArticle) -> NormalizedArticle:
-        try:
-            # Fetch full article with Playwright
-            full_html = await self.fetch_rendered(
-                raw.url,
-                wait_selector="article, .post-content, [class*='content'], main",
-                wait_ms=3000
-            )
-            soup = BeautifulSoup(full_html, "lxml")
+        """
+        Normalize inline content - no need to fetch since content is already in HTML.
+        """
+        # Extract text from the HTML we already have
+        soup = BeautifulSoup(raw.html, "lxml")
+        text = soup.get_text(separator="\n", strip=True)
 
-            # Find main content
-            content_el = soup.select_one(
-                "article, .post-content, .entry-content, [class*='Content'], main"
-            )
+        # Add partner flag if applicable
+        author = raw.author
+        if author and self._is_partner_authored(author):
+            text = f"[PARTNER POST: {author}]\n{text}"
 
-            if content_el:
-                # Remove navigation and non-content elements
-                for el in content_el.select("nav, header, footer, .share, .related, script, style"):
-                    el.decompose()
-                text = content_el.get_text(separator="\n", strip=True)
-            else:
-                text = self._extract_text(full_html)
-
-            # Try to find author in full article
-            author = raw.author
-            if not author:
-                author_el = soup.select_one(".author, [class*='author'], [class*='Author'], .byline, [rel='author']")
-                if author_el:
-                    author = author_el.get_text(strip=True)
-
-            # Flag if partner-authored
-            if author and self._is_partner_authored(author):
-                text = f"[PARTNER POST: {author}]\n{text}"
-
-        except Exception:
-            text = self._extract_text(raw.html)
-            author = raw.author
+        # Add investment context
+        text = f"Greylock Investment Announcement: {raw.title}\n\n{text}"
 
         return NormalizedArticle(
             url=raw.url,
