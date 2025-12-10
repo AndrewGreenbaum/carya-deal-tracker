@@ -321,6 +321,9 @@ class BraveEnrichmentClient:
                 # Skip if already has LinkedIn
                 if founder.get("linkedin_url"):
                     result.founder_linkedins[founder_name] = founder["linkedin_url"]
+                    if not result.ceo_linkedin:
+                        result.ceo_name = founder_name
+                        result.ceo_linkedin = founder["linkedin_url"]
                     continue
 
                 linkedin = await self.find_founder_linkedin(founder_name, context.company_name)
@@ -333,11 +336,12 @@ class BraveEnrichmentClient:
 
                 await asyncio.sleep(0.3)
 
-        # Fallback: if no founders known, try generic CEO search
-        if not result.ceo_linkedin and not context.founders:
+        # Fallback: if still no LinkedIn found, try generic CEO search
+        if not result.ceo_linkedin:
             ceo_name, linkedin_url = await self.find_ceo_linkedin(context.company_name)
-            result.ceo_name = ceo_name
-            result.ceo_linkedin = linkedin_url
+            if linkedin_url:
+                result.ceo_name = ceo_name
+                result.ceo_linkedin = linkedin_url
 
         return result
 
