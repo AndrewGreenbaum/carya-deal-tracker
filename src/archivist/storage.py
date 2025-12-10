@@ -18,7 +18,7 @@ from .models import (
 from .database import get_session
 from ..analyst.schemas import DealExtraction, LeadStatus, EnterpriseCategory
 from ..config.funds import FUND_REGISTRY
-from ..harvester.fund_matcher import match_fund_name
+# NOTE: match_fund_name is imported lazily inside save_deal() to avoid circular import
 
 
 async def get_or_create_company(
@@ -97,6 +97,10 @@ async def save_deal(
     - DealInvestor records for all investors
     - Article record linked to the deal
     """
+    # Lazy import to avoid circular dependency
+    # (storage.py -> harvester -> orchestrator.py -> storage.py)
+    from ..harvester.fund_matcher import match_fund_name
+
     # Get or create company with website and LinkedIn
     company = await get_or_create_company(
         session,
