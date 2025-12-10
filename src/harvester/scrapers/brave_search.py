@@ -562,7 +562,7 @@ class BraveSearchScraper:
         include_stealth: bool = True,
         include_regional: bool = False,
         include_early_signals: bool = False,
-        include_partner_names: bool = True,  # NEW: Search by partner names
+        include_partner_names: bool = False,  # DISABLED: Re-enable after testing
     ) -> List[NormalizedArticle]:
         """
         Full scraping pipeline with expanded coverage options.
