@@ -6,6 +6,7 @@ Runs scraping every 4 hours of all 18 VC funds with:
 - Error isolation per fund
 - Webhook notifications on completion
 - Metrics logging
+- Automatic enrichment of new deals
 """
 
 import asyncio
@@ -21,6 +22,94 @@ from ..config.settings import settings
 from .notifications import send_scrape_summary
 
 logger = logging.getLogger(__name__)
+
+
+async def enrich_new_deals(limit: int = 25):
+    """
+    Enrich newly scraped deals with website and CEO LinkedIn.
+
+    Runs after each scrape job to populate company links.
+    """
+    try:
+        from ..enrichment import enrich_company
+        from ..archivist import get_session, Deal, PortfolioCompany
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        import json
+
+        async with get_session() as db:
+            # Find deals missing company website
+            query = (
+                select(Deal)
+                .options(selectinload(Deal.company))
+                .join(Deal.company)
+                .where(
+                    (PortfolioCompany.website == None) | (PortfolioCompany.website == "")
+                )
+                .order_by(Deal.created_at.desc())
+                .limit(limit)
+            )
+
+            result = await db.execute(query)
+            deals = result.scalars().all()
+
+            if not deals:
+                logger.info("No deals needing enrichment")
+                return 0
+
+            enriched_count = 0
+            for deal in deals:
+                company_name = deal.company.name if deal.company else None
+                if not company_name or company_name.startswith("No "):
+                    continue
+
+                try:
+                    enrichment = await enrich_company(company_name)
+
+                    if deal.company and enrichment.website:
+                        deal.company.website = enrichment.website
+                        enriched_count += 1
+
+                    # Update founders with CEO LinkedIn
+                    if enrichment.ceo_linkedin:
+                        founders = []
+                        if deal.founders_json:
+                            try:
+                                founders = json.loads(deal.founders_json)
+                            except:
+                                founders = []
+
+                        ceo_found = False
+                        for f in founders:
+                            if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
+                                if not f.get("linkedin_url"):
+                                    f["linkedin_url"] = enrichment.ceo_linkedin
+                                    if enrichment.ceo_name:
+                                        f["name"] = enrichment.ceo_name
+                                ceo_found = True
+                                break
+
+                        if not ceo_found:
+                            founders.insert(0, {
+                                "name": enrichment.ceo_name or "CEO",
+                                "title": "CEO",
+                                "linkedin_url": enrichment.ceo_linkedin,
+                            })
+
+                        deal.founders_json = json.dumps(founders)
+
+                    await asyncio.sleep(0.5)  # Rate limit
+
+                except Exception as e:
+                    logger.warning(f"Error enriching {company_name}: {e}")
+
+            await db.commit()
+            logger.info(f"Enriched {enriched_count} companies with website/LinkedIn data")
+            return enriched_count
+
+    except Exception as e:
+        logger.error(f"Enrichment job failed: {e}", exc_info=True)
+        return 0
 
 # Global scheduler instance
 scheduler: Optional[AsyncIOScheduler] = None
@@ -61,6 +150,12 @@ async def scheduled_scrape_job():
             f"articles={total_articles}, deals={total_deals}, "
             f"errors={total_errors}, duration={duration:.1f}s"
         )
+
+        # Enrich new deals with website/LinkedIn data
+        if total_deals > 0:
+            logger.info(f"[{job_id}] Starting automatic enrichment for new deals")
+            enriched = await enrich_new_deals(limit=min(total_deals + 10, 50))
+            logger.info(f"[{job_id}] Enrichment complete: {enriched} companies updated")
 
         # Send notification
         await send_scrape_summary(

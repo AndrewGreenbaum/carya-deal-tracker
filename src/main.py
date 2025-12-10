@@ -2174,6 +2174,7 @@ async def enrich_single_company(
 async def enrich_deals(
     limit: int = Query(10, ge=1, le=50, description="Max deals to enrich"),
     skip_enriched: bool = Query(True, description="Skip deals that already have data"),
+    force_update: bool = Query(False, description="Overwrite existing data with new enrichment"),
     api_key: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2182,6 +2183,8 @@ async def enrich_deals(
 
     Finds deals missing company_website or founder LinkedIn,
     then uses Brave Search to populate the data.
+
+    Use force_update=true to overwrite existing (potentially wrong) data.
     """
     from .enrichment import enrich_company
 
@@ -2216,7 +2219,7 @@ async def enrich_deals(
 
             # Update company in database
             if deal.company:
-                if enrichment.website and not deal.company.website:
+                if enrichment.website and (not deal.company.website or force_update):
                     deal.company.website = enrichment.website
                     updated_count += 1
 
@@ -2234,7 +2237,7 @@ async def enrich_deals(
                     ceo_found = False
                     for f in founders:
                         if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
-                            if not f.get("linkedin_url"):
+                            if not f.get("linkedin_url") or force_update:
                                 f["linkedin_url"] = enrichment.ceo_linkedin
                                 if enrichment.ceo_name:
                                     f["name"] = enrichment.ceo_name
