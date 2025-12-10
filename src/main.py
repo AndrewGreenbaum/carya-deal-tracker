@@ -2181,12 +2181,14 @@ async def enrich_deals(
     """
     Enrich deals with missing website/LinkedIn data.
 
+    Uses deal context (investor, founders, category) for accurate enrichment.
     Finds deals missing company_website or founder LinkedIn,
     then uses Brave Search to populate the data.
 
     Use force_update=true to overwrite existing (potentially wrong) data.
     """
-    from .enrichment import enrich_company
+    from .enrichment import enrich_company_with_context, DealContext
+    import json as json_module
 
     # Find deals missing enrichment data
     query = (
@@ -2215,7 +2217,24 @@ async def enrich_deals(
             continue
 
         try:
-            enrichment = await enrich_company(company_name)
+            # Build context from deal data
+            founders = []
+            if deal.founders_json:
+                try:
+                    founders = json_module.loads(deal.founders_json)
+                except:
+                    founders = []
+
+            context = DealContext(
+                company_name=company_name,
+                lead_investor=deal.lead_investor,
+                founders=founders,
+                source_url=deal.source_url,
+                enterprise_category=deal.enterprise_category,
+            )
+
+            # Use context-aware enrichment
+            enrichment = await enrich_company_with_context(context)
 
             # Update company in database
             if deal.company:
@@ -2223,35 +2242,26 @@ async def enrich_deals(
                     deal.company.website = enrichment.website
                     updated_count += 1
 
-                # Update founders_json with CEO LinkedIn
-                if enrichment.ceo_linkedin:
-                    import json
-                    founders = []
-                    if deal.founders_json:
-                        try:
-                            founders = json.loads(deal.founders_json)
-                        except:
-                            founders = []
-
-                    # Add/update CEO
-                    ceo_found = False
+                # Update founders_json with LinkedIn URLs
+                if enrichment.founder_linkedins or enrichment.ceo_linkedin:
+                    # Update existing founders with LinkedIn URLs
                     for f in founders:
-                        if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
+                        founder_name = f.get("name", "")
+                        if founder_name in enrichment.founder_linkedins:
                             if not f.get("linkedin_url") or force_update:
-                                f["linkedin_url"] = enrichment.ceo_linkedin
-                                if enrichment.ceo_name:
-                                    f["name"] = enrichment.ceo_name
-                            ceo_found = True
-                            break
+                                f["linkedin_url"] = enrichment.founder_linkedins[founder_name]
 
-                    if not ceo_found and enrichment.ceo_linkedin:
-                        founders.insert(0, {
-                            "name": enrichment.ceo_name or "CEO",
-                            "title": "CEO",
-                            "linkedin_url": enrichment.ceo_linkedin,
-                        })
+                    # Fallback: if no founder matched, add CEO
+                    if enrichment.ceo_linkedin:
+                        ceo_found = any(f.get("linkedin_url") for f in founders)
+                        if not ceo_found:
+                            for f in founders:
+                                if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
+                                    if not f.get("linkedin_url") or force_update:
+                                        f["linkedin_url"] = enrichment.ceo_linkedin
+                                    break
 
-                    deal.founders_json = json.dumps(founders)
+                    deal.founders_json = json_module.dumps(founders)
 
             results.append(EnrichmentResult(
                 company_name=company_name,
