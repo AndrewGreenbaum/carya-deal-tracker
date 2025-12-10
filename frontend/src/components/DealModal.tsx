@@ -166,38 +166,31 @@ export function DealModal({ deal, onClose }: DealModalProps) {
             </div>
           </div>
 
-          {/* Founders */}
-          {deal.founders && deal.founders.length > 0 && (
+          {/* CEO/Main Founder - only show first founder */}
+          {deal.founders && deal.founders.length > 0 && deal.founders[0] && (
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
-                Founders
+                CEO / Founder
               </label>
-              <div className="space-y-2">
-                {deal.founders.map((founder, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between p-3 bg-slate-900/50 border border-slate-800 rounded"
+              <div className="flex items-center justify-between p-3 bg-slate-900/50 border border-slate-800 rounded">
+                <div className="flex items-center gap-2">
+                  <User className="w-4 h-4 text-slate-400" />
+                  <span className="text-white">{deal.founders[0].name}</span>
+                  {deal.founders[0].title && (
+                    <span className="text-slate-500 text-sm">• {deal.founders[0].title}</span>
+                  )}
+                </div>
+                {deal.founders[0].linkedinUrl && (
+                  <a
+                    href={deal.founders[0].linkedinUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-sm transition-colors"
                   >
-                    <div className="flex items-center gap-2">
-                      <User className="w-4 h-4 text-slate-400" />
-                      <span className="text-white">{founder.name}</span>
-                      {founder.title && (
-                        <span className="text-slate-500 text-sm">• {founder.title}</span>
-                      )}
-                    </div>
-                    {founder.linkedinUrl && (
-                      <a
-                        href={founder.linkedinUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-sm transition-colors"
-                      >
-                        <Linkedin className="w-3 h-3" />
-                        LinkedIn
-                      </a>
-                    )}
-                  </div>
-                ))}
+                    <Linkedin className="w-3 h-3" />
+                    LinkedIn
+                  </a>
+                )}
               </div>
             </div>
           )}
