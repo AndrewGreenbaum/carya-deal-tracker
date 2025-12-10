@@ -2131,6 +2131,148 @@ async def clear_cache(api_key: str = Depends(verify_api_key)):
     return {"status": "cache cleared"}
 
 
+# ----- Company Enrichment -----
+
+class EnrichmentResult(BaseModel):
+    company_name: str
+    website: Optional[str] = None
+    ceo_name: Optional[str] = None
+    ceo_linkedin: Optional[str] = None
+
+
+class EnrichmentResponse(BaseModel):
+    companies_enriched: int
+    companies_updated: int
+    results: List[EnrichmentResult]
+
+
+@app.post("/enrichment/company", response_model=EnrichmentResult)
+async def enrich_single_company(
+    company_name: str = Query(..., description="Company name to enrich"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Enrich a single company with website and CEO LinkedIn.
+
+    Uses Brave Search to find:
+    - Official company website
+    - CEO/Founder LinkedIn profile
+    """
+    from .enrichment import enrich_company
+
+    result = await enrich_company(company_name)
+
+    return EnrichmentResult(
+        company_name=result.company_name,
+        website=result.website,
+        ceo_name=result.ceo_name,
+        ceo_linkedin=result.ceo_linkedin,
+    )
+
+
+@app.post("/enrichment/deals", response_model=EnrichmentResponse)
+async def enrich_deals(
+    limit: int = Query(10, ge=1, le=50, description="Max deals to enrich"),
+    skip_enriched: bool = Query(True, description="Skip deals that already have data"),
+    api_key: str = Depends(verify_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Enrich deals with missing website/LinkedIn data.
+
+    Finds deals missing company_website or founder LinkedIn,
+    then uses Brave Search to populate the data.
+    """
+    from .enrichment import enrich_company
+
+    # Find deals missing enrichment data
+    query = (
+        select(Deal)
+        .options(selectinload(Deal.company))
+        .join(Deal.company)
+    )
+
+    if skip_enriched:
+        # Only get deals where company website is missing
+        query = query.where(
+            (PortfolioCompany.website == None) | (PortfolioCompany.website == "")
+        )
+
+    query = query.order_by(Deal.created_at.desc()).limit(limit)
+
+    result = await db.execute(query)
+    deals = result.scalars().all()
+
+    results = []
+    updated_count = 0
+
+    for deal in deals:
+        company_name = deal.company.name if deal.company else None
+        if not company_name:
+            continue
+
+        try:
+            enrichment = await enrich_company(company_name)
+
+            # Update company in database
+            if deal.company:
+                if enrichment.website and not deal.company.website:
+                    deal.company.website = enrichment.website
+                    updated_count += 1
+
+                # Update founders_json with CEO LinkedIn
+                if enrichment.ceo_linkedin:
+                    import json
+                    founders = []
+                    if deal.founders_json:
+                        try:
+                            founders = json.loads(deal.founders_json)
+                        except:
+                            founders = []
+
+                    # Add/update CEO
+                    ceo_found = False
+                    for f in founders:
+                        if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
+                            if not f.get("linkedin_url"):
+                                f["linkedin_url"] = enrichment.ceo_linkedin
+                                if enrichment.ceo_name:
+                                    f["name"] = enrichment.ceo_name
+                            ceo_found = True
+                            break
+
+                    if not ceo_found and enrichment.ceo_linkedin:
+                        founders.insert(0, {
+                            "name": enrichment.ceo_name or "CEO",
+                            "title": "CEO",
+                            "linkedin_url": enrichment.ceo_linkedin,
+                        })
+
+                    deal.founders_json = json.dumps(founders)
+
+            results.append(EnrichmentResult(
+                company_name=company_name,
+                website=enrichment.website,
+                ceo_name=enrichment.ceo_name,
+                ceo_linkedin=enrichment.ceo_linkedin,
+            ))
+
+            # Rate limit
+            await asyncio.sleep(0.5)
+
+        except Exception as e:
+            print(f"Error enriching {company_name}: {e}")
+            results.append(EnrichmentResult(company_name=company_name))
+
+    await db.commit()
+
+    return EnrichmentResponse(
+        companies_enriched=len(results),
+        companies_updated=updated_count,
+        results=results,
+    )
+
+
 # ----- CLI Runner -----
 
 def run_server():

@@ -1,11 +1,11 @@
 /**
- * DealsTable - Main deals table with verification snippets
+ * DealsTable - Main deals table with company links
  *
  * Features:
  * - Company name with source
  * - Stage badge & Lead fund
  * - Enterprise category with icon
- * - Verification snippet with highlight
+ * - Company links (website + CEO LinkedIn icons)
  * - Detection time
  * - Click to open modal
  */
@@ -27,6 +27,8 @@ import {
   ChevronRight,
   ArrowUp,
   ArrowDown,
+  Linkedin,
+  ExternalLink,
 } from 'lucide-react';
 import type { Deal, EnterpriseCategory, InvestmentStage, PaginatedDeals, SortDirection } from '../types';
 import { STAGE_LABELS } from '../types';
@@ -89,8 +91,8 @@ export function DealsTable({
               <th className="px-6 py-3 border-b border-slate-800">Company / Source</th>
               <th className="px-6 py-3 border-b border-slate-800">Stage & Fund</th>
               <th className="px-6 py-3 border-b border-slate-800">AI Category</th>
-              <th className="px-6 py-3 border-b border-slate-800 w-1/3">
-                Verification Snippet (Claude 3.5)
+              <th className="px-6 py-3 border-b border-slate-800 w-24 text-center">
+                Links
               </th>
               <th
                 className="px-6 py-3 border-b border-slate-800 text-right cursor-pointer hover:bg-slate-800/50 transition-colors select-none"
@@ -202,12 +204,12 @@ function DealRow({ deal, onClick }: DealRowProps) {
         <CategoryBadge category={deal.enterpriseCategory} isRejected={isRejected} />
       </td>
 
-      {/* Verification Snippet */}
+      {/* Company Links */}
       <td className="px-6 py-4">
-        <VerificationSnippet
-          snippet={deal.verificationSnippet}
+        <CompanyLinks
+          website={deal.companyWebsite}
+          ceoLinkedin={deal.founders?.[0]?.linkedinUrl}
           isRejected={isRejected}
-          isEnterpriseAi={deal.isEnterpriseAi}
         />
       </td>
 
@@ -278,59 +280,54 @@ function CategoryBadge({
   );
 }
 
-function VerificationSnippet({
-  snippet,
+function CompanyLinks({
+  website,
+  ceoLinkedin,
   isRejected,
-  isEnterpriseAi,
 }: {
-  snippet?: string;
+  website?: string;
+  ceoLinkedin?: string;
   isRejected: boolean;
-  isEnterpriseAi: boolean;
 }) {
-  if (isRejected || !snippet) {
-    const reason = !isEnterpriseAi
-      ? 'Not Enterprise AI (Consumer/B2C)'
-      : 'Participated only (not lead)';
-    return (
-      <div className="p-2 bg-slate-900 border-l-2 border-slate-700 text-slate-600 italic">
-        "Filtered: {reason}"
-      </div>
-    );
-  }
+  const hasWebsite = !!website;
+  const hasLinkedin = !!ceoLinkedin;
 
-  // Highlight lead-related phrases
-  const highlightedSnippet = highlightLeadPhrases(snippet);
+  const handleClick = (e: React.MouseEvent, url: string) => {
+    e.stopPropagation(); // Prevent row click
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
 
   return (
-    <div
-      className="verification-snippet"
-      dangerouslySetInnerHTML={{ __html: `"${highlightedSnippet}"` }}
-    />
+    <div className="flex items-center justify-center gap-3">
+      {/* Website Icon */}
+      <button
+        onClick={(e) => hasWebsite && handleClick(e, website!)}
+        disabled={!hasWebsite}
+        className={`p-1.5 rounded transition-all ${
+          hasWebsite
+            ? 'hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 cursor-pointer'
+            : 'text-slate-700 cursor-not-allowed'
+        } ${isRejected ? 'opacity-50' : ''}`}
+        title={hasWebsite ? `Visit ${website}` : 'No website'}
+      >
+        <Globe className="w-4 h-4" />
+      </button>
+
+      {/* LinkedIn Icon */}
+      <button
+        onClick={(e) => hasLinkedin && handleClick(e, ceoLinkedin!)}
+        disabled={!hasLinkedin}
+        className={`p-1.5 rounded transition-all ${
+          hasLinkedin
+            ? 'hover:bg-slate-700 text-blue-400 hover:text-blue-300 cursor-pointer'
+            : 'text-slate-700 cursor-not-allowed'
+        } ${isRejected ? 'opacity-50' : ''}`}
+        title={hasLinkedin ? 'CEO LinkedIn' : 'No LinkedIn'}
+      >
+        <Linkedin className="w-4 h-4" />
+      </button>
+    </div>
   );
-}
-
-function highlightLeadPhrases(text: string): string {
-  const phrases = [
-    'led by',
-    'led the',
-    'headed by',
-    'headed the',
-    'leading the',
-    'led the investment',
-    'led the round',
-    'led a',
-    'led the Series',
-  ];
-
-  let result = text;
-  for (const phrase of phrases) {
-    const regex = new RegExp(`(${phrase})`, 'gi');
-    result = result.replace(
-      regex,
-      '<span class="bg-emerald-500/20 text-emerald-300 px-0.5">$1</span>'
-    );
-  }
-  return result;
 }
 
 function formatDate(dateString: string): string {
