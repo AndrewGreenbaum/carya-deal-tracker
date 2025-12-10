@@ -1,15 +1,12 @@
 /**
  * DealModal - Detailed view of a single deal
  *
- * Shows all deal fields with copy functionality for verification snippet
+ * Shows deal details with company links and founder info
  * Command Center dark theme
  */
 
-import { useState } from 'react';
 import {
   X,
-  Copy,
-  Check,
   ExternalLink,
   Users,
   DollarSign,
@@ -33,16 +30,6 @@ interface DealModalProps {
 }
 
 export function DealModal({ deal, onClose }: DealModalProps) {
-  const [copied, setCopied] = useState(false);
-
-  const copySnippet = async () => {
-    if (deal.verificationSnippet) {
-      await navigator.clipboard.writeText(deal.verificationSnippet);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       onClose();
@@ -143,40 +130,6 @@ export function DealModal({ deal, onClose }: DealModalProps) {
                 )
               }
             />
-          </div>
-
-          {/* Verification Snippet */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                Verification Snippet
-              </label>
-              {deal.verificationSnippet && (
-                <button
-                  onClick={copySnippet}
-                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-white transition-colors"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-3 h-3 text-emerald-400" />
-                      <span className="text-emerald-400">Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3 h-3" />
-                      <span>Copy</span>
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-            <div className="p-4 bg-slate-900 border-l-2 border-emerald-500 rounded-r">
-              {deal.verificationSnippet ? (
-                <p className="text-slate-300 italic">"{deal.verificationSnippet}"</p>
-              ) : (
-                <p className="text-slate-500 italic">No verification snippet available</p>
-              )}
-            </div>
           </div>
 
           {/* Company Links */}
