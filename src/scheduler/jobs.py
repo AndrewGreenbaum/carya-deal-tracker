@@ -28,10 +28,11 @@ async def enrich_new_deals(limit: int = 25):
     """
     Enrich newly scraped deals with website and CEO LinkedIn.
 
+    Uses deal context (investor, founders, category) for accurate enrichment.
     Runs after each scrape job to populate company links.
     """
     try:
-        from ..enrichment import enrich_company
+        from ..enrichment import enrich_company_with_context, DealContext
         from ..archivist import get_session, Deal, PortfolioCompany
         from sqlalchemy import select
         from sqlalchemy.orm import selectinload
@@ -63,38 +64,57 @@ async def enrich_new_deals(limit: int = 25):
                 if not company_name or company_name.startswith("No "):
                     continue
 
+                # Skip invalid names
+                if company_name.lower() in ("unknown", "n/a", "<unknown>"):
+                    continue
+
                 try:
-                    enrichment = await enrich_company(company_name)
+                    # Build context from deal for accurate enrichment
+                    founders = []
+                    if deal.founders_json:
+                        try:
+                            founders = json.loads(deal.founders_json)
+                        except:
+                            founders = []
+
+                    # Get lead investor from deal_investors
+                    lead_investor = None
+                    for inv in deal.investors:
+                        if inv.is_lead:
+                            lead_investor = inv.investor_name
+                            break
+
+                    context = DealContext(
+                        company_name=company_name,
+                        lead_investor=lead_investor,
+                        founders=founders,
+                        source_url=None,  # Not stored in deal model
+                        enterprise_category=deal.enterprise_category,
+                    )
+
+                    enrichment = await enrich_company_with_context(context)
 
                     if deal.company and enrichment.website:
                         deal.company.website = enrichment.website
                         enriched_count += 1
 
-                    # Update founders with CEO LinkedIn
-                    if enrichment.ceo_linkedin:
-                        founders = []
-                        if deal.founders_json:
-                            try:
-                                founders = json.loads(deal.founders_json)
-                            except:
-                                founders = []
-
-                        ceo_found = False
+                    # Update founders with LinkedIn URLs from enrichment
+                    if enrichment.founder_linkedins or enrichment.ceo_linkedin:
                         for f in founders:
-                            if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
+                            founder_name = f.get("name", "")
+                            if founder_name in enrichment.founder_linkedins:
                                 if not f.get("linkedin_url"):
-                                    f["linkedin_url"] = enrichment.ceo_linkedin
-                                    if enrichment.ceo_name:
-                                        f["name"] = enrichment.ceo_name
-                                ceo_found = True
-                                break
+                                    f["linkedin_url"] = enrichment.founder_linkedins[founder_name]
 
-                        if not ceo_found:
-                            founders.insert(0, {
-                                "name": enrichment.ceo_name or "CEO",
-                                "title": "CEO",
-                                "linkedin_url": enrichment.ceo_linkedin,
-                            })
+                        # Fallback: if no founder matched, add CEO LinkedIn
+                        if enrichment.ceo_linkedin:
+                            ceo_found = any(f.get("linkedin_url") for f in founders)
+                            if not ceo_found:
+                                for f in founders:
+                                    if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
+                                        if not f.get("linkedin_url"):
+                                            f["linkedin_url"] = enrichment.ceo_linkedin
+                                        break
 
                         deal.founders_json = json.dumps(founders)
 
