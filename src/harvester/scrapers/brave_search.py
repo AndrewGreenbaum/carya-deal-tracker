@@ -48,13 +48,18 @@ FUND_SEARCH_NAMES = {
     "first_round": ["First Round Capital", "First Round"],
 }
 
-# Exclusion terms to filter noise
+# Exclusion terms to filter noise - enhanced for generic fund names
 EXCLUSION_TERMS = {
-    "gv": ["-NYSE", "-stock", "-ticker", "-dividend"],  # Exclude GV stock ticker
-    "thrive": ["-\"Thrive Global\"", "-\"Thrive IT\"", "-wellness"],  # Wrong Thrive
-    "sequoia": ["-\"Sequoia National\"", "-HongShan", "-\"Peak XV\""],  # Wrong Sequoia
-    "benchmark": ["-benchmark.com", "-benchmarking"],  # Generic benchmark word
-    "accel": ["-accelerate", "-acceleration"],  # Generic accel word
+    "gv": ["-NYSE", "-stock", "-ticker", "-dividend", "-\"Visionary Holdings\""],  # Exclude GV stock ticker
+    "thrive": ["-\"Thrive Global\"", "-\"Thrive IT\"", "-\"Thrive Market\"", "-wellness"],  # Wrong Thrive
+    "sequoia": ["-\"Sequoia National\"", "-HongShan", "-\"Peak XV\"", "-\"Sequoia India\"", "-\"Sequoia China\""],  # Wrong Sequoia
+    "benchmark": ["-benchmark.com", "-benchmarking", "-\"Benchmark International\"", "-\"Benchmark Electronics\""],  # Generic benchmark
+    "accel": ["-accelerate", "-acceleration", "-accelerator", "-\"Accel Entertainment\""],  # Generic accel word
+    "index": ["-\"index fund\"", "-\"stock index\"", "-\"S&P index\"", "-\"market index\""],  # Exclude index fund mentions
+    "insight": ["-\"market insight\"", "-\"business insight\"", "-\"consumer insight\"", "-insights"],  # Generic insight
+    "menlo": ["-\"Menlo Park\"", "-\"Menlo College\"", "-\"Menlo School\""],  # Menlo Park location
+    "redpoint": ["-\"Redpoint Bio\"", "-\"Redpoint Positioning\""],  # Other Redpoint companies
+    "first_round": ["-\"first round pick\"", "-\"first round draft\"", "-NFL", "-NBA"],  # Sports draft picks
 }
 
 # Enterprise AI keywords - optimized for high-signal results

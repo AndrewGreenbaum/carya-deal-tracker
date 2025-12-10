@@ -18,6 +18,7 @@ from .models import (
 from .database import get_session
 from ..analyst.schemas import DealExtraction, LeadStatus, EnterpriseCategory
 from ..config.funds import FUND_REGISTRY
+from ..harvester.fund_matcher import match_fund_name
 
 
 async def get_or_create_company(
@@ -140,19 +141,17 @@ async def save_deal(
     # Add lead investors
     for investor in extraction.lead_investors:
         fund = None
-        if investor.is_tracked_fund:
-            # Try to match to a tracked fund
-            for slug in FUND_REGISTRY:
-                if FUND_REGISTRY[slug].name.lower() in investor.name.lower():
-                    fund = await get_or_create_fund(session, slug)
-                    break
+        # Use centralized fund matcher (handles variants + negative keywords)
+        fund_slug = match_fund_name(investor.name)
+        if fund_slug:
+            fund = await get_or_create_fund(session, fund_slug)
 
         deal_investor = DealInvestor(
             deal_id=deal.id,
             fund_id=fund.id if fund else None,
             investor_name=investor.name,
             is_lead=True,
-            is_tracked_fund=investor.is_tracked_fund,
+            is_tracked_fund=fund is not None,  # Use actual match result
             partner_name=investor.partner_name,
             role=investor.role.value,
         )
@@ -161,18 +160,17 @@ async def save_deal(
     # Add participating investors
     for investor in extraction.participating_investors:
         fund = None
-        if investor.is_tracked_fund:
-            for slug in FUND_REGISTRY:
-                if FUND_REGISTRY[slug].name.lower() in investor.name.lower():
-                    fund = await get_or_create_fund(session, slug)
-                    break
+        # Use centralized fund matcher (handles variants + negative keywords)
+        fund_slug = match_fund_name(investor.name)
+        if fund_slug:
+            fund = await get_or_create_fund(session, fund_slug)
 
         deal_investor = DealInvestor(
             deal_id=deal.id,
             fund_id=fund.id if fund else None,
             investor_name=investor.name,
             is_lead=False,
-            is_tracked_fund=investor.is_tracked_fund,
+            is_tracked_fund=fund is not None,  # Use actual match result
             partner_name=investor.partner_name,
             role=investor.role.value,
         )
