@@ -1,15 +1,20 @@
 """
 First Round Capital Scraper.
 
-Source: https://review.firstround.com
-Format: HTML
+DISABLED: First Round Review (review.firstround.com) is a thought leadership blog,
+NOT a portfolio/funding news page. All content is management advice, case studies,
+and methodology articles - not deal announcements.
 
-Monitor 'Community' page/Twitter for deal news.
-Note: First Round Review is primarily thought leadership content.
+First Round Capital deals are captured via external sources:
+- Brave Search (with partner name queries)
+- TechCrunch RSS
+- Fortune Term Sheet
+- SEC EDGAR Form D filings
+
+This scraper returns empty results to avoid polluting the database with blog posts.
 """
 
 from typing import List, Optional
-from bs4 import BeautifulSoup
 
 from ..base_scraper import SimpleHTMLScraper, RawArticle, NormalizedArticle
 from ...config.funds import FUND_REGISTRY
@@ -17,135 +22,39 @@ from ...config.funds import FUND_REGISTRY
 
 class FirstRoundScraper(SimpleHTMLScraper):
     """
-    Scraper for First Round Capital (Review site).
+    First Round Capital scraper - DISABLED.
 
-    Note: First Round Review is mainly thought leadership.
-    Look for portfolio mentions and funding announcements.
+    First Round Review is thought leadership content, not deal announcements.
+    Deals are captured via external sources (Brave Search, TechCrunch, Fortune).
     """
-
-    # Keywords indicating funding/investment content
-    FUNDING_KEYWORDS = [
-        "raised",
-        "funding",
-        "investment",
-        "series",
-        "seed",
-        "round",
-        "portfolio",
-        "backed",
-        "announcing",
-        "led by first round",
-    ]
 
     def __init__(self):
         super().__init__(FUND_REGISTRY["first_round"])
         self.base_url = "https://review.firstround.com"
 
     async def fetch(self, url: Optional[str] = None) -> str:
-        target_url = url or self.base_url
-        response = await self.client.get(target_url)
-        response.raise_for_status()
-        return response.text
+        """Return empty HTML - scraper is disabled."""
+        return "<html><body><!-- First Round scraper disabled - use external sources --></body></html>"
 
     async def parse(self, html: str) -> List[RawArticle]:
-        soup = BeautifulSoup(html, "lxml")
-        articles = []
-        seen_urls = set()
-
-        selectors = [
-            "article",
-            ".post",
-            ".post-card",
-            ".review-post",
-            "[class*='post']",
-            "[class*='article']",
-            ".card",
-        ]
-
-        for selector in selectors:
-            for card in soup.select(selector):
-                title_el = card.select_one("h2, h3, h4, .title, [class*='title'], a")
-                if not title_el:
-                    continue
-                title = title_el.get_text(strip=True)
-
-                if not title or len(title) < 10:
-                    continue
-
-                link_el = card.select_one("a[href]")
-                if not link_el:
-                    link_el = card.find_parent("a")
-                if not link_el:
-                    continue
-
-                url = link_el.get("href", "")
-
-                if url and not url.startswith("http"):
-                    url = f"{self.base_url}{url}"
-
-                if url in seen_urls or not url:
-                    continue
-                seen_urls.add(url)
-
-                # Extract author
-                author = None
-                author_el = card.select_one(".author, [class*='author'], .byline")
-                if author_el:
-                    author = author_el.get_text(strip=True)
-
-                date_el = card.select_one("time, .date, [class*='date']")
-                pub_date = None
-                if date_el:
-                    date_str = date_el.get("datetime") or date_el.get_text(strip=True)
-                    pub_date = self._parse_date(date_str)
-
-                # Check if article is funding-related
-                card_text = card.get_text(strip=True).lower()
-                tags = []
-                if self._is_funding_related(title, card_text):
-                    tags.append("funding")
-
-                for tag_el in card.select(".tag, .category, [class*='tag']"):
-                    tag_text = tag_el.get_text(strip=True).lower()
-                    if tag_text:
-                        tags.append(tag_text)
-
-                articles.append(RawArticle(
-                    url=url,
-                    title=title,
-                    html=str(card),
-                    published_date=pub_date,
-                    author=author,
-                    tags=tags,
-                ))
-
-        return articles
+        """Return empty list - First Round Review has no deal announcements."""
+        # First Round Review is a thought leadership blog with:
+        # - "Speed as a Habit" - management advice
+        # - "25 Micro-Habits of High-Impact Managers" - leadership content
+        # - "0-$5M: How to Identify Your ICP" - methodology articles
+        #
+        # None of this is about First Round's own deals.
+        # Deals are captured via: Brave Search, TechCrunch, Fortune, SEC EDGAR
+        return []
 
     async def normalize(self, raw: RawArticle) -> NormalizedArticle:
-        try:
-            full_html = await self.fetch(raw.url)
-            text = self._extract_text(full_html)
-
-            # Flag funding-related content
-            if self._is_funding_related(raw.title, text):
-                text = f"[FUNDING RELATED]\n{text}"
-
-        except Exception:
-            text = self._extract_text(raw.html)
-
+        """Should never be called since parse() returns empty."""
         return NormalizedArticle(
             url=raw.url,
             title=raw.title,
-            text=text,
+            text="",
             published_date=raw.published_date,
-            author=raw.author,
-            tags=raw.tags,
         )
-
-    def _is_funding_related(self, title: str, text: str) -> bool:
-        """Check if content is funding/investment related."""
-        combined = f"{title} {text}".lower()
-        return any(keyword in combined for keyword in self.FUNDING_KEYWORDS)
 
 
 def create_scraper() -> FirstRoundScraper:

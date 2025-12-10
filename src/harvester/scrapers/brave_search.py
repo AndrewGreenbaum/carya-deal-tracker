@@ -62,6 +62,34 @@ EXCLUSION_TERMS = {
     "first_round": ["-\"first round pick\"", "-\"first round draft\"", "-NFL", "-NBA"],  # Sports draft picks
 }
 
+# Partner name queries for funds with disabled website scrapers
+# These funds don't have useful news pages, so we search by partner names
+PARTNER_QUERIES = {
+    "benchmark": [
+        '"Bill Gurley" investment OR funding OR leads',
+        '"Sarah Tavel" investment OR funding OR leads',
+        '"Peter Fenton" investment OR funding OR leads',
+    ],
+    "first_round": [
+        '"Josh Kopelman" investment OR funding OR leads',
+        '"Phin Barnes" investment OR funding OR leads',
+        '"First Round Capital" leads OR "led by First Round"',
+    ],
+    "khosla": [
+        '"Vinod Khosla" investment OR funding OR leads',
+        '"Khosla Ventures" leads OR "led by Khosla"',
+    ],
+    "thrive": [
+        '"Josh Kushner" investment OR funding OR leads',
+        '"Thrive Capital" leads OR "led by Thrive"',
+    ],
+    "founders_fund": [
+        '"Peter Thiel" investment OR funding OR leads',
+        '"Keith Rabois" investment OR funding OR leads',
+        '"Founders Fund" leads OR "led by Founders Fund"',
+    ],
+}
+
 # Enterprise AI keywords - optimized for high-signal results
 ENTERPRISE_KEYWORDS = [
     # Infrastructure & DevTools
@@ -475,6 +503,35 @@ class BraveSearchScraper:
 
         return all_results
 
+    async def search_partner_names(
+        self,
+        freshness: str = "pw",
+    ) -> Dict[str, List[BraveSearchResult]]:
+        """
+        Search for funding news by partner names.
+
+        For funds without useful website scrapers (Benchmark, First Round,
+        Khosla, Thrive, Founders Fund), we search by partner names to find
+        deals that might not mention the fund name explicitly.
+        """
+        results: Dict[str, List[BraveSearchResult]] = {}
+
+        for fund_slug, queries in PARTNER_QUERIES.items():
+            fund_results: List[BraveSearchResult] = []
+            seen_urls: set = set()
+
+            for query in queries:
+                search_results = await self.search_news(query, count=15, freshness=freshness)
+                for r in search_results:
+                    if r.url not in seen_urls:
+                        seen_urls.add(r.url)
+                        fund_results.append(r)
+                await asyncio.sleep(0.3)
+
+            results[fund_slug] = fund_results
+
+        return results
+
     async def to_normalized_article(
         self,
         result: BraveSearchResult,
@@ -505,6 +562,7 @@ class BraveSearchScraper:
         include_stealth: bool = True,
         include_regional: bool = False,
         include_early_signals: bool = False,
+        include_partner_names: bool = True,  # NEW: Search by partner names
     ) -> List[NormalizedArticle]:
         """
         Full scraping pipeline with expanded coverage options.
@@ -516,6 +574,7 @@ class BraveSearchScraper:
             include_stealth: Search for stealth startup news
             include_regional: Search 10 regional markets
             include_early_signals: Search for hiring/expansion signals
+            include_partner_names: Search by partner names for funds w/o websites
 
         Returns:
             Deduplicated list of NormalizedArticle objects
@@ -527,7 +586,8 @@ class BraveSearchScraper:
         - 1 stealth query
         - 10 regional queries (if enabled)
         - 12 early signal queries (if enabled)
-        = 38-60 queries depending on options
+        - 13 partner name queries (if enabled)
+        = 38-73 queries depending on options
         """
         all_articles: List[NormalizedArticle] = []
         seen_urls: set = set()
@@ -598,6 +658,21 @@ class BraveSearchScraper:
                 article = await self.to_normalized_article(result, "")
                 article.tags.append("early_signal")
                 all_articles.append(article)
+
+        # Search by partner names for funds without useful website scrapers
+        # (Benchmark, First Round, Khosla, Thrive, Founders Fund)
+        if include_partner_names:
+            partner_results = await self.search_partner_names(freshness)
+
+            for fund_slug, results in partner_results.items():
+                for result in results:
+                    if result.url in seen_urls:
+                        continue
+                    seen_urls.add(result.url)
+
+                    article = await self.to_normalized_article(result, fund_slug)
+                    article.tags.append("partner_search")
+                    all_articles.append(article)
 
         return all_articles
 
