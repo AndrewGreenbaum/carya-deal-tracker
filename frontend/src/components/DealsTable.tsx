@@ -28,7 +28,6 @@ import {
   ArrowUp,
   ArrowDown,
   Linkedin,
-  ExternalLink,
 } from 'lucide-react';
 import type { Deal, EnterpriseCategory, InvestmentStage, PaginatedDeals, SortDirection } from '../types';
 import { STAGE_LABELS } from '../types';
