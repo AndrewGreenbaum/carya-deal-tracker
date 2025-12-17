@@ -29,6 +29,7 @@ from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from ..base_scraper import NormalizedArticle
+from ..fund_matcher import match_fund_name
 from ...config.settings import settings
 
 
@@ -226,6 +227,10 @@ class GoogleAlertsScraper:
 
             text = full_text or f"{item.title}\n\n{item.description}"
 
+            # Match fund from article content using centralized fund matcher
+            full_content = f"{item.title} {item.description} {text}"
+            fund_slug = match_fund_name(full_content)
+
             articles.append(NormalizedArticle(
                 url=item.url,
                 title=item.title,
@@ -233,7 +238,7 @@ class GoogleAlertsScraper:
                 published_date=item.published.date() if item.published else date.today(),
                 author=None,
                 tags=['google_alerts', item.source] if item.source else ['google_alerts'],
-                fund_slug=None,
+                fund_slug=fund_slug,
                 fetched_at=datetime.utcnow(),
             ))
 

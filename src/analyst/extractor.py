@@ -8,12 +8,21 @@ OPTIMIZED:
 - Prompt caching for system message (20% token savings)
 - Batch extraction for multiple articles
 - Early exit for non-funding content
+- Content hash deduplication to avoid duplicate API calls
 """
 
 import asyncio
+import hashlib
+import logging
 import instructor
 from anthropic import Anthropic
-from typing import Optional, List
+from typing import Optional, List, Set
+
+logger = logging.getLogger(__name__)
+
+# Session-based content hash cache (cleared between runs)
+# Prevents duplicate Claude calls for same article content
+_content_hash_cache: Set[str] = set()
 
 from .schemas import DealExtraction, ArticleAnalysis, LeadStatus, RoundType, EnterpriseCategory
 from ..config.settings import settings
@@ -23,6 +32,16 @@ from ..config.funds import FUND_REGISTRY, FundConfig
 
 # Initialize Instructor with Anthropic client
 client = instructor.from_anthropic(Anthropic(api_key=settings.anthropic_api_key))
+
+# Pre-built cached system message (optimization: created once, reused across calls)
+# Anthropic's prompt caching uses content-based caching, but we save object creation overhead
+CACHED_SYSTEM_MESSAGE = [
+    {
+        "type": "text",
+        "text": None,  # Will be set after SYSTEM_PROMPT is defined
+        "cache_control": {"type": "ephemeral"}
+    }
+]
 
 
 SYSTEM_PROMPT = """You are an expert venture capital analyst specializing in identifying lead investors in B2B Enterprise AI funding rounds.
@@ -129,6 +148,9 @@ Always explain your reasoning by:
 
 Output must be valid JSON matching the schema."""
 
+# Initialize the cached system message with the prompt text
+CACHED_SYSTEM_MESSAGE[0]["text"] = SYSTEM_PROMPT
+
 
 # Keywords that indicate funding content (for early exit optimization)
 FUNDING_KEYWORDS = [
@@ -148,6 +170,34 @@ def is_likely_funding_content(text: str) -> bool:
     text_lower = text.lower()
     matches = sum(1 for kw in FUNDING_KEYWORDS if kw in text_lower)
     return matches >= 2  # Require at least 2 funding keywords
+
+
+def _compute_content_hash(text: str) -> str:
+    """Compute a hash of the article content for deduplication."""
+    # Normalize whitespace and lowercase for consistent hashing
+    normalized = " ".join(text.lower().split())
+    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+
+def _is_duplicate_content(text: str) -> bool:
+    """
+    Check if we've already processed this content in this session.
+
+    Returns True if duplicate (should skip), False if new.
+    """
+    content_hash = _compute_content_hash(text)
+    if content_hash in _content_hash_cache:
+        logger.debug(f"Skipping duplicate content (hash: {content_hash})")
+        return True
+    _content_hash_cache.add(content_hash)
+    return False
+
+
+def clear_content_hash_cache() -> None:
+    """Clear the content hash cache. Call between scrape runs."""
+    global _content_hash_cache
+    _content_hash_cache.clear()
+    logger.debug("Content hash cache cleared")
 
 
 def build_extraction_prompt(
@@ -190,24 +240,32 @@ async def extract_deal(
     article_text: str,
     source_url: str = "",
     fund_context: Optional[FundConfig] = None,
-    skip_funding_check: bool = False
-) -> DealExtraction:
+    skip_funding_check: bool = False,
+    skip_dedup_check: bool = False
+) -> Optional[DealExtraction]:
     """
     Extract a single funding deal from article text.
 
     OPTIMIZED:
     - Uses prompt caching for system message (20% token savings)
     - Early exit for non-funding content
+    - Content hash deduplication to avoid duplicate API calls
 
     Args:
         article_text: The article content to analyze
         source_url: URL of the source article
         fund_context: Optional fund-specific extraction context
         skip_funding_check: If True, skip the funding keyword check
+        skip_dedup_check: If True, skip the duplicate content check
 
     Returns:
-        DealExtraction with structured deal information
+        DealExtraction with structured deal information, or None if duplicate
     """
+    # Early exit: check for duplicate content (saves API calls)
+    if not skip_dedup_check and _is_duplicate_content(article_text):
+        logger.info(f"Skipping duplicate content for: {source_url}")
+        return None
+
     # Early exit: check if text is likely about funding
     if not skip_funding_check and not is_likely_funding_content(article_text):
         # Return low-confidence empty extraction
@@ -241,18 +299,12 @@ async def extract_deal(
 
     prompt = build_extraction_prompt(article_text, fund_context, source_url)
 
-    # Use prompt caching for system message (significant token savings)
+    # Use pre-built cached system message (optimization: created once at module load)
     response = client.messages.create(
         model=settings.llm_model,
         max_tokens=settings.llm_max_tokens,
         temperature=settings.llm_temperature,
-        system=[
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"}  # Enable prompt caching
-            }
-        ],
+        system=CACHED_SYSTEM_MESSAGE,
         messages=[{"role": "user", "content": prompt}],
         response_model=DealExtraction,
     )
@@ -266,7 +318,7 @@ async def extract_deal(
 async def extract_deal_batch(
     articles: List[dict],
     max_concurrent: int = 5
-) -> List[DealExtraction]:
+) -> List[Optional[DealExtraction]]:
     """
     Extract deals from multiple articles concurrently.
 
@@ -302,38 +354,14 @@ async def extract_deal_batch(
         return_exceptions=True
     )
 
-    # Handle any exceptions
+    # Handle any exceptions - log errors and skip failed extractions
     processed_results = []
     for i, result in enumerate(results):
         if isinstance(result, Exception):
-            # Return low-confidence extraction for failed articles
-            from .schemas import ChainOfThought
-            processed_results.append(DealExtraction(
-                startup_name="Error",
-                startup_description=None,
-                round_label=RoundType.UNKNOWN,
-                amount=None,
-                valuation=None,
-                round_date=None,
-                lead_investors=[],
-                participating_investors=[],
-                tracked_fund_is_lead=False,
-                tracked_fund_name=None,
-                tracked_fund_role=None,
-                tracked_fund_partner=None,
-                enterprise_category=EnterpriseCategory.NOT_ENTERPRISE,
-                is_enterprise_ai=False,
-                verification_snippet=None,
-                confidence_score=0.0,
-                thesis_drift_score=0.0,
-                reasoning=ChainOfThought(
-                    verb_analysis="Extraction failed",
-                    lead_signals=[],
-                    participation_signals=[],
-                    ambiguity_flags=[f"Error: {str(result)}"],
-                    final_reasoning="Extraction failed due to error"
-                )
-            ))
+            # Log the error and skip this extraction (return None)
+            source_url = articles[i].get("source_url", "unknown")
+            logger.error(f"Extraction failed for article {i} ({source_url}): {result}")
+            processed_results.append(None)  # Caller should filter out None values
         else:
             processed_results.append(result)
 
@@ -360,17 +388,12 @@ async def extract_article(
     """
     prompt = build_extraction_prompt(article_text, fund_context, source_url)
 
+    # Use pre-built cached system message (optimization: created once at module load)
     response = client.messages.create(
         model=settings.llm_model,
         max_tokens=settings.llm_max_tokens,
         temperature=settings.llm_temperature,
-        system=[
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"}
-            }
-        ],
+        system=CACHED_SYSTEM_MESSAGE,
         messages=[{"role": "user", "content": prompt}],
         response_model=ArticleAnalysis,
     )
@@ -387,32 +410,44 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
     Post-process to verify tracked fund identification.
 
     Ensures the tracked_fund fields are consistent with lead_investors.
+    Now marks ALL matching investors (for co-leads), not just the first.
     """
     # Lazy import to avoid circular dependency
     from ..harvester.fund_matcher import match_fund_name
 
-    # Check all lead investors against our fund registry
+    # Track all matched funds for logging
+    matched_leads = []
+    matched_participants = []
+
+    # Check ALL lead investors against our fund registry
     for investor in deal.lead_investors:
         matched_fund = match_fund_name(investor.name)
         if matched_fund:
             investor.is_tracked_fund = True
-            if investor.role in [LeadStatus.CONFIRMED_LEAD, LeadStatus.LIKELY_LEAD]:
+            matched_leads.append((matched_fund, investor))
+            # Set deal-level fields for the FIRST matching lead
+            if not deal.tracked_fund_is_lead and investor.role in [LeadStatus.CONFIRMED_LEAD, LeadStatus.LIKELY_LEAD]:
                 deal.tracked_fund_is_lead = True
                 deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
                 deal.tracked_fund_role = investor.role
                 deal.tracked_fund_partner = investor.partner_name
-                break
 
-    # Also check participating investors
-    if not deal.tracked_fund_is_lead:
-        for investor in deal.participating_investors:
-            matched_fund = match_fund_name(investor.name)
-            if matched_fund:
-                investor.is_tracked_fund = True
+    # Log if multiple tracked funds co-led
+    if len(matched_leads) > 1:
+        fund_names = [FUND_REGISTRY[f].name for f, _ in matched_leads]
+        logger.info(f"Multiple tracked funds co-led deal for {deal.startup_name}: {fund_names}")
+
+    # Also check ALL participating investors
+    for investor in deal.participating_investors:
+        matched_fund = match_fund_name(investor.name)
+        if matched_fund:
+            investor.is_tracked_fund = True
+            matched_participants.append((matched_fund, investor))
+            # Only set deal-level fields if no lead was found
+            if not deal.tracked_fund_is_lead and not deal.tracked_fund_name:
                 deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
                 deal.tracked_fund_role = LeadStatus.PARTICIPANT
                 deal.tracked_fund_partner = investor.partner_name
-                break
 
     return deal
 

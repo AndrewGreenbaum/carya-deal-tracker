@@ -64,33 +64,39 @@ EXCLUSION_TERMS = {
 
 # Partner name queries for funds with disabled website scrapers
 # These funds don't have useful news pages, so we search by partner names
+# Updated: Added "led by" variants for each partner to catch lead deals
 PARTNER_QUERIES = {
     "benchmark": [
         '"Bill Gurley" investment OR funding OR leads',
+        '"led by Bill Gurley" OR "Bill Gurley led"',
         '"Sarah Tavel" investment OR funding OR leads',
+        '"led by Sarah Tavel" OR "Sarah Tavel led"',
         '"Peter Fenton" investment OR funding OR leads',
-        '"Matt Cohler" investment OR funding OR leads',
+        '"led by Peter Fenton" OR "Peter Fenton led"',
         '"Eric Vishria" investment OR funding OR leads',
-        '"Chetan Puttagunta" investment OR funding OR leads',
-        '"Miles Grimshaw" investment OR funding OR leads',
-        '"Victor Lazarte" investment OR funding OR leads',
+        '"Chetan Puttagunta" investment OR funding',
     ],
     "first_round": [
         '"Josh Kopelman" investment OR funding OR leads',
+        '"led by Josh Kopelman" OR "Josh Kopelman led"',
         '"Phin Barnes" investment OR funding OR leads',
         '"First Round Capital" leads OR "led by First Round"',
     ],
     "khosla": [
         '"Vinod Khosla" investment OR funding OR leads',
+        '"led by Vinod Khosla" OR "Vinod Khosla led"',
         '"Khosla Ventures" leads OR "led by Khosla"',
     ],
     "thrive": [
         '"Josh Kushner" investment OR funding OR leads',
+        '"led by Josh Kushner" OR "Josh Kushner led"',
         '"Thrive Capital" leads OR "led by Thrive"',
     ],
     "founders_fund": [
         '"Peter Thiel" investment OR funding OR leads',
+        '"led by Peter Thiel" OR "Peter Thiel led"',
         '"Keith Rabois" investment OR funding OR leads',
+        '"led by Keith Rabois" OR "Keith Rabois led"',
         '"Founders Fund" leads OR "led by Founders Fund"',
     ],
 }

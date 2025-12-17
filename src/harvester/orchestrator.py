@@ -42,6 +42,7 @@ from .scrapers.felicis import FelicisScraper
 from .scrapers.general_catalyst import GeneralCatalystScraper
 from .scrapers.first_round import FirstRoundScraper
 from ..config.funds import FUND_REGISTRY, FundConfig, ScraperType
+from ..config.settings import settings
 from ..analyst.extractor import extract_deal
 from ..archivist.storage import save_deal
 from ..archivist.database import get_session
@@ -153,11 +154,11 @@ async def process_article(
             fund_context=fund_config,
         )
 
-        # Skip low-confidence extractions
-        if extraction.confidence_score < 0.5:
+        # Skip low-confidence extractions (threshold from settings)
+        if extraction.confidence_score < settings.extraction_confidence_threshold:
             logger.info(
                 f"Skipping low-confidence extraction for {article.title}: "
-                f"{extraction.confidence_score:.2f}"
+                f"{extraction.confidence_score:.2f} < {settings.extraction_confidence_threshold}"
             )
             return False, "low_confidence"
 
