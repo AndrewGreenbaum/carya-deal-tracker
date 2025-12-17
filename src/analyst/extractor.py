@@ -18,7 +18,7 @@ from typing import Optional, List
 from .schemas import DealExtraction, ArticleAnalysis, LeadStatus, RoundType, EnterpriseCategory
 from ..config.settings import settings
 from ..config.funds import FUND_REGISTRY, FundConfig
-from ..harvester.fund_matcher import match_fund_name
+# Note: match_fund_name is imported lazily in _verify_tracked_fund to avoid circular import
 
 
 # Initialize Instructor with Anthropic client
@@ -388,6 +388,9 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
 
     Ensures the tracked_fund fields are consistent with lead_investors.
     """
+    # Lazy import to avoid circular dependency
+    from ..harvester.fund_matcher import match_fund_name
+
     # Check all lead investors against our fund registry
     for investor in deal.lead_investors:
         matched_fund = match_fund_name(investor.name)
