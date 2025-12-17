@@ -1427,6 +1427,8 @@ async def run_linkedin_jobs_scraper_endpoint(
     ~17 queries per run.
     """
     from .harvester.scrapers.linkedin_jobs import LinkedInJobsScraper, STEALTH_JOB_QUERIES
+    from .archivist.storage import save_stealth_detection
+    from .archivist.database import get_session
 
     if not settings.brave_search_key:
         raise HTTPException(status_code=400, detail="BRAVE_SEARCH_KEY not configured")
@@ -1437,6 +1439,18 @@ async def run_linkedin_jobs_scraper_endpoint(
 
         stealth_count = len([a for a in articles if 'stealth' in a.tags])
         fund_matches = len([a for a in articles if a.fund_slug])
+
+        # Save stealth detections to database
+        async with get_session() as session:
+            for article in articles:
+                if 'stealth' in article.tags or article.fund_slug:
+                    await save_stealth_detection(
+                        session=session,
+                        fund_slug=article.fund_slug or "unknown",
+                        detected_url=article.url,
+                        company_name=article.title.replace("Stealth Signal: ", "").split(" - ")[0] if article.title else None,
+                        notes=f"Source: LinkedIn Jobs | Tags: {', '.join(article.tags)}",
+                    )
 
         return LinkedInJobsResponse(
             queries_executed=len(STEALTH_JOB_QUERIES),
@@ -1472,6 +1486,8 @@ async def run_portfolio_diff_scraper_endpoint(
     Tier 1 stealth detection - one of the BEST free sources.
     """
     from .harvester.scrapers.portfolio_diff import PortfolioDiffScraper
+    from .archivist.storage import save_stealth_detection
+    from .archivist.database import get_session
 
     try:
         slugs = None
@@ -1482,6 +1498,18 @@ async def run_portfolio_diff_scraper_endpoint(
             articles = await scraper.scrape_all(fund_slugs=slugs)
 
         funds_checked = len(slugs) if slugs else 18  # 18 funds in PORTFOLIO_URLS
+
+        # Save stealth detections to database
+        async with get_session() as session:
+            for article in articles:
+                company_name = article.title.replace("Stealth Addition: ", "").split(" added to ")[0] if article.title else None
+                await save_stealth_detection(
+                    session=session,
+                    fund_slug=article.fund_slug or "unknown",
+                    detected_url=article.url,
+                    company_name=company_name,
+                    notes=f"Source: Portfolio Diff | Tags: {', '.join(article.tags)}",
+                )
 
         cache.invalidate("deals")
 
