@@ -69,6 +69,11 @@ PARTNER_QUERIES = {
         '"Bill Gurley" investment OR funding OR leads',
         '"Sarah Tavel" investment OR funding OR leads',
         '"Peter Fenton" investment OR funding OR leads',
+        '"Matt Cohler" investment OR funding OR leads',
+        '"Eric Vishria" investment OR funding OR leads',
+        '"Chetan Puttagunta" investment OR funding OR leads',
+        '"Miles Grimshaw" investment OR funding OR leads',
+        '"Victor Lazarte" investment OR funding OR leads',
     ],
     "first_round": [
         '"Josh Kopelman" investment OR funding OR leads',
@@ -586,8 +591,8 @@ class BraveSearchScraper:
         - 1 stealth query
         - 10 regional queries (if enabled)
         - 12 early signal queries (if enabled)
-        - 13 partner name queries (if enabled)
-        = 38-73 queries depending on options
+        - 18 partner name queries (if enabled)
+        = 38-78 queries depending on options
         """
         all_articles: List[NormalizedArticle] = []
         seen_urls: set = set()
