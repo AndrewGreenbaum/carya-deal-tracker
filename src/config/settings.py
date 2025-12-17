@@ -18,6 +18,16 @@ class Settings(BaseSettings):
     firecrawl_api_key: str = ""  # Firecrawl for JS-heavy PR sites
     twitter_bearer_token: str = ""  # Twitter API v2 Bearer Token
     google_alerts_feeds: str = ""  # Comma-separated Google Alerts RSS feed URLs
+    api_keys: str = "dev-key"  # Comma-separated valid API keys for authentication
+
+    # Y Combinator Algolia credentials (public, from YC website)
+    yc_algolia_app_id: str = "45BWZJ1SGC"
+    yc_algolia_api_key: str = "<SET_IN_ENV>"
+
+    @property
+    def valid_api_keys(self) -> list[str]:
+        """Get list of valid API keys."""
+        return [k.strip() for k in self.api_keys.split(",") if k.strip()]
 
     # Frontend URL for CORS (production)
     frontend_url: str = ""  # e.g., https://your-frontend.railway.app

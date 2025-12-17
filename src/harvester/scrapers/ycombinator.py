@@ -11,9 +11,12 @@ Data Sources:
 """
 
 import asyncio
+import logging
 import re
 import httpx
 import feedparser
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta
 from typing import List, Optional, Dict, Any
@@ -23,9 +26,7 @@ from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
 
 
-# YC Algolia API configuration (public, extracted from their website)
-ALGOLIA_APP_ID = "45BWZJ1SGC"
-ALGOLIA_API_KEY = "<SET_IN_ENV>"
+# YC Algolia API configuration (from settings, with fallback to public defaults)
 ALGOLIA_INDEX = "YCCompany_production"
 
 # YC batch identifiers (format: "Winter 2024", "Summer 2024", etc.)
@@ -105,11 +106,13 @@ class YCombinatorScraper:
     async def fetch_companies_algolia(self, batch: str, hits_per_page: int = 100) -> List[YCCompany]:
         """Fetch companies from Algolia API for a specific batch."""
         try:
-            url = f"https://{ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{ALGOLIA_INDEX}/query"
+            app_id = settings.yc_algolia_app_id
+            api_key = settings.yc_algolia_api_key
+            url = f"https://{app_id}-dsn.algolia.net/1/indexes/{ALGOLIA_INDEX}/query"
 
             headers = {
-                "X-Algolia-Application-Id": ALGOLIA_APP_ID,
-                "X-Algolia-API-Key": ALGOLIA_API_KEY,
+                "X-Algolia-Application-Id": app_id,
+                "X-Algolia-API-Key": api_key,
                 "Content-Type": "application/json",
             }
 
@@ -141,7 +144,7 @@ class YCombinatorScraper:
             return companies
 
         except Exception as e:
-            print(f"Error fetching YC companies from Algolia for batch {batch}: {e}")
+            logger.error(f"Error fetching YC companies from Algolia for batch {batch}: {e}")
             return []
 
     async def fetch_recent_batch_companies(self) -> List[YCCompany]:
@@ -157,7 +160,7 @@ class YCombinatorScraper:
                     seen_names.add(company.name)
                     all_companies.append(company)
 
-            print(f"YC batch {batch}: {len(companies)} companies")
+            logger.info(f"YC batch {batch}: {len(companies)} companies")
             await asyncio.sleep(0.5)  # Rate limit
 
         return all_companies
@@ -193,7 +196,7 @@ class YCombinatorScraper:
                 ))
 
         except Exception as e:
-            print(f"Error fetching YC blog RSS: {e}")
+            logger.error(f"Error fetching YC blog RSS: {e}")
 
         return posts
 

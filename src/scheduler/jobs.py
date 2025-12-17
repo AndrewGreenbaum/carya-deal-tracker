@@ -42,10 +42,13 @@ async def enrich_new_deals(limit: int = 25):
             # Find deals missing company website
             query = (
                 select(Deal)
-                .options(selectinload(Deal.company))
+                .options(
+                    selectinload(Deal.company),
+                    selectinload(Deal.investors),
+                )
                 .join(Deal.company)
                 .where(
-                    (PortfolioCompany.website == None) | (PortfolioCompany.website == "")
+                    (PortfolioCompany.website.is_(None)) | (PortfolioCompany.website == "")
                 )
                 .order_by(Deal.created_at.desc())
                 .limit(limit)
@@ -74,7 +77,7 @@ async def enrich_new_deals(limit: int = 25):
                     if deal.founders_json:
                         try:
                             founders = json.loads(deal.founders_json)
-                        except:
+                        except (json.JSONDecodeError, TypeError, ValueError):
                             founders = []
 
                     # Get lead investor from deal_investors

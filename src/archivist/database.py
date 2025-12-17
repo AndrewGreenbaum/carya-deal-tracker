@@ -2,6 +2,7 @@
 Database session management for async SQLAlchemy operations.
 """
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -9,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlmodel import SQLModel
 
 from ..config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 # Create async engine
@@ -45,7 +48,8 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
-        except Exception:
+        except Exception as e:
+            logger.error(f"Database session error, rolling back: {e}")
             await session.rollback()
             raise
 
@@ -56,6 +60,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
-        except Exception:
+        except Exception as e:
+            logger.error(f"Database session error, rolling back: {e}")
             await session.rollback()
             raise

@@ -119,7 +119,9 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
     """Verify API key for protected endpoints."""
     if not api_key:
         raise HTTPException(status_code=401, detail="API key required")
-    # In production, validate against stored keys
+    # Validate against configured API keys
+    if api_key not in settings.valid_api_keys:
+        raise HTTPException(status_code=403, detail="Invalid API key")
     return api_key
 
 
@@ -2193,14 +2195,18 @@ async def enrich_deals(
     # Find deals missing enrichment data
     query = (
         select(Deal)
-        .options(selectinload(Deal.company))
+        .options(
+            selectinload(Deal.company),
+            selectinload(Deal.investors),
+            selectinload(Deal.articles),
+        )
         .join(Deal.company)
     )
 
     if skip_enriched:
         # Only get deals where company website is missing
         query = query.where(
-            (PortfolioCompany.website == None) | (PortfolioCompany.website == "")
+            (PortfolioCompany.website.is_(None)) | (PortfolioCompany.website == "")
         )
 
     query = query.order_by(Deal.created_at.desc()).limit(limit)
@@ -2222,14 +2228,24 @@ async def enrich_deals(
             if deal.founders_json:
                 try:
                     founders = json_module.loads(deal.founders_json)
-                except:
+                except (json_module.JSONDecodeError, TypeError, ValueError):
                     founders = []
+
+            # Extract lead investor from deal.investors relationship
+            lead_investor = None
+            for inv in deal.investors:
+                if inv.is_lead:
+                    lead_investor = inv.investor_name
+                    break
+
+            # Extract source URL from deal.articles relationship
+            source_url = deal.articles[0].url if deal.articles else None
 
             context = DealContext(
                 company_name=company_name,
-                lead_investor=deal.lead_investor,
+                lead_investor=lead_investor,
                 founders=founders,
-                source_url=deal.source_url,
+                source_url=source_url,
                 enterprise_category=deal.enterprise_category,
             )
 

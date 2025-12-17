@@ -9,8 +9,11 @@ IMPROVED v2: Uses deal context (investor, founders, source URL) for accurate res
 """
 
 import asyncio
+import logging
 import re
 import httpx
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 from urllib.parse import urlparse
@@ -160,7 +163,7 @@ class BraveEnrichmentClient:
             data = response.json()
             return data.get("web", {}).get("results", [])
         except Exception as e:
-            print(f"Brave Search error: {e}")
+            logger.error(f"Brave Search error: {e}")
             return []
 
     async def find_website_with_context(
@@ -393,7 +396,7 @@ async def enrich_companies_batch(
                 result = await client.enrich(name)
                 results[name] = result
             except Exception as e:
-                print(f"Error enriching {name}: {e}")
+                logger.error(f"Error enriching {name}: {e}")
                 results[name] = BraveEnrichmentResult(company_name=name)
 
             await asyncio.sleep(delay_seconds)

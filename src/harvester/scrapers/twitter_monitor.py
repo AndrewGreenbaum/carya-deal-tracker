@@ -33,29 +33,8 @@ from ...config.settings import settings
 
 
 # Official Twitter/X handles for tracked VC funds
+# Only includes validated, working handles
 VC_TWITTER_HANDLES = {
-    "founders_fund": "foaborundersfund",  # Note: FF doesn't have official account, placeholder
-    "benchmark": "benchmark",
-    "sequoia": "sequoia",
-    "khosla": "khaboroslaventures",
-    "index": "IndexVentures",
-    "a16z": "a]16z",
-    "insight": "insaborightpartners",
-    "bessemer": "Bessemer_VP",
-    "redpoint": "redaborpoint",
-    "greylock": "GreylockVC",
-    "gv": "GVteam",
-    "menlo": "MenloVentures",
-    "usv": "usaborv",
-    "thrive": "ThriveCapital",
-    "accel": "Accel",
-    "felicis": "FelicisVC",
-    "general_catalyst": "gcvaborc",
-    "first_round": "firstround",
-}
-
-# Cleaned up handles (removing invalid ones)
-VALID_VC_HANDLES = {
     "benchmark": "benchmark",
     "sequoia": "sequoia",
     "index": "IndexVentures",
@@ -311,7 +290,7 @@ class TwitterMonitor:
         """
         all_tweets = []
 
-        for fund_slug, handle in VALID_VC_HANDLES.items():
+        for fund_slug, handle in VC_TWITTER_HANDLES.items():
             if not self._check_rate_limit():
                 break
 

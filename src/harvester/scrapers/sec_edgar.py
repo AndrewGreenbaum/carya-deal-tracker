@@ -215,18 +215,22 @@ class SECEdgarScraper:
             if response.status_code != 200:
                 return filing
 
-            # Parse XML - SEC Form D uses no namespace prefix
+            # Parse XML - SEC Form D may use namespace prefixes
             root = ET.fromstring(response.text)
 
-            # Extract offering amount (look in offeringSalesAmounts section)
-            offering_elem = root.find(".//totalOfferingAmount")
+            # Extract offering amount (namespace-agnostic search)
+            offering_elem = root.find(".//{*}totalOfferingAmount")
+            if offering_elem is None:
+                offering_elem = root.find(".//totalOfferingAmount")
             if offering_elem is not None and offering_elem.text and offering_elem.text.strip():
                 try:
                     filing.total_offering = f"${int(float(offering_elem.text)):,}"
                 except (ValueError, TypeError):
                     pass
 
-            amount_sold_elem = root.find(".//totalAmountSold")
+            amount_sold_elem = root.find(".//{*}totalAmountSold")
+            if amount_sold_elem is None:
+                amount_sold_elem = root.find(".//totalAmountSold")
             if amount_sold_elem is not None and amount_sold_elem.text and amount_sold_elem.text.strip():
                 try:
                     filing.amount_raised = f"${int(float(amount_sold_elem.text)):,}"

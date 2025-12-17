@@ -18,8 +18,11 @@ Example alert queries:
 """
 
 import asyncio
+import logging
 import feedparser
 import httpx
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 from datetime import datetime, date
 from typing import List, Optional
@@ -89,7 +92,16 @@ class GoogleAlertsScraper:
         # Check for comma-separated feed URLs in settings
         feeds_str = getattr(settings, 'google_alerts_feeds', '')
         if feeds_str:
-            return [f.strip() for f in feeds_str.split(',') if f.strip()]
+            feeds = []
+            for f in feeds_str.split(','):
+                url = f.strip()
+                if url:
+                    # Validate URL starts with http
+                    if url.startswith('http://') or url.startswith('https://'):
+                        feeds.append(url)
+                    else:
+                        logger.warning(f"Invalid Google Alerts feed URL (must start with http): {url}")
+            return feeds
         return []
 
     async def __aenter__(self):
@@ -140,7 +152,7 @@ class GoogleAlertsScraper:
             return items
 
         except Exception as e:
-            print(f"Error fetching Google Alert feed: {e}")
+            logger.error(f"Error fetching Google Alert feed: {e}")
             return []
 
     async def fetch_all_feeds(self) -> List[GoogleAlertItem]:
@@ -191,7 +203,7 @@ class GoogleAlertsScraper:
             return None
 
         except Exception as e:
-            print(f"Error fetching article {url}: {e}")
+            logger.error(f"Error fetching article {url}: {e}")
             return None
 
     async def scrape_all(self) -> List[NormalizedArticle]:
@@ -201,8 +213,7 @@ class GoogleAlertsScraper:
         Returns list of normalized articles ready for extraction.
         """
         if not self.feed_urls:
-            print("No Google Alerts RSS feeds configured.")
-            print("Set GOOGLE_ALERTS_FEEDS environment variable with comma-separated feed URLs.")
+            logger.warning("No Google Alerts RSS feeds configured. Set GOOGLE_ALERTS_FEEDS environment variable.")
             return []
 
         # Fetch all alert items

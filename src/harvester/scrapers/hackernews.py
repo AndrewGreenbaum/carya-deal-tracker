@@ -19,7 +19,6 @@ import httpx
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta
 from typing import List, Optional, Dict, Any
-from urllib.parse import quote
 
 from ..base_scraper import NormalizedArticle
 from ...config.settings import settings

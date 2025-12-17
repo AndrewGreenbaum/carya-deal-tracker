@@ -180,11 +180,12 @@ class LinkedInJobsScraper:
                 "pre-launch", "unannounced"
             ])
 
-            # Check for fund matches
+            # Check for fund matches using word boundary matching
             matched_fund = None
             for fund_slug, patterns in FUND_PATTERNS.items():
                 for pattern in patterns:
-                    if pattern.lower() in text_lower:
+                    # Use word boundary to avoid false positives on generic terms
+                    if re.search(rf'\b{re.escape(pattern)}\b', text_lower, re.IGNORECASE):
                         matched_fund = fund_slug
                         break
                 if matched_fund:

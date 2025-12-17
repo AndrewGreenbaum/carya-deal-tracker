@@ -18,32 +18,11 @@ from typing import Optional, List
 from .schemas import DealExtraction, ArticleAnalysis, LeadStatus, RoundType, EnterpriseCategory
 from ..config.settings import settings
 from ..config.funds import FUND_REGISTRY, FundConfig
+from ..harvester.fund_matcher import match_fund_name
 
 
 # Initialize Instructor with Anthropic client
 client = instructor.from_anthropic(Anthropic(api_key=settings.anthropic_api_key))
-
-# Fund name variations for matching
-FUND_NAME_VARIANTS = {
-    "founders_fund": ["Founders Fund", "Founder's Fund", "FF"],
-    "benchmark": ["Benchmark", "Benchmark Capital"],
-    "sequoia": ["Sequoia", "Sequoia Capital"],
-    "khosla": ["Khosla", "Khosla Ventures", "KV"],
-    "index": ["Index", "Index Ventures"],
-    "a16z": ["a16z", "Andreessen Horowitz", "Andreessen", "AH"],
-    "insight": ["Insight", "Insight Partners"],
-    "bessemer": ["Bessemer", "BVP", "Bessemer Venture Partners"],
-    "redpoint": ["Redpoint", "Redpoint Ventures"],
-    "greylock": ["Greylock", "Greylock Partners"],
-    "gv": ["GV", "Google Ventures"],
-    "menlo": ["Menlo", "Menlo Ventures"],
-    "usv": ["USV", "Union Square Ventures", "Union Square"],
-    "thrive": ["Thrive", "Thrive Capital"],
-    "accel": ["Accel", "Accel Partners"],
-    "felicis": ["Felicis", "Felicis Ventures"],
-    "general_catalyst": ["General Catalyst", "GC"],
-    "first_round": ["First Round", "First Round Capital"],
-}
 
 
 SYSTEM_PROMPT = """You are an expert venture capital analyst specializing in identifying lead investors in B2B Enterprise AI funding rounds.
@@ -411,7 +390,7 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
     """
     # Check all lead investors against our fund registry
     for investor in deal.lead_investors:
-        matched_fund = _match_fund_name(investor.name)
+        matched_fund = match_fund_name(investor.name)
         if matched_fund:
             investor.is_tracked_fund = True
             if investor.role in [LeadStatus.CONFIRMED_LEAD, LeadStatus.LIKELY_LEAD]:
@@ -424,7 +403,7 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
     # Also check participating investors
     if not deal.tracked_fund_is_lead:
         for investor in deal.participating_investors:
-            matched_fund = _match_fund_name(investor.name)
+            matched_fund = match_fund_name(investor.name)
             if matched_fund:
                 investor.is_tracked_fund = True
                 deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
@@ -433,27 +412,6 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
                 break
 
     return deal
-
-
-def _match_fund_name(name: str) -> Optional[str]:
-    """
-    Match an investor name to a tracked fund slug.
-
-    Returns the fund slug if matched, None otherwise.
-    """
-    name_lower = name.lower().strip()
-
-    for slug, variants in FUND_NAME_VARIANTS.items():
-        for variant in variants:
-            if variant.lower() in name_lower or name_lower in variant.lower():
-                # Check negative keywords
-                fund = FUND_REGISTRY[slug]
-                for neg in fund.negative_keywords:
-                    if neg.lower() in name_lower:
-                        return None  # Excluded by negative keyword
-                return slug
-
-    return None
 
 
 def check_negative_filters(text: str, fund: FundConfig) -> bool:
