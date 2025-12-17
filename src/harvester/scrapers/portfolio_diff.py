@@ -15,7 +15,7 @@ This is one of the BEST free sources for true stealth detection.
 
 import asyncio
 import json
-import hashlib
+import logging
 import re
 import httpx
 from bs4 import BeautifulSoup
@@ -26,6 +26,8 @@ from typing import List, Optional, Dict, Set, Any
 
 from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 # Portfolio page URLs for tracked funds
@@ -123,6 +125,9 @@ PORTFOLIO_URLS = {
 }
 
 # Snapshot storage path
+# NOTE: /tmp/ is ephemeral on Railway - snapshots are lost on redeploy.
+# This means first run after deploy will show no diffs. Consider storing
+# in database for persistent snapshots in a future enhancement.
 SNAPSHOT_DIR = Path("/tmp/bud-tracker-snapshots")
 
 
@@ -280,7 +285,7 @@ class PortfolioDiffScraper:
             return companies
 
         except Exception as e:
-            print(f"Error scraping {fund_slug} portfolio: {e}")
+            logger.error(f"Error scraping {fund_slug} portfolio: {e}")
             return []
 
     async def get_portfolio_diff(self, fund_slug: str) -> PortfolioDiff:
@@ -314,7 +319,7 @@ class PortfolioDiffScraper:
     def diff_to_article(self, company: PortfolioCompany) -> NormalizedArticle:
         """Convert new portfolio company to NormalizedArticle."""
         text_parts = [
-            f"🚨 STEALTH PORTFOLIO ADDITION DETECTED",
+            f"[STEALTH PORTFOLIO ADDITION DETECTED]",
             f"",
             f"Fund: {company.fund_slug}",
             f"Company: {company.name}",

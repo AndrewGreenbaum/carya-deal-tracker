@@ -14,14 +14,17 @@ Uses Brave Search API to find stealth startup signals.
 """
 
 import asyncio
-import re
+import logging
 import httpx
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from typing import List, Optional, Dict, Any
 
 from ..base_scraper import NormalizedArticle
+from ..fund_matcher import match_fund_name
 from ...config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 # Brave Search API (reuse existing key)
@@ -56,27 +59,8 @@ STEALTH_JOB_QUERIES = [
     '"stealth" "AI infrastructure" startup',
 ]
 
-# Fund slug mapping for detection
-FUND_PATTERNS = {
-    "founders_fund": ["founders fund", "peter thiel"],
-    "benchmark": ["benchmark"],
-    "sequoia": ["sequoia"],
-    "khosla": ["khosla"],
-    "index": ["index ventures"],
-    "a16z": ["a16z", "andreessen"],
-    "insight": ["insight partners"],
-    "bessemer": ["bessemer", "bvp"],
-    "redpoint": ["redpoint"],
-    "greylock": ["greylock"],
-    "gv": ["google ventures", "gv "],
-    "menlo": ["menlo ventures"],
-    "usv": ["union square"],
-    "thrive": ["thrive capital"],
-    "accel": ["accel"],
-    "felicis": ["felicis"],
-    "general_catalyst": ["general catalyst"],
-    "first_round": ["first round"],
-}
+# NOTE: Fund matching now uses centralized fund_matcher.py
+# which handles name variants, negative keywords, and disambiguation
 
 
 @dataclass
@@ -144,7 +128,7 @@ class LinkedInJobsScraper:
             return data.get("web", {}).get("results", [])
 
         except Exception as e:
-            print(f"LinkedIn Jobs Brave search error: {e}")
+            logger.error(f"LinkedIn Jobs Brave search error: {e}")
             return []
 
     def parse_job_result(self, result: Dict[str, Any]) -> Optional[LinkedInJob]:
@@ -159,8 +143,8 @@ class LinkedInJobsScraper:
                 return None
 
             # Extract company name from title or description
+            # Try common patterns in job titles
             company_name = ""
-            # Try common patterns
             if " at " in title:
                 parts = title.split(" at ")
                 if len(parts) >= 2:
@@ -172,6 +156,10 @@ class LinkedInJobsScraper:
             elif ":" in title:
                 company_name = title.split(":")[0].strip()
 
+            # Fallback: use truncated title if no pattern matched
+            if not company_name and title:
+                company_name = title[:50] + "..." if len(title) > 50 else title
+
             # Check if stealth
             text_lower = f"{title} {description}".lower()
             is_stealth = any(kw in text_lower for kw in [
@@ -180,16 +168,9 @@ class LinkedInJobsScraper:
                 "pre-launch", "unannounced"
             ])
 
-            # Check for fund matches using word boundary matching
-            matched_fund = None
-            for fund_slug, patterns in FUND_PATTERNS.items():
-                for pattern in patterns:
-                    # Use word boundary to avoid false positives on generic terms
-                    if re.search(rf'\b{re.escape(pattern)}\b', text_lower, re.IGNORECASE):
-                        matched_fund = fund_slug
-                        break
-                if matched_fund:
-                    break
+            # Check for fund matches using centralized fund_matcher
+            # (handles name variants, negative keywords, and disambiguation)
+            matched_fund = match_fund_name(f"{title} {description}")
 
             return LinkedInJob(
                 title=title,
@@ -203,7 +184,7 @@ class LinkedInJobsScraper:
             )
 
         except Exception as e:
-            print(f"Error parsing LinkedIn job: {e}")
+            logger.error(f"Error parsing LinkedIn job: {e}")
             return None
 
     def job_to_article(self, job: LinkedInJob) -> NormalizedArticle:
@@ -220,7 +201,7 @@ class LinkedInJobsScraper:
         ]
 
         if job.is_stealth:
-            text_parts.insert(0, "⚠️ STEALTH STARTUP DETECTED")
+            text_parts.insert(0, "[STEALTH STARTUP DETECTED]")
 
         if job.matched_fund:
             text_parts.append(f"\nMatched Fund: {job.matched_fund}")
@@ -253,7 +234,7 @@ class LinkedInJobsScraper:
             List of NormalizedArticle objects for stealth signals.
         """
         if not self.api_key:
-            print("BRAVE_SEARCH_KEY not configured - skipping LinkedIn Jobs")
+            logger.warning("BRAVE_SEARCH_KEY not configured - skipping LinkedIn Jobs")
             return []
 
         all_jobs: List[LinkedInJob] = []

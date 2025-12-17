@@ -14,6 +14,7 @@ from .models import (
     Deal,
     DealInvestor,
     Article,
+    StealthDetection,
 )
 from .database import get_session
 from ..analyst.schemas import DealExtraction, LeadStatus, EnterpriseCategory
@@ -275,3 +276,87 @@ async def seed_funds(session: AsyncSession) -> None:
     for slug, config in FUND_REGISTRY.items():
         await get_or_create_fund(session, slug)
     await session.commit()
+
+
+async def save_stealth_detection(
+    session: AsyncSession,
+    fund_slug: str,
+    detected_url: str,
+    company_name: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> StealthDetection:
+    """
+    Save a stealth detection to the database.
+
+    Stealth detections track portfolio additions found via:
+    - Portfolio page diffing
+    - LinkedIn job scraping
+    - SEC EDGAR Form D filings
+    - Delaware corporate filings
+
+    Args:
+        session: Database session
+        fund_slug: The fund that backed the company
+        detected_url: URL where the stealth signal was found
+        company_name: Name of the company (if known)
+        notes: Additional context about the detection
+
+    Returns:
+        The created StealthDetection record
+    """
+    # Check for existing detection with same URL to avoid duplicates
+    stmt = select(StealthDetection).where(StealthDetection.detected_url == detected_url)
+    result = await session.execute(stmt)
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        # Update existing detection if we have new info
+        if company_name and not existing.company_name:
+            existing.company_name = company_name
+        if notes and not existing.notes:
+            existing.notes = notes
+        return existing
+
+    detection = StealthDetection(
+        fund_slug=fund_slug,
+        detected_url=detected_url,
+        company_name=company_name,
+        notes=notes,
+    )
+    session.add(detection)
+    await session.flush()
+    return detection
+
+
+async def get_stealth_detections(
+    session: AsyncSession,
+    fund_slug: Optional[str] = None,
+    is_confirmed: Optional[bool] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[StealthDetection]:
+    """
+    Fetch stealth detections with optional filters.
+
+    Args:
+        session: Database session
+        fund_slug: Filter by specific fund
+        is_confirmed: Filter by confirmation status
+        limit: Max results
+        offset: Pagination offset
+
+    Returns:
+        List of StealthDetection records
+    """
+    stmt = select(StealthDetection).order_by(StealthDetection.detected_at.desc())
+
+    if fund_slug:
+        stmt = stmt.where(StealthDetection.fund_slug == fund_slug)
+
+    if is_confirmed is not None:
+        stmt = stmt.where(StealthDetection.is_confirmed == is_confirmed)
+
+    stmt = stmt.offset(offset).limit(limit)
+
+    result = await session.execute(stmt)
+    return list(result.scalars().all())

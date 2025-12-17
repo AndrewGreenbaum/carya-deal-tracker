@@ -21,6 +21,7 @@ Note: Delaware doesn't provide a public API, so we use:
 """
 
 import asyncio
+import logging
 import re
 import httpx
 from bs4 import BeautifulSoup
@@ -30,6 +31,8 @@ from typing import List, Optional, Dict, Any
 
 from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 # Tech company name patterns
@@ -141,7 +144,7 @@ class DelawareCorpsScraper:
         entities = []
 
         if not settings.brave_search_key:
-            print("BRAVE_SEARCH_KEY not configured for Delaware search")
+            logger.warning("BRAVE_SEARCH_KEY not configured for Delaware search")
             return entities
 
         try:
@@ -176,7 +179,7 @@ class DelawareCorpsScraper:
                 await brave_client.aclose()
 
         except Exception as e:
-            print(f"Delaware Brave search error: {e}")
+            logger.error(f"Delaware Brave search error: {e}")
 
         # Deduplicate by name
         seen_names = set()
@@ -303,7 +306,7 @@ class DelawareCorpsScraper:
                         ))
 
         except Exception as e:
-            print(f"OpenCorporates search error: {e}")
+            logger.error(f"OpenCorporates search error: {e}")
 
         return entities
 
@@ -389,7 +392,7 @@ class DelawareCorpsScraper:
                         )
 
         except Exception as e:
-            print(f"OpenCorporates company lookup error: {e}")
+            logger.error(f"OpenCorporates company lookup error: {e}")
 
         return None
 
@@ -426,7 +429,7 @@ class DelawareCorpsScraper:
             signals.append("Startup-friendly registered agent")
 
         text_parts = [
-            f"🏛️ DELAWARE INCORPORATION DETECTED",
+            f"[DELAWARE INCORPORATION DETECTED]",
             f"",
             f"Entity: {entity.entity_name}",
             f"Type: {entity.entity_type}",

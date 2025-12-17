@@ -914,7 +914,18 @@ async def run_sec_edgar_scraper(
 
             tracked_count = 0
             articles = []
+            seen_ciks = set()  # Deduplication by CIK
+
             for filing in filings:
+                # Skip duplicate CIKs
+                if filing.cik in seen_ciks:
+                    continue
+                seen_ciks.add(filing.cik)
+
+                # Fetch filing details (amount, industry, state, investors)
+                filing = await scraper.fetch_filing_details(filing)
+                await asyncio.sleep(0.2)  # Rate limit
+
                 fund_slug = scraper.match_tracked_fund(filing)
                 if fund_slug:
                     tracked_count += 1
@@ -1415,7 +1426,7 @@ async def run_linkedin_jobs_scraper_endpoint(
     Uses Brave Search API (requires BRAVE_SEARCH_KEY).
     ~17 queries per run.
     """
-    from .harvester.scrapers.linkedin_jobs import LinkedInJobsScraper
+    from .harvester.scrapers.linkedin_jobs import LinkedInJobsScraper, STEALTH_JOB_QUERIES
 
     if not settings.brave_search_key:
         raise HTTPException(status_code=400, detail="BRAVE_SEARCH_KEY not configured")
@@ -1428,7 +1439,7 @@ async def run_linkedin_jobs_scraper_endpoint(
         fund_matches = len([a for a in articles if a.fund_slug])
 
         return LinkedInJobsResponse(
-            queries_executed=17,  # Number of STEALTH_JOB_QUERIES
+            queries_executed=len(STEALTH_JOB_QUERIES),
             stealth_signals_found=stealth_count,
             fund_matches=fund_matches,
             total_jobs=len(articles),
@@ -1984,13 +1995,13 @@ async def run_all_sources(
     # LinkedIn Jobs - Stealth Detection (if Brave Search configured)
     if settings.brave_search_key:
         try:
-            from .harvester.scrapers.linkedin_jobs import LinkedInJobsScraper
+            from .harvester.scrapers.linkedin_jobs import LinkedInJobsScraper, STEALTH_JOB_QUERIES
             async with LinkedInJobsScraper() as scraper:
                 articles = await scraper.scrape_all()
             stealth_count = len([a for a in articles if 'stealth' in a.tags])
             fund_matches = len([a for a in articles if a.fund_slug])
             results["linkedin_jobs"] = LinkedInJobsResponse(
-                queries_executed=17,
+                queries_executed=len(STEALTH_JOB_QUERIES),
                 stealth_signals_found=stealth_count,
                 fund_matches=fund_matches,
                 total_jobs=len(articles),

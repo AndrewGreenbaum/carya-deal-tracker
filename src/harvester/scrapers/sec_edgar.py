@@ -10,6 +10,7 @@ with the SEC within 15 days. This is public data we can monitor.
 """
 
 import asyncio
+import logging
 import re
 import feedparser
 import httpx
@@ -21,6 +22,8 @@ from xml.etree import ElementTree as ET
 from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
 from ...config.funds import FUND_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 
 # SEC EDGAR Atom feed for recent Form D filings
@@ -65,6 +68,23 @@ VC_LIKELY_INDUSTRIES = [
 
 # Minimum amount to consider as likely VC-backed (filters out small raises)
 MIN_VC_AMOUNT = 500_000  # $500K+
+
+# State name to 2-letter code mapping for normalization
+STATE_CODES = {
+    "ALABAMA": "AL", "ALASKA": "AK", "ARIZONA": "AZ", "ARKANSAS": "AR",
+    "CALIFORNIA": "CA", "COLORADO": "CO", "CONNECTICUT": "CT", "DELAWARE": "DE",
+    "FLORIDA": "FL", "GEORGIA": "GA", "HAWAII": "HI", "IDAHO": "ID",
+    "ILLINOIS": "IL", "INDIANA": "IN", "IOWA": "IA", "KANSAS": "KS",
+    "KENTUCKY": "KY", "LOUISIANA": "LA", "MAINE": "ME", "MARYLAND": "MD",
+    "MASSACHUSETTS": "MA", "MICHIGAN": "MI", "MINNESOTA": "MN", "MISSISSIPPI": "MS",
+    "MISSOURI": "MO", "MONTANA": "MT", "NEBRASKA": "NE", "NEVADA": "NV",
+    "NEW HAMPSHIRE": "NH", "NEW JERSEY": "NJ", "NEW MEXICO": "NM", "NEW YORK": "NY",
+    "NORTH CAROLINA": "NC", "NORTH DAKOTA": "ND", "OHIO": "OH", "OKLAHOMA": "OK",
+    "OREGON": "OR", "PENNSYLVANIA": "PA", "RHODE ISLAND": "RI", "SOUTH CAROLINA": "SC",
+    "SOUTH DAKOTA": "SD", "TENNESSEE": "TN", "TEXAS": "TX", "UTAH": "UT",
+    "VERMONT": "VT", "VIRGINIA": "VA", "WASHINGTON": "WA", "WEST VIRGINIA": "WV",
+    "WISCONSIN": "WI", "WYOMING": "WY", "DISTRICT OF COLUMBIA": "DC",
+}
 
 
 @dataclass
@@ -153,7 +173,7 @@ class SECEdgarScraper:
             return filings
 
         except Exception as e:
-            print(f"SEC EDGAR fetch error: {e}")
+            logger.error(f"SEC EDGAR fetch error: {e}")
             return []
 
     def _parse_feed_entry(self, entry: Dict[str, Any]) -> Optional[FormDFiling]:
@@ -193,7 +213,7 @@ class SECEdgarScraper:
             )
 
         except Exception as e:
-            print(f"Error parsing SEC entry: {e}")
+            logger.error(f"Error parsing SEC entry: {e}")
             return None
 
     async def fetch_filing_details(self, filing: FormDFiling) -> FormDFiling:
@@ -206,6 +226,11 @@ class SECEdgarScraper:
         - Names of Related Persons (investors)
         """
         try:
+            # Validate accession_number before constructing URL
+            if not filing.accession_number:
+                logger.warning(f"Missing accession number for {filing.company_name} (CIK: {filing.cik})")
+                return filing
+
             # Build URL to Form D XML
             # Format: /Archives/edgar/data/{cik}/{accession}/primary_doc.xml
             accession_clean = filing.accession_number.replace("-", "")
@@ -266,19 +291,23 @@ class SECEdgarScraper:
             if state_elem is None:
                 state_elem = root.find(".//issuerStateOrCountry")
             if state_elem is not None and state_elem.text:
-                # Convert full name to state code if needed
+                # Convert full name to 2-letter state code using STATE_CODES mapping
                 state_text = state_elem.text.strip().upper()
-                if state_text == "DELAWARE":
-                    filing.state_of_incorporation = "DE"
-                elif len(state_text) == 2:
+                if len(state_text) == 2:
+                    # Already a 2-letter code
                     filing.state_of_incorporation = state_text
+                elif state_text in STATE_CODES:
+                    # Use mapping to convert full name to 2-letter code
+                    filing.state_of_incorporation = STATE_CODES[state_text]
                 else:
+                    # Unknown format, store as-is but log warning
+                    logger.warning(f"Unknown state format: {state_text}")
                     filing.state_of_incorporation = state_text
 
             return filing
 
         except Exception as e:
-            print(f"Error fetching filing details: {e}")
+            logger.error(f"Error fetching filing details for {filing.company_name}: {e}")
             return filing
 
     def match_tracked_fund(self, filing: FormDFiling) -> Optional[str]:
