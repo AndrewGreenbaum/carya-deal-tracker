@@ -2429,6 +2429,7 @@ async def cleanup_old_deals(
 
     Cleans up old data to focus on recent deals (past year).
     Use cutoff_date=2023-12-01 to keep only deals from the past year.
+    Also deletes related articles and deal_investors.
     """
     from datetime import datetime as dt
     from sqlalchemy import delete
@@ -2442,19 +2443,35 @@ async def cleanup_old_deals(
 
     try:
         async with get_session() as session:
-            # Delete deals with announced_date before cutoff
-            stmt1 = delete(Deal).where(Deal.announced_date < cutoff)
-            result1 = await session.execute(stmt1)
-            deleted_count += result1.rowcount
+            # First, find deal IDs to delete
+            stmt_find = select(Deal.id).where(Deal.announced_date < cutoff)
+            result_find = await session.execute(stmt_find)
+            deal_ids_dated = [row[0] for row in result_find.fetchall()]
 
-            # Optionally delete undated deals created before cutoff
+            deal_ids_undated = []
             if include_undated:
-                stmt2 = delete(Deal).where(
+                stmt_find2 = select(Deal.id).where(
                     Deal.announced_date.is_(None),
                     Deal.created_at < cutoff
                 )
-                result2 = await session.execute(stmt2)
-                deleted_count += result2.rowcount
+                result_find2 = await session.execute(stmt_find2)
+                deal_ids_undated = [row[0] for row in result_find2.fetchall()]
+
+            all_deal_ids = deal_ids_dated + deal_ids_undated
+
+            if all_deal_ids:
+                # Delete related articles first
+                stmt_articles = delete(Article).where(Article.deal_id.in_(all_deal_ids))
+                await session.execute(stmt_articles)
+
+                # Delete related deal_investors
+                stmt_investors = delete(DealInvestor).where(DealInvestor.deal_id.in_(all_deal_ids))
+                await session.execute(stmt_investors)
+
+                # Now delete the deals
+                stmt_deals = delete(Deal).where(Deal.id.in_(all_deal_ids))
+                result_deals = await session.execute(stmt_deals)
+                deleted_count = result_deals.rowcount
 
             await session.commit()
 
