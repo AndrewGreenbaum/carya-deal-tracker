@@ -2341,6 +2341,213 @@ async def enrich_deals(
     )
 
 
+# ----- Date Backfill & Cleanup -----
+
+class DateBackfillResponse(BaseModel):
+    deals_processed: int
+    deals_updated: int
+    deals_skipped_no_article: int
+    deals_skipped_already_has_date: int
+
+
+@app.post("/enrichment/backfill-dates", response_model=DateBackfillResponse)
+async def backfill_deal_dates(
+    limit: int = Query(100, ge=1, le=500, description="Max deals to process"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Backfill missing announced_date for deals.
+
+    Uses article.published_date as fallback for deals missing announced_date.
+    This improves date coverage from ~50-60% to ~95%+.
+    """
+    from datetime import date
+
+    processed = 0
+    updated = 0
+    skipped_no_article = 0
+    skipped_has_date = 0
+
+    try:
+        async with get_session() as session:
+            # Find deals missing announced_date
+            stmt = (
+                select(Deal)
+                .options(selectinload(Deal.articles))
+                .where(Deal.announced_date.is_(None))
+                .order_by(Deal.created_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            deals = result.scalars().all()
+
+            for deal in deals:
+                processed += 1
+
+                # Skip if deal already has a date (shouldn't happen with our query)
+                if deal.announced_date:
+                    skipped_has_date += 1
+                    continue
+
+                # Try to get date from linked article
+                if deal.articles:
+                    article = deal.articles[0]
+                    if article.published_date:
+                        deal.announced_date = article.published_date
+                        updated += 1
+                        continue
+
+                # No article or no published_date
+                skipped_no_article += 1
+
+            await session.commit()
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return DateBackfillResponse(
+        deals_processed=processed,
+        deals_updated=updated,
+        deals_skipped_no_article=skipped_no_article,
+        deals_skipped_already_has_date=skipped_has_date,
+    )
+
+
+class CleanupOldDealsResponse(BaseModel):
+    deals_deleted: int
+    cutoff_date: str
+
+
+@app.post("/deals/cleanup-old", response_model=CleanupOldDealsResponse)
+async def cleanup_old_deals(
+    cutoff_date: str = Query("2023-12-01", description="Delete deals before this date (YYYY-MM-DD)"),
+    include_undated: bool = Query(True, description="Also delete deals without dates that were created before cutoff"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Delete deals older than the cutoff date.
+
+    Cleans up old data to focus on recent deals (past year).
+    Use cutoff_date=2023-12-01 to keep only deals from the past year.
+    """
+    from datetime import datetime as dt
+    from sqlalchemy import delete
+
+    try:
+        cutoff = dt.strptime(cutoff_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+
+    deleted_count = 0
+
+    try:
+        async with get_session() as session:
+            # Delete deals with announced_date before cutoff
+            stmt1 = delete(Deal).where(Deal.announced_date < cutoff)
+            result1 = await session.execute(stmt1)
+            deleted_count += result1.rowcount
+
+            # Optionally delete undated deals created before cutoff
+            if include_undated:
+                stmt2 = delete(Deal).where(
+                    Deal.announced_date.is_(None),
+                    Deal.created_at < cutoff
+                )
+                result2 = await session.execute(stmt2)
+                deleted_count += result2.rowcount
+
+            await session.commit()
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    cache.invalidate("deals")
+
+    return CleanupOldDealsResponse(
+        deals_deleted=deleted_count,
+        cutoff_date=cutoff_date,
+    )
+
+
+class LinkedInEnrichmentResponse(BaseModel):
+    deals_processed: int
+    founders_enriched: int
+    linkedin_urls_found: int
+
+
+@app.post("/enrichment/linkedin", response_model=LinkedInEnrichmentResponse)
+async def enrich_founder_linkedin(
+    limit: int = Query(50, ge=1, le=200, description="Max deals to process"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Enrich founders with LinkedIn URLs and persist to database.
+
+    Finds deals with founders missing LinkedIn URLs,
+    searches Brave for their profiles, and saves results.
+    """
+    from .enrichment.brave_enrichment import enrich_deal_founders_linkedin
+    import json as json_module
+
+    processed = 0
+    founders_enriched = 0
+    linkedin_found = 0
+
+    try:
+        async with get_session() as session:
+            # Find deals with founders but missing LinkedIn URLs
+            stmt = (
+                select(Deal)
+                .options(selectinload(Deal.company))
+                .where(Deal.founders_json.isnot(None))
+                .order_by(Deal.created_at.desc())
+                .limit(limit * 2)  # Get more to filter
+            )
+            result = await session.execute(stmt)
+            deals = result.scalars().all()
+
+            for deal in deals:
+                if processed >= limit:
+                    break
+
+                # Parse founders
+                try:
+                    founders = json_module.loads(deal.founders_json)
+                except (json_module.JSONDecodeError, TypeError):
+                    continue
+
+                # Skip if all founders already have LinkedIn
+                missing_linkedin = [f for f in founders if not f.get("linkedin_url")]
+                if not missing_linkedin:
+                    continue
+
+                processed += 1
+                company_name = deal.company.name if deal.company else "Unknown"
+
+                # Enrich and persist
+                updated_founders = await enrich_deal_founders_linkedin(
+                    deal_id=deal.id,
+                    company_name=company_name,
+                    founders=founders,
+                    persist=True,
+                )
+
+                # Count enriched
+                for orig, updated in zip(founders, updated_founders):
+                    if not orig.get("linkedin_url") and updated.get("linkedin_url"):
+                        founders_enriched += 1
+                        linkedin_found += 1
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return LinkedInEnrichmentResponse(
+        deals_processed=processed,
+        founders_enriched=founders_enriched,
+        linkedin_urls_found=linkedin_found,
+    )
+
+
 # ----- CLI Runner -----
 
 def run_server():

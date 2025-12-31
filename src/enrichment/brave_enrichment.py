@@ -402,3 +402,90 @@ async def enrich_companies_batch(
             await asyncio.sleep(delay_seconds)
 
     return results
+
+
+async def persist_deal_linkedin_enrichment(
+    deal_id: int,
+    founders_with_linkedin: List[Dict],
+) -> bool:
+    """
+    Persist LinkedIn enrichment results to a deal's founders_json.
+
+    Args:
+        deal_id: ID of the deal to update
+        founders_with_linkedin: Updated list of founder dicts with linkedin_url fields
+
+    Returns:
+        True if update succeeded, False otherwise
+    """
+    import json
+    from ..archivist.database import get_session
+    from ..archivist.models import Deal
+
+    try:
+        async with get_session() as session:
+            deal = await session.get(Deal, deal_id)
+            if deal:
+                deal.founders_json = json.dumps(founders_with_linkedin)
+                await session.commit()
+                logger.info(f"Updated LinkedIn for deal {deal_id}")
+                return True
+            return False
+    except Exception as e:
+        logger.error(f"Error persisting LinkedIn for deal {deal_id}: {e}")
+        return False
+
+
+async def enrich_deal_founders_linkedin(
+    deal_id: int,
+    company_name: str,
+    founders: List[Dict],
+    persist: bool = True,
+) -> List[Dict]:
+    """
+    Enrich founders with LinkedIn URLs and optionally persist to database.
+
+    Args:
+        deal_id: ID of the deal
+        company_name: Name of the company
+        founders: List of founder dicts [{"name": "...", "title": "...", "linkedin_url": None}]
+        persist: If True, save results to database
+
+    Returns:
+        Updated list of founder dicts with linkedin_url fields populated
+    """
+    if not founders:
+        return []
+
+    updated_founders = []
+    enriched_count = 0
+
+    async with BraveEnrichmentClient() as client:
+        for founder in founders:
+            founder_copy = dict(founder)
+
+            # Skip if already has LinkedIn
+            if founder.get("linkedin_url"):
+                updated_founders.append(founder_copy)
+                continue
+
+            founder_name = founder.get("name", "")
+            if not founder_name or founder_name.lower() in ("ceo", "founder", "unknown"):
+                updated_founders.append(founder_copy)
+                continue
+
+            # Find LinkedIn
+            linkedin_url = await client.find_founder_linkedin(founder_name, company_name)
+            if linkedin_url:
+                founder_copy["linkedin_url"] = linkedin_url
+                enriched_count += 1
+                logger.info(f"Found LinkedIn for {founder_name} at {company_name}: {linkedin_url}")
+
+            updated_founders.append(founder_copy)
+            await asyncio.sleep(0.5)  # Rate limit
+
+    # Persist results
+    if persist and enriched_count > 0:
+        await persist_deal_linkedin_enrichment(deal_id, updated_founders)
+
+    return updated_founders

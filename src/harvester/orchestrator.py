@@ -171,6 +171,7 @@ async def process_article(
                 article_title=article.title,
                 article_text=article.text,
                 source_fund_slug=article.fund_slug,
+                article_published_date=article.published_date,
             )
             logger.info(
                 f"Saved deal: {extraction.startup_name} - "

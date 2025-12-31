@@ -134,6 +134,22 @@ FOUNDERS:
   - If NOT mentioned → set to null (do NOT create search URLs)
 
 ═══════════════════════════════════════════════════════════════════
+DATE EXTRACTION (REQUIRED)
+═══════════════════════════════════════════════════════════════════
+
+ALWAYS extract the announcement/funding date from the article:
+- Look for explicit dates: "December 15, 2025", "Dec 15", "15/12/2025"
+- Look for relative dates: "announced today", "yesterday", "last week", "this week"
+- Look for context clues: "Tuesday's announcement", "earlier this month"
+
+If date is found:
+- Set round_date to the extracted date in YYYY-MM-DD format
+- If relative ("today", "yesterday"), estimate based on typical news cycle
+
+If NO date found:
+- Set round_date to null (caller will use article.published_date as fallback)
+
+═══════════════════════════════════════════════════════════════════
 CHAIN OF THOUGHT
 ═══════════════════════════════════════════════════════════════════
 

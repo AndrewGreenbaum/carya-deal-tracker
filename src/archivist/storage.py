@@ -3,7 +3,7 @@ Storage pipeline for persisting extracted deals to the database.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 from sqlalchemy import select, nullslast
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,6 +88,7 @@ async def save_deal(
     article_title: str,
     article_text: Optional[str] = None,
     source_fund_slug: Optional[str] = None,
+    article_published_date: Optional[date] = None,
 ) -> Deal:
     """
     Save an extracted deal to the database.
@@ -124,13 +125,18 @@ async def save_deal(
         ]
         founders_json = json.dumps(founders_data)
 
+    # Determine announced_date with fallback to article published date
+    announced_date = extraction.round_date
+    if announced_date is None and article_published_date:
+        announced_date = article_published_date
+
     # Create deal with enterprise AI classification
     deal = Deal(
         company_id=company.id,
         round_type=extraction.round_label.value,
         amount=extraction.amount,
         valuation=extraction.valuation,
-        announced_date=extraction.round_date,
+        announced_date=announced_date,
         is_lead_confirmed=extraction.tracked_fund_is_lead,
         lead_partner_name=extraction.tracked_fund_partner,
         verification_snippet=extraction.verification_snippet,
