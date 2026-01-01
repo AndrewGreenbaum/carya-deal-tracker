@@ -8,7 +8,7 @@ Supports:
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 import httpx
 
@@ -23,6 +23,7 @@ async def send_scrape_summary(
     results: List[ScrapingResult],
     duration_seconds: float,
     error: Optional[str] = None,
+    external_results: Optional[Dict[str, Any]] = None,
 ):
     """
     Send scrape summary to configured webhooks.
@@ -32,12 +33,13 @@ async def send_scrape_summary(
         results: List of ScrapingResult from each fund
         duration_seconds: Total job duration
         error: Optional error message if job failed
+        external_results: Optional dict with external source stats
     """
     # Build summary
     if error:
         summary = _build_error_message(job_id, error, duration_seconds)
     else:
-        summary = _build_success_message(job_id, results, duration_seconds)
+        summary = _build_success_message(job_id, results, duration_seconds, external_results)
 
     # Log the summary
     logger.info(summary["text"])
@@ -55,25 +57,42 @@ def _build_success_message(
     job_id: str,
     results: List[ScrapingResult],
     duration: float,
+    external_results: Optional[Dict[str, Any]] = None,
 ) -> dict:
     """Build success notification message."""
-    total_articles = sum(r.articles_found for r in results)
-    total_deals = sum(r.deals_saved for r in results)
+    # Fund website stats
+    fund_articles = sum(r.articles_found for r in results)
+    fund_deals = sum(r.deals_saved for r in results)
     total_errors = sum(len(r.errors) for r in results)
     funds_with_deals = [r.fund_slug for r in results if r.deals_saved > 0]
 
+    # External source stats
+    external_deals = 0
+    external_sources = []
+    if external_results:
+        external_deals = external_results.get("total_deals_saved", 0)
+        for source, stats in external_results.items():
+            if source != "total_deals_saved" and isinstance(stats, dict):
+                deals = stats.get("deals_saved", 0)
+                if deals > 0:
+                    external_sources.append(f"{source}({deals})")
+
+    total_deals = fund_deals + external_deals
     status_emoji = ":white_check_mark:" if total_errors == 0 else ":warning:"
 
     text = f"""{status_emoji} *Bud Tracker Scrape Complete* [{job_id}]
 
 *Summary:*
 - Funds scraped: {len(results)}
-- Articles found: {total_articles}
-- New deals saved: {total_deals}
+- Fund articles: {fund_articles}
+- Fund deals: {fund_deals}
+- External deals: {external_deals}
+- *Total deals saved: {total_deals}*
 - Errors: {total_errors}
 - Duration: {duration:.1f}s
 
-*Funds with new deals:* {', '.join(funds_with_deals) or 'None'}"""
+*Funds with new deals:* {', '.join(funds_with_deals) or 'None'}
+*External sources with deals:* {', '.join(external_sources) or 'None'}"""
 
     return {
         "text": text.strip(),

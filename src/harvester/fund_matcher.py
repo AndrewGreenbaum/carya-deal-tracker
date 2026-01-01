@@ -86,6 +86,8 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
 
 
 # Negative keywords - if these appear, DON'T match to that fund
+# NOTE: Be careful not to be too aggressive - these should only exclude
+# clear false positives, not valid mentions that happen to contain similar words
 NEGATIVE_KEYWORDS: dict[str, list[str]] = {
     "gv": [
         "nyse:gv",
@@ -115,25 +117,26 @@ NEGATIVE_KEYWORDS: dict[str, list[str]] = {
         "benchmark litigation",
     ],
     "insight": [
-        "insight venture management",  # Subsidiary
-        "market insight",
-        "business insight",
-        "consumer insight",
+        "insight venture management",  # Subsidiary - actually still valid
+        # Removed: "market insight", "business insight", "consumer insight"
+        # These were too aggressive and could appear in valid Insight Partners articles
     ],
     "index": [
         "index fund",
         "stock index",
         "s&p index",
         "market index",
+        # These are specific enough to not exclude valid Index Ventures mentions
     ],
     "accel": [
-        "accelerate",
-        "acceleration",
-        "accelerator program",
-        "accel entertainment",  # Different company
+        # Removed: "accelerate", "acceleration" - too aggressive
+        # These words commonly appear in valid startup funding news
+        "accelerator program",  # Keep - refers to accelerators, not Accel
+        "accel entertainment",  # Different company (gaming)
     ],
     "menlo": [
-        "menlo park",  # Location, not the fund
+        # Removed: "menlo park" - Menlo Ventures IS based in Menlo Park
+        # and many articles mention both legitimately
         "menlo college",
         "menlo school",
     ],
@@ -143,7 +146,8 @@ NEGATIVE_KEYWORDS: dict[str, list[str]] = {
         "redpoint global",  # Different fund
     ],
     "general_catalyst": [
-        "general catalyst partners",  # Old name but still valid
+        # Removed: "general catalyst partners" - this is just their full legal name
+        # and shouldn't be excluded
     ],
 }
 

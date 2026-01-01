@@ -102,6 +102,48 @@ PARTNER_QUERIES = {
         '"led by Keith Rabois" OR "Keith Rabois led"',
         '"Founders Fund" leads OR "led by Founders Fund"',
     ],
+    # NEW: Insight Partners - growth equity focus, often leads large rounds
+    "insight": [
+        '"Insight Partners" leads OR "led by Insight Partners"',
+        '"Insight Partners" investment OR funding series',
+        '"Jeff Horing" investment OR funding OR leads',
+        '"Deven Parekh" investment OR funding OR leads',
+        '"Lonne Jaffe" investment OR funding',
+    ],
+    # NEW: Index Ventures - European focus with US presence
+    "index": [
+        '"Index Ventures" leads OR "led by Index Ventures"',
+        '"Index Ventures" investment OR funding series',
+        '"Danny Rimer" investment OR funding OR leads',
+        '"Mike Volpi" investment OR funding OR leads',
+    ],
+    # NEW: Bessemer - cloud focus
+    "bessemer": [
+        '"Bessemer Venture Partners" leads OR "led by Bessemer"',
+        '"Bessemer" investment OR funding series',
+        '"Byron Deeter" investment OR funding OR leads',
+        '"Ethan Kurzweil" investment OR funding',
+    ],
+    # NEW: Accel - global presence
+    "accel": [
+        '"Accel" leads OR "led by Accel"',
+        '"Accel Partners" investment OR funding series',
+        '"Dan Levine" Accel investment OR funding',
+        '"Arun Mathew" Accel investment OR funding',
+    ],
+    # NEW: GV (Google Ventures) - corporate VC
+    "gv": [
+        '"Google Ventures" leads OR "led by Google Ventures"',
+        '"GV" leads startup funding OR investment',
+        '"Tom Hulme" GV investment OR funding',
+    ],
+    # NEW: Sequoia - top-tier with extensive portfolio
+    "sequoia": [
+        '"Sequoia Capital" leads OR "led by Sequoia"',
+        '"Sequoia" investment series funding startup',
+        '"Roelof Botha" investment OR funding OR leads',
+        '"Alfred Lin" investment OR funding OR leads',
+    ],
 }
 
 # Enterprise AI keywords - optimized for high-signal results

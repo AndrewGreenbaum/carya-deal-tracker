@@ -7,18 +7,21 @@ Runs scraping every 4 hours of all 18 VC funds with:
 - Webhook notifications on completion
 - Metrics logging
 - Automatic enrichment of new deals
+- External sources (Brave Search, SEC EDGAR, etc.)
 """
 
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from ..harvester import scrape_all_funds, get_implemented_scrapers
+from ..harvester.base_scraper import NormalizedArticle
 from ..config.settings import settings
+from ..config.funds import FUND_REGISTRY
 from .notifications import send_scrape_summary
 
 logger = logging.getLogger(__name__)
@@ -138,12 +141,270 @@ async def enrich_new_deals(limit: int = 25):
 scheduler: Optional[AsyncIOScheduler] = None
 
 
+async def process_external_articles(
+    articles: List[NormalizedArticle],
+    source_name: str,
+) -> Dict[str, int]:
+    """
+    Process articles from external sources through extraction pipeline.
+
+    This is the CRITICAL fix: external sources (Brave Search, SEC, etc.)
+    were returning articles but never extracting deals from them.
+
+    Args:
+        articles: List of NormalizedArticle from external source
+        source_name: Name of source for logging
+
+    Returns:
+        Dict with processing stats
+    """
+    from ..analyst.extractor import extract_deal
+    from ..archivist.storage import save_deal
+    from ..archivist.database import get_session
+    from ..archivist.models import Article
+    from sqlalchemy import select
+
+    stats = {
+        "articles_received": len(articles),
+        "articles_skipped_duplicate": 0,
+        "deals_extracted": 0,
+        "deals_saved": 0,
+        "errors": 0,
+    }
+
+    if not articles:
+        return stats
+
+    logger.info(f"[{source_name}] Processing {len(articles)} articles through extraction pipeline")
+
+    for article in articles:
+        try:
+            # Check for duplicate URL
+            async with get_session() as session:
+                stmt = select(Article).where(Article.url == article.url).limit(1)
+                result = await session.execute(stmt)
+                if result.scalar_one_or_none():
+                    stats["articles_skipped_duplicate"] += 1
+                    continue
+
+            # Get fund config for context (may be empty for general articles)
+            fund_config = FUND_REGISTRY.get(article.fund_slug) if article.fund_slug else None
+
+            # Extract deal using Claude
+            extraction = await extract_deal(
+                article_text=article.text,
+                source_url=article.url,
+                fund_context=fund_config,
+            )
+
+            # Skip low-confidence extractions
+            if extraction.confidence_score < settings.extraction_confidence_threshold:
+                continue
+
+            stats["deals_extracted"] += 1
+
+            # Save to database
+            async with get_session() as session:
+                await save_deal(
+                    session=session,
+                    extraction=extraction,
+                    article_url=article.url,
+                    article_title=article.title,
+                    article_text=article.text,
+                    source_fund_slug=article.fund_slug,
+                    article_published_date=article.published_date,
+                )
+                stats["deals_saved"] += 1
+                logger.info(
+                    f"[{source_name}] Saved deal: {extraction.startup_name} "
+                    f"(fund: {article.fund_slug or 'unknown'})"
+                )
+
+            # Rate limit between extractions
+            await asyncio.sleep(0.5)
+
+        except Exception as e:
+            stats["errors"] += 1
+            logger.warning(f"[{source_name}] Error processing article {article.url}: {e}")
+
+    logger.info(
+        f"[{source_name}] Extraction complete: "
+        f"received={stats['articles_received']}, "
+        f"duplicates={stats['articles_skipped_duplicate']}, "
+        f"extracted={stats['deals_extracted']}, "
+        f"saved={stats['deals_saved']}, "
+        f"errors={stats['errors']}"
+    )
+
+    return stats
+
+
+async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
+    """
+    Scrape all external data sources and process through extraction pipeline.
+
+    This is the KEY function that was missing from the scheduled job.
+    External sources find articles about deals, but they must be extracted
+    by Claude to become actual deal records in the database.
+
+    Sources scraped:
+    1. Brave Search (with partner name queries for Benchmark, Khosla, etc.)
+    2. SEC EDGAR (Form D filings)
+    3. Google Alerts (RSS feeds)
+    4. Twitter/X (API monitoring)
+    5. TechCrunch RSS
+    6. Fortune Term Sheet RSS
+    7. LinkedIn Jobs (stealth detector)
+
+    Args:
+        days: Number of days to look back
+
+    Returns:
+        Dict with stats per source
+    """
+    results = {}
+    total_deals_saved = 0
+
+    # 1. BRAVE SEARCH (most important - includes partner name queries)
+    if settings.brave_search_key:
+        try:
+            from ..harvester.scrapers.brave_search import BraveSearchScraper
+
+            freshness = "pd" if days <= 1 else ("pw" if days <= 7 else "pm")
+            async with BraveSearchScraper() as scraper:
+                articles = await scraper.scrape_all(
+                    freshness=freshness,
+                    include_enterprise=True,
+                    include_participation=True,
+                    include_stealth=True,
+                    include_partner_names=True,  # Critical for Benchmark, Khosla, First Round
+                )
+
+            stats = await process_external_articles(articles, "brave_search")
+            results["brave_search"] = stats
+            total_deals_saved += stats["deals_saved"]
+
+        except Exception as e:
+            logger.error(f"Brave Search scraping failed: {e}")
+            results["brave_search"] = {"error": str(e)}
+
+    # 2. SEC EDGAR (free - Form D filings)
+    try:
+        from ..harvester.scrapers.sec_edgar import SECEdgarScraper
+
+        async with SECEdgarScraper() as scraper:
+            filings = await scraper.fetch_recent_filings(hours=days * 24)
+            # Convert filings to articles - to_normalized_article is async
+            articles = []
+            for filing in filings:
+                matched_fund = scraper.match_tracked_fund(filing)
+                article = await scraper.to_normalized_article(filing, matched_fund)
+                articles.append(article)
+
+        stats = await process_external_articles(articles, "sec_edgar")
+        results["sec_edgar"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error(f"SEC EDGAR scraping failed: {e}")
+        results["sec_edgar"] = {"error": str(e)}
+
+    # 3. GOOGLE ALERTS (free - RSS feeds)
+    if settings.google_alerts_feeds:
+        try:
+            from ..harvester.scrapers.google_alerts import GoogleAlertsScraper
+
+            feed_urls = [f.strip() for f in settings.google_alerts_feeds.split(',') if f.strip()]
+            async with GoogleAlertsScraper(feed_urls) as scraper:
+                articles = await scraper.scrape_all()
+
+            stats = await process_external_articles(articles, "google_alerts")
+            results["google_alerts"] = stats
+            total_deals_saved += stats["deals_saved"]
+
+        except Exception as e:
+            logger.error(f"Google Alerts scraping failed: {e}")
+            results["google_alerts"] = {"error": str(e)}
+
+    # 4. TWITTER (free tier)
+    if settings.twitter_bearer_token:
+        try:
+            from ..harvester.scrapers.twitter_monitor import TwitterMonitor
+
+            async with TwitterMonitor() as monitor:
+                articles = await monitor.scrape_all(hours_back=days * 24)
+
+            stats = await process_external_articles(articles, "twitter")
+            results["twitter"] = stats
+            total_deals_saved += stats["deals_saved"]
+
+        except Exception as e:
+            logger.error(f"Twitter scraping failed: {e}")
+            results["twitter"] = {"error": str(e)}
+
+    # 5. TECHCRUNCH RSS (free)
+    try:
+        from ..harvester.scrapers.techcrunch_rss import TechCrunchScraper
+
+        async with TechCrunchScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+
+        stats = await process_external_articles(articles, "techcrunch")
+        results["techcrunch"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error(f"TechCrunch scraping failed: {e}")
+        results["techcrunch"] = {"error": str(e)}
+
+    # 6. FORTUNE TERM SHEET (free)
+    try:
+        from ..harvester.scrapers.fortune_term_sheet import FortuneTermSheetScraper
+
+        async with FortuneTermSheetScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+
+        stats = await process_external_articles(articles, "fortune")
+        results["fortune"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error(f"Fortune Term Sheet scraping failed: {e}")
+        results["fortune"] = {"error": str(e)}
+
+    # 7. LINKEDIN JOBS / STEALTH DETECTOR (uses Brave Search)
+    if settings.brave_search_key:
+        try:
+            from ..harvester.scrapers.linkedin_jobs import LinkedInJobsScraper
+
+            async with LinkedInJobsScraper() as scraper:
+                articles = await scraper.scrape_all()
+
+            stats = await process_external_articles(articles, "linkedin_jobs")
+            results["linkedin_jobs"] = stats
+            total_deals_saved += stats["deals_saved"]
+
+        except Exception as e:
+            logger.error(f"LinkedIn Jobs scraping failed: {e}")
+            results["linkedin_jobs"] = {"error": str(e)}
+
+    results["total_deals_saved"] = total_deals_saved
+    logger.info(f"External sources complete: {total_deals_saved} total deals saved")
+
+    return results
+
+
 async def scheduled_scrape_job():
     """
     Main scheduled scraping job.
 
-    Scrapes all 18 implemented funds with parallel execution
-    and sends summary notification. Runs every 4 hours.
+    Scrapes all 18 implemented funds with parallel execution,
+    PLUS all external data sources (Brave Search, SEC, etc.).
+    Runs every 4 hours.
+
+    This is the FIXED version that includes external sources
+    which contain partner name queries for funds like Benchmark,
+    Khosla, and First Round that don't have useful website scrapers.
     """
     job_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     logger.info(f"[{job_id}] Starting scheduled scrape job")
@@ -151,9 +412,9 @@ async def scheduled_scrape_job():
     start_time = datetime.utcnow()
 
     try:
-        # Get all implemented scrapers
+        # ===== PHASE 1: Scrape fund websites =====
         fund_slugs = get_implemented_scrapers()
-        logger.info(f"[{job_id}] Scraping {len(fund_slugs)} funds: {fund_slugs}")
+        logger.info(f"[{job_id}] Phase 1: Scraping {len(fund_slugs)} fund websites")
 
         # Run scrapers with parallel=True, max 3 concurrent
         results = await scrape_all_funds(
@@ -162,21 +423,40 @@ async def scheduled_scrape_job():
             max_parallel_funds=3
         )
 
-        # Calculate summary stats
-        total_articles = sum(r.articles_found for r in results)
-        total_deals = sum(r.deals_saved for r in results)
-        total_errors = sum(len(r.errors) for r in results)
+        # Calculate Phase 1 stats
+        fund_articles = sum(r.articles_found for r in results)
+        fund_deals = sum(r.deals_saved for r in results)
+        fund_errors = sum(len(r.errors) for r in results)
+
+        logger.info(
+            f"[{job_id}] Phase 1 complete: "
+            f"articles={fund_articles}, deals={fund_deals}, errors={fund_errors}"
+        )
+
+        # ===== PHASE 2: Scrape external sources (THE FIX) =====
+        logger.info(f"[{job_id}] Phase 2: Scraping external sources (Brave Search, SEC, etc.)")
+
+        external_results = await scrape_external_sources(days=7)
+        external_deals = external_results.get("total_deals_saved", 0)
+
+        logger.info(
+            f"[{job_id}] Phase 2 complete: "
+            f"external_deals={external_deals}"
+        )
+
+        # ===== Calculate total stats =====
+        total_deals = fund_deals + external_deals
         duration = (datetime.utcnow() - start_time).total_seconds()
 
         logger.info(
             f"[{job_id}] Scrape complete: "
-            f"articles={total_articles}, deals={total_deals}, "
-            f"errors={total_errors}, duration={duration:.1f}s"
+            f"fund_deals={fund_deals}, external_deals={external_deals}, "
+            f"total_deals={total_deals}, duration={duration:.1f}s"
         )
 
-        # Enrich new deals with website/LinkedIn data
+        # ===== PHASE 3: Enrich new deals =====
         if total_deals > 0:
-            logger.info(f"[{job_id}] Starting automatic enrichment for new deals")
+            logger.info(f"[{job_id}] Phase 3: Starting automatic enrichment for new deals")
             enriched = await enrich_new_deals(limit=min(total_deals + 10, 50))
             logger.info(f"[{job_id}] Enrichment complete: {enriched} companies updated")
 
@@ -184,7 +464,8 @@ async def scheduled_scrape_job():
         await send_scrape_summary(
             job_id=job_id,
             results=results,
-            duration_seconds=duration
+            duration_seconds=duration,
+            external_results=external_results,
         )
 
     except Exception as e:
