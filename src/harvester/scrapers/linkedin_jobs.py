@@ -90,8 +90,12 @@ class LinkedInJobsScraper:
 
     def __init__(self):
         self.api_key = settings.brave_search_key
+        self.timeout = settings.brave_search_timeout
+        self.max_retries = settings.brave_search_max_retries
+        self.rate_limit_delay = settings.brave_search_rate_limit_delay
+        self.backoff_base = settings.brave_search_backoff_base
         self.client = httpx.AsyncClient(
-            timeout=30,
+            timeout=self.timeout,
             headers={
                 "X-Subscription-Token": self.api_key,
                 "Accept": "application/json",
@@ -109,27 +113,73 @@ class LinkedInJobsScraper:
         query: str,
         count: int = 20,
     ) -> List[Dict[str, Any]]:
-        """Execute web search via Brave API."""
+        """Execute web search via Brave API with retry logic."""
         if not self.api_key:
+            logger.warning("BRAVE_SEARCH_KEY not configured for stealth detection")
             return []
 
-        try:
-            params = {
-                "q": query,
-                "count": count,
-                "freshness": "pm",  # Past month
-                "safesearch": "off",
-            }
+        params = {
+            "q": query,
+            "count": count,
+            "freshness": "pm",  # Past month
+            "safesearch": "off",
+        }
 
-            response = await self.client.get(BRAVE_WEB_API, params=params)
-            response.raise_for_status()
-            data = response.json()
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                response = await self.client.get(BRAVE_WEB_API, params=params)
 
-            return data.get("web", {}).get("results", [])
+                # Handle rate limiting (429)
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    logger.warning(
+                        f"Stealth detection rate limited. Waiting {retry_after}s "
+                        f"(attempt {attempt + 1}/{self.max_retries})"
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue
 
-        except Exception as e:
-            logger.error(f"LinkedIn Jobs Brave search error: {e}")
-            return []
+                # Handle server errors with backoff
+                if response.status_code >= 500:
+                    backoff = self.backoff_base ** attempt
+                    logger.warning(
+                        f"Stealth detection server error {response.status_code}. "
+                        f"Retrying in {backoff:.1f}s (attempt {attempt + 1}/{self.max_retries})"
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+
+                response.raise_for_status()
+                data = response.json()
+                return data.get("web", {}).get("results", [])
+
+            except httpx.TimeoutException:
+                backoff = self.backoff_base ** attempt
+                logger.warning(
+                    f"Stealth detection timeout. Retrying in {backoff:.1f}s "
+                    f"(attempt {attempt + 1}/{self.max_retries})"
+                )
+                last_error = "timeout"
+                await asyncio.sleep(backoff)
+
+            except httpx.HTTPStatusError as e:
+                if 400 <= e.response.status_code < 500:
+                    logger.error(f"Stealth detection client error: {e.response.status_code}")
+                    return []
+                last_error = str(e)
+
+            except httpx.RequestError as e:
+                backoff = self.backoff_base ** attempt
+                logger.warning(
+                    f"Stealth detection network error: {e}. Retrying in {backoff:.1f}s "
+                    f"(attempt {attempt + 1}/{self.max_retries})"
+                )
+                last_error = str(e)
+                await asyncio.sleep(backoff)
+
+        logger.error(f"Stealth detection failed after {self.max_retries} attempts: {last_error}")
+        return []
 
     def parse_job_result(self, result: Dict[str, Any]) -> Optional[LinkedInJob]:
         """Parse Brave search result into LinkedInJob (or stealth signal)."""
@@ -249,7 +299,7 @@ class LinkedInJobsScraper:
                     seen_urls.add(job.url)
                     all_jobs.append(job)
 
-            await asyncio.sleep(0.3)  # Rate limit
+            await asyncio.sleep(self.rate_limit_delay)  # Rate limit
 
         # Convert to articles
         articles = []

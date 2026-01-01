@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     rate_limit_delay: float = 1.0
     max_retries: int = 3
 
+    # Brave Search Settings
+    brave_search_timeout: int = 30
+    brave_search_max_retries: int = 3
+    brave_search_rate_limit_delay: float = 0.3
+    brave_search_backoff_base: float = 2.0  # Exponential backoff base
+
     # Deduplication
     similarity_threshold: float = 0.95
     dedup_window_days: int = 7

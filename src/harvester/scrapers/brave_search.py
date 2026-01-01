@@ -11,6 +11,7 @@ Advantages over NewsAPI:
 """
 
 import asyncio
+import logging
 import httpx
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta
@@ -19,6 +20,8 @@ from typing import List, Optional, Dict, Any
 from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
 from ...config.funds import FUND_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 
 # Brave Search API endpoint
@@ -234,8 +237,12 @@ class BraveSearchScraper:
 
     def __init__(self):
         self.api_key = settings.brave_search_key
+        self.timeout = settings.brave_search_timeout
+        self.max_retries = settings.brave_search_max_retries
+        self.rate_limit_delay = settings.brave_search_rate_limit_delay
+        self.backoff_base = settings.brave_search_backoff_base
         self.client = httpx.AsyncClient(
-            timeout=30,
+            timeout=self.timeout,
             headers={
                 "X-Subscription-Token": self.api_key,
                 "Accept": "application/json",
@@ -247,6 +254,77 @@ class BraveSearchScraper:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.client.aclose()
+
+    async def _request_with_retry(
+        self,
+        url: str,
+        params: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Make HTTP request with exponential backoff retry logic.
+
+        Handles:
+        - HTTP 429 (rate limit) with Retry-After header
+        - HTTP 5xx (server errors) with exponential backoff
+        - Timeouts with retry
+        """
+        last_error = None
+
+        for attempt in range(self.max_retries):
+            try:
+                response = await self.client.get(url, params=params)
+
+                # Handle rate limiting (429)
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    logger.warning(
+                        f"Brave API rate limited. Waiting {retry_after}s before retry "
+                        f"(attempt {attempt + 1}/{self.max_retries})"
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue
+
+                # Handle server errors with backoff
+                if response.status_code >= 500:
+                    backoff = self.backoff_base ** attempt
+                    logger.warning(
+                        f"Brave API server error {response.status_code}. "
+                        f"Retrying in {backoff:.1f}s (attempt {attempt + 1}/{self.max_retries})"
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+
+                response.raise_for_status()
+                return response.json()
+
+            except httpx.TimeoutException:
+                backoff = self.backoff_base ** attempt
+                logger.warning(
+                    f"Brave API timeout. Retrying in {backoff:.1f}s "
+                    f"(attempt {attempt + 1}/{self.max_retries})"
+                )
+                last_error = "timeout"
+                await asyncio.sleep(backoff)
+
+            except httpx.HTTPStatusError as e:
+                # Client errors (4xx except 429) - don't retry
+                if 400 <= e.response.status_code < 500:
+                    logger.error(f"Brave API client error: {e.response.status_code}")
+                    return None
+                last_error = str(e)
+
+            except httpx.RequestError as e:
+                # Network errors - retry with backoff
+                backoff = self.backoff_base ** attempt
+                logger.warning(
+                    f"Brave API network error: {e}. Retrying in {backoff:.1f}s "
+                    f"(attempt {attempt + 1}/{self.max_retries})"
+                )
+                last_error = str(e)
+                await asyncio.sleep(backoff)
+
+        logger.error(f"Brave API request failed after {self.max_retries} attempts: {last_error}")
+        return None
 
     def _build_fund_query(self, fund_slug: str, query_type: str = "lead") -> str:
         """Build optimized search query for a specific fund.
@@ -334,19 +412,11 @@ class BraveSearchScraper:
             "safesearch": "off",
         }
 
-        try:
-            response = await self.client.get(BRAVE_NEWS_API, params=params)
-            response.raise_for_status()
-            data = response.json()
-
-            return self._parse_news_results(data)
-
-        except httpx.HTTPStatusError as e:
-            print(f"Brave Search HTTP error: {e.response.status_code}")
+        data = await self._request_with_retry(BRAVE_NEWS_API, params)
+        if data is None:
             return []
-        except Exception as e:
-            print(f"Brave Search error: {e}")
-            return []
+
+        return self._parse_news_results(data)
 
     def _parse_news_results(self, data: Dict[str, Any]) -> List[BraveSearchResult]:
         """Parse Brave news API response."""
@@ -370,7 +440,7 @@ class BraveSearchScraper:
                     extra_snippets=item.get("extra_snippets", []),
                 ))
             except Exception as e:
-                print(f"Error parsing Brave result: {e}")
+                logger.warning(f"Error parsing Brave result: {e}")
                 continue
 
         return results
@@ -440,13 +510,13 @@ class BraveSearchScraper:
             # Lead query (primary)
             lead_results = await self.search_for_fund(fund_slug, freshness, "lead")
             results[fund_slug] = lead_results
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(self.rate_limit_delay)
 
             # Participation query (2x expansion)
             if include_participation:
                 participation_results = await self.search_for_fund(fund_slug, freshness, "participation")
                 results[f"{fund_slug}_participation"] = participation_results
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(self.rate_limit_delay)
 
         return results
 
@@ -488,7 +558,7 @@ class BraveSearchScraper:
         for region, query in REGIONAL_QUERIES.items():
             region_results = await self.search_news(query, count=20, freshness=freshness)
             results[region] = region_results
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(self.rate_limit_delay)
 
         return results
 
@@ -510,7 +580,7 @@ class BraveSearchScraper:
                 if r.url not in seen_urls:
                     seen_urls.add(r.url)
                     all_results.append(r)
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(self.rate_limit_delay)
 
         return all_results
 
@@ -537,7 +607,7 @@ class BraveSearchScraper:
                     if r.url not in seen_urls:
                         seen_urls.add(r.url)
                         fund_results.append(r)
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(self.rate_limit_delay)
 
             results[fund_slug] = fund_results
 

@@ -13,6 +13,7 @@ the Trademark Status & Document Retrieval (TSDR) API.
 """
 
 import asyncio
+import logging
 import re
 import httpx
 from bs4 import BeautifulSoup
@@ -22,6 +23,8 @@ from typing import List, Optional, Dict, Any
 
 from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 # USPTO TSDR API base
@@ -106,7 +109,7 @@ class USPTOTrademarkScraper:
 
         # Use Brave Search to find recent USPTO trademark news
         if not settings.brave_search_key:
-            print("BRAVE_SEARCH_KEY not configured - using fallback USPTO search")
+            logger.warning("BRAVE_SEARCH_KEY not configured - using fallback USPTO search")
             return await self._search_uspto_direct(days_back, max_results)
 
         try:
@@ -144,7 +147,7 @@ class USPTOTrademarkScraper:
                 await brave_client.aclose()
 
         except Exception as e:
-            print(f"USPTO Brave search error: {e}")
+            logger.error(f"USPTO Brave search error: {e}")
 
         return trademarks[:max_results]
 
@@ -181,7 +184,7 @@ class USPTOTrademarkScraper:
                         trademarks.append(tm)
 
         except Exception as e:
-            print(f"USPTO direct search error: {e}")
+            logger.error(f"USPTO direct search error: {e}")
 
         return trademarks
 

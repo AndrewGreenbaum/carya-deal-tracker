@@ -80,8 +80,12 @@ class BraveEnrichmentClient:
     def __init__(self):
         self.api_key = settings.brave_search_key
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
+        self.timeout = settings.brave_search_timeout
+        self.max_retries = settings.brave_search_max_retries
+        self.rate_limit_delay = settings.brave_search_rate_limit_delay
+        self.backoff_base = settings.brave_search_backoff_base
         self.client = httpx.AsyncClient(
-            timeout=15,
+            timeout=self.timeout,
             headers={
                 "X-Subscription-Token": self.api_key or "",
                 "Accept": "application/json",
@@ -146,25 +150,72 @@ class BraveEnrichmentClient:
         return None
 
     async def _search(self, query: str, count: int = 5) -> List[Dict]:
-        """Execute Brave Search query."""
+        """Execute Brave Search query with retry logic."""
         if not self.api_key:
+            logger.warning("BRAVE_SEARCH_KEY not configured for enrichment")
             return []
 
-        try:
-            response = await self.client.get(
-                self.base_url,
-                params={
-                    "q": query,
-                    "count": count,
-                    "safesearch": "off",
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data.get("web", {}).get("results", [])
-        except Exception as e:
-            logger.error(f"Brave Search error: {e}")
-            return []
+        params = {
+            "q": query,
+            "count": count,
+            "safesearch": "off",
+        }
+
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                response = await self.client.get(self.base_url, params=params)
+
+                # Handle rate limiting (429)
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    logger.warning(
+                        f"Brave enrichment rate limited. Waiting {retry_after}s "
+                        f"(attempt {attempt + 1}/{self.max_retries})"
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue
+
+                # Handle server errors with backoff
+                if response.status_code >= 500:
+                    backoff = self.backoff_base ** attempt
+                    logger.warning(
+                        f"Brave enrichment server error {response.status_code}. "
+                        f"Retrying in {backoff:.1f}s (attempt {attempt + 1}/{self.max_retries})"
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+
+                response.raise_for_status()
+                data = response.json()
+                return data.get("web", {}).get("results", [])
+
+            except httpx.TimeoutException:
+                backoff = self.backoff_base ** attempt
+                logger.warning(
+                    f"Brave enrichment timeout. Retrying in {backoff:.1f}s "
+                    f"(attempt {attempt + 1}/{self.max_retries})"
+                )
+                last_error = "timeout"
+                await asyncio.sleep(backoff)
+
+            except httpx.HTTPStatusError as e:
+                if 400 <= e.response.status_code < 500:
+                    logger.error(f"Brave enrichment client error: {e.response.status_code}")
+                    return []
+                last_error = str(e)
+
+            except httpx.RequestError as e:
+                backoff = self.backoff_base ** attempt
+                logger.warning(
+                    f"Brave enrichment network error: {e}. Retrying in {backoff:.1f}s "
+                    f"(attempt {attempt + 1}/{self.max_retries})"
+                )
+                last_error = str(e)
+                await asyncio.sleep(backoff)
+
+        logger.error(f"Brave enrichment failed after {self.max_retries} attempts: {last_error}")
+        return []
 
     async def find_website_with_context(
         self,
@@ -312,7 +363,7 @@ class BraveEnrichmentClient:
             investor=context.lead_investor,
             category=context.enterprise_category,
         )
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(self.rate_limit_delay)
 
         # Find LinkedIn for each known founder
         if context.founders:
@@ -337,7 +388,7 @@ class BraveEnrichmentClient:
                         result.ceo_name = founder_name
                         result.ceo_linkedin = linkedin
 
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(self.rate_limit_delay)
 
         # Fallback: if still no LinkedIn found, try generic CEO search
         if not result.ceo_linkedin:
@@ -361,7 +412,7 @@ class BraveEnrichmentClient:
 
         # Find website (without context - less accurate)
         result.website = await self.find_website_with_context(company_name)
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(self.rate_limit_delay)
 
         # Find CEO LinkedIn
         ceo_name, linkedin_url = await self.find_ceo_linkedin(company_name)
@@ -482,7 +533,7 @@ async def enrich_deal_founders_linkedin(
                 logger.info(f"Found LinkedIn for {founder_name} at {company_name}: {linkedin_url}")
 
             updated_founders.append(founder_copy)
-            await asyncio.sleep(0.5)  # Rate limit
+            await asyncio.sleep(client.rate_limit_delay)  # Rate limit
 
     # Persist results
     if persist and enriched_count > 0:
