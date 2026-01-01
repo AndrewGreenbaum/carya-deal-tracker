@@ -20,6 +20,7 @@ import { DealModal } from './components/DealModal';
 import { StealthTracker } from './components/StealthTracker';
 import { ScraperControl } from './components/ScraperControl';
 import { SettingsPanel } from './components/SettingsPanel';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   fetchDeals,
   fetchFunds,
@@ -93,13 +94,12 @@ function App() {
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Data state
-  const [deals, setDeals] = useState<Deal[]>([]);
+  // Data state (deals stored in pagination.deals to avoid redundancy)
   const [funds, setFunds] = useState<Fund[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Pagination state
+  // Pagination state (includes deals array)
   const [pagination, setPagination] = useState<PaginatedDeals>({
     deals: [],
     total: 0,
@@ -202,7 +202,6 @@ function App() {
 
         // Use API results directly - no client-side filtering needed
         // The API already filters based on the parameters we sent
-        setDeals(result.deals);
         setPagination({
           deals: result.deals,
           total: result.total,
@@ -244,7 +243,6 @@ function App() {
         setError(null);
       } catch (err) {
         console.warn('API unavailable, using sample data:', err);
-        setDeals(sampleDeals);
         setPagination({
           deals: sampleDeals,
           total: sampleDeals.length,
@@ -297,18 +295,18 @@ function App() {
     loadDeals(newOffset);
   };
 
-  const handleSortChange = (direction: SortDirection) => {
+  const handleSortChange = useCallback((direction: SortDirection) => {
     setSortDirection(direction);
     // Sort deals client-side (API already sorts by announced_date desc)
-    setDeals((prevDeals) => {
-      const sorted = [...prevDeals].sort((a, b) => {
+    setPagination((prev) => {
+      const sorted = [...prev.deals].sort((a, b) => {
         const dateA = new Date(a.date || '1970-01-01').getTime();
         const dateB = new Date(b.date || '1970-01-01').getTime();
         return direction === 'desc' ? dateB - dateA : dateA - dateB;
       });
-      return sorted;
+      return { ...prev, deals: sorted };
     });
-  };
+  }, []);
 
   return (
     <div className="h-screen flex flex-col bg-[#050506] text-slate-300 font-['JetBrains_Mono',monospace]">
@@ -354,26 +352,36 @@ function App() {
 
               {/* Deals Table */}
               <div className="flex-1 flex flex-col overflow-hidden">
-                <DealsTable
-                  deals={deals}
-                  pagination={pagination}
-                  onDealClick={setSelectedDeal}
-                  onExport={handleExport}
-                  onRefresh={handleRefresh}
-                  onPageChange={handlePageChange}
-                  isLoading={loading}
-                  sortDirection={sortDirection}
-                  onSortChange={handleSortChange}
-                />
+                <ErrorBoundary>
+                  <DealsTable
+                    deals={pagination.deals}
+                    pagination={pagination}
+                    onDealClick={setSelectedDeal}
+                    onExport={handleExport}
+                    onRefresh={handleRefresh}
+                    onPageChange={handlePageChange}
+                    isLoading={loading}
+                    sortDirection={sortDirection}
+                    onSortChange={handleSortChange}
+                  />
+                </ErrorBoundary>
               </div>
             </>
           )}
 
           {/* Stealth Tracker View */}
-          {currentView === 'stealth' && <StealthTracker />}
+          {currentView === 'stealth' && (
+            <ErrorBoundary>
+              <StealthTracker />
+            </ErrorBoundary>
+          )}
 
           {/* Scrapers View */}
-          {currentView === 'scrapers' && <ScraperControl />}
+          {currentView === 'scrapers' && (
+            <ErrorBoundary>
+              <ScraperControl />
+            </ErrorBoundary>
+          )}
         </main>
       </div>
 

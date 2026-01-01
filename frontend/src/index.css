@@ -87,28 +87,6 @@ body {
   @apply bg-slate-900/50;
 }
 
-/* Verification snippet styling */
-.verification-snippet {
-  @apply p-2 bg-slate-900 border-l-2 border-emerald-500 text-slate-400 italic;
-}
-
-.verification-snippet .highlight {
-  @apply bg-emerald-500/20 text-emerald-300 px-0.5;
-}
-
-/* Fund list item */
-.fund-item {
-  @apply flex justify-between items-center py-1 px-2 rounded cursor-pointer transition-all duration-150;
-}
-
-.fund-item:hover {
-  @apply bg-slate-800 translate-x-1;
-}
-
-.fund-item.active {
-  @apply bg-slate-800/50 text-emerald-400 border-l-2 border-emerald-500;
-}
-
 /* Category badges */
 .category-badge {
   @apply inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs border;
@@ -168,17 +146,6 @@ body {
   @apply bg-slate-500/10 text-slate-400 border-slate-500/30;
 }
 
-/* Modal backdrop */
-.modal-backdrop {
-  @apply fixed inset-0 bg-black/70 backdrop-blur-sm z-40;
-}
-
-.modal-content {
-  @apply fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50;
-  @apply bg-cc-bg border border-slate-800 rounded-lg shadow-2xl;
-  @apply max-w-2xl w-full max-h-[90vh] overflow-y-auto;
-}
-
 /* Button styles */
 .btn-primary {
   @apply px-3 py-1.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/50 rounded;
@@ -188,18 +155,6 @@ body {
 .btn-secondary {
   @apply px-3 py-1.5 bg-slate-800 text-slate-300 border border-slate-700 rounded;
   @apply hover:bg-slate-700 transition-colors text-xs font-medium;
-}
-
-.btn-danger {
-  @apply px-3 py-1.5 bg-red-500/10 text-red-500 border border-red-500/50 rounded;
-  @apply hover:bg-red-500/20 transition-colors text-xs font-medium;
-}
-
-/* Input styles */
-.input-dark {
-  @apply bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm;
-  @apply focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50;
-  @apply placeholder:text-slate-600;
 }
 
 /* Stats card */

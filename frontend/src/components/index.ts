@@ -11,8 +11,4 @@ export { DealModal } from './DealModal';
 export { StealthTracker } from './StealthTracker';
 export { ScraperControl } from './ScraperControl';
 export { SettingsPanel } from './SettingsPanel';
-
-// Legacy components (kept for backwards compatibility)
-export { Sidebar } from './Sidebar';
-export { Header } from './Header';
-export { DealTable } from './DealTable';
+export { ErrorBoundary } from './ErrorBoundary';

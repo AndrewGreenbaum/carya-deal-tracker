@@ -10,6 +10,7 @@
  * - Click to open modal
  */
 
+import React, { memo } from 'react';
 import {
   Link,
   FileText,
@@ -67,7 +68,11 @@ export function DealsTable({
           <span className="text-slate-500 font-normal">({pagination.total} total)</span>
         </h2>
         <div className="flex gap-2">
-          <button onClick={onExport} className="btn-primary flex items-center gap-1.5">
+          <button
+            onClick={onExport}
+            className="btn-primary flex items-center gap-1.5"
+            aria-label="Export deals to CSV"
+          >
             <Download className="w-3 h-3" />
             EXPORT CSV
           </button>
@@ -75,6 +80,7 @@ export function DealsTable({
             onClick={onRefresh}
             disabled={isLoading}
             className="btn-secondary flex items-center gap-1.5"
+            aria-label={isLoading ? 'Refreshing deals...' : 'Refresh deals'}
           >
             <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
             REFRESH
@@ -87,22 +93,32 @@ export function DealsTable({
         <table className="w-full text-left border-collapse">
           <thead className="bg-[#0a0a0c] sticky top-0 z-10 text-[10px] uppercase font-bold text-slate-500">
             <tr>
-              <th className="px-6 py-3 border-b border-slate-800">Company / Source</th>
-              <th className="px-6 py-3 border-b border-slate-800">Stage & Fund</th>
-              <th className="px-6 py-3 border-b border-slate-800">AI Category</th>
-              <th className="px-6 py-3 border-b border-slate-800 w-24 text-center">
+              <th scope="col" className="px-6 py-3 border-b border-slate-800">Company / Source</th>
+              <th scope="col" className="px-6 py-3 border-b border-slate-800">Stage & Fund</th>
+              <th scope="col" className="px-6 py-3 border-b border-slate-800">AI Category</th>
+              <th scope="col" className="px-6 py-3 border-b border-slate-800 w-24 text-center">
                 Links
               </th>
               <th
+                scope="col"
+                aria-sort={sortDirection === 'desc' ? 'descending' : 'ascending'}
                 className="px-6 py-3 border-b border-slate-800 text-right cursor-pointer hover:bg-slate-800/50 transition-colors select-none"
                 onClick={() => onSortChange(sortDirection === 'desc' ? 'asc' : 'desc')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSortChange(sortDirection === 'desc' ? 'asc' : 'desc');
+                  }
+                }}
+                tabIndex={0}
+                role="button"
               >
                 <span className="flex items-center justify-end gap-1">
                   Announced
                   {sortDirection === 'desc' ? (
-                    <ArrowDown className="w-3 h-3 text-emerald-400" />
+                    <ArrowDown className="w-3 h-3 text-emerald-400" aria-hidden="true" />
                   ) : (
-                    <ArrowUp className="w-3 h-3 text-emerald-400" />
+                    <ArrowUp className="w-3 h-3 text-emerald-400" aria-hidden="true" />
                   )}
                 </span>
               </th>
@@ -163,7 +179,7 @@ interface DealRowProps {
   onClick: () => void;
 }
 
-function DealRow({ deal, onClick }: DealRowProps) {
+const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
   const isRejected = !deal.isEnterpriseAi || !deal.investorRoles.includes('lead');
 
   return (
@@ -218,7 +234,7 @@ function DealRow({ deal, onClick }: DealRowProps) {
       </td>
     </tr>
   );
-}
+});
 
 function SourceIcon({ source }: { source?: string }) {
   if (!source) return <Link className="w-3 h-3" />;

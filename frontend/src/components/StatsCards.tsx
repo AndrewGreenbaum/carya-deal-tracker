@@ -8,6 +8,7 @@
  * - Verification rate
  */
 
+import { memo } from 'react';
 import { Zap, PieChart, Code, ShieldCheck, TrendingUp, TrendingDown } from 'lucide-react';
 import type { DashboardStats } from '../types';
 
@@ -15,7 +16,7 @@ interface StatsCardsProps {
   stats: DashboardStats;
 }
 
-export function StatsCards({ stats }: StatsCardsProps) {
+export const StatsCards = memo(function StatsCards({ stats }: StatsCardsProps) {
   return (
     <div className="grid grid-cols-4 gap-4 p-6 border-b border-slate-800 bg-[#0a0a0c]">
       {/* Total Deals Scanned */}
@@ -52,7 +53,7 @@ export function StatsCards({ stats }: StatsCardsProps) {
       />
     </div>
   );
-}
+});
 
 interface StatCardProps {
   title: string;
@@ -104,3 +105,6 @@ function StatCard({
 }
 
 export default StatsCards;
+
+// Memoized to prevent re-renders when parent state changes
+// Only re-renders when stats prop changes

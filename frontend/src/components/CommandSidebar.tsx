@@ -165,21 +165,33 @@ export function CommandSidebar({
             </button>
           )}
         </div>
-        <ul className="space-y-1 text-xs text-slate-400">
+        <ul className="space-y-1 text-xs text-slate-400" role="listbox" aria-label="Tracked funds filter">
           {displayFunds.map((fund) => (
-            <li
-              key={fund.slug}
-              onClick={() => setFund(fund.slug === filters.selectedFund ? undefined : fund.slug)}
-              className={`fund-item ${fund.slug === filters.selectedFund ? 'active' : ''} ${
-                !fund.isActive ? 'opacity-50' : ''
-              }`}
-            >
-              <span>{fund.name}</span>
-              {fund.lastScraped && (
-                <span className="text-[9px] text-slate-600">
-                  {formatTimeAgo(fund.lastScraped)}
-                </span>
-              )}
+            <li key={fund.slug} role="presentation">
+              <button
+                type="button"
+                role="option"
+                aria-selected={fund.slug === filters.selectedFund}
+                onClick={() => setFund(fund.slug === filters.selectedFund ? undefined : fund.slug)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setFund(fund.slug === filters.selectedFund ? undefined : fund.slug);
+                  }
+                }}
+                className={`w-full flex items-center justify-between px-2 py-1.5 rounded text-left transition-colors cursor-pointer ${
+                  fund.slug === filters.selectedFund
+                    ? 'bg-emerald-500/10 text-emerald-400 border-l-2 border-emerald-500'
+                    : 'hover:bg-slate-800 hover:text-white'
+                } ${!fund.isActive ? 'opacity-50' : ''}`}
+              >
+                <span>{fund.name}</span>
+                {fund.lastScraped && (
+                  <span className="text-[9px] text-slate-600">
+                    {formatTimeAgo(fund.lastScraped)}
+                  </span>
+                )}
+              </button>
             </li>
           ))}
         </ul>

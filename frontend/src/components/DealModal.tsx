@@ -3,8 +3,14 @@
  *
  * Shows deal details with company links and founder info
  * Command Center dark theme
+ *
+ * Accessibility features:
+ * - Focus trap within modal
+ * - Escape key to close
+ * - Focus restoration on close
  */
 
+import { memo, useEffect, useRef, useCallback } from 'react';
 import {
   X,
   ExternalLink,
@@ -29,12 +35,40 @@ interface DealModalProps {
   onClose: () => void;
 }
 
-export function DealModal({ deal, onClose }: DealModalProps) {
-  const handleBackdropClick = (e: React.MouseEvent) => {
+export const DealModal = memo(function DealModal({ deal, onClose }: DealModalProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Focus the close button when modal opens
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+
+    // Store the previously focused element
+    const previouslyFocused = document.activeElement as HTMLElement;
+
+    return () => {
+      // Restore focus when modal closes
+      previouslyFocused?.focus?.();
+    };
+  }, []);
+
+  // Handle Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  const handleBackdropClick = useCallback((e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       onClose();
     }
-  };
+  }, [onClose]);
 
   const getCategoryIcon = (category?: EnterpriseCategory) => {
     switch (category) {
@@ -59,14 +93,21 @@ export function DealModal({ deal, onClose }: DealModalProps) {
       <div
         className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 animate-fade-in"
         onClick={handleBackdropClick}
+        aria-hidden="true"
       />
 
       {/* Modal Content */}
-      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl mx-4 bg-[#0a0a0c] border border-slate-800 rounded-lg shadow-2xl animate-slide-up">
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="deal-modal-title"
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl mx-4 bg-[#0a0a0c] border border-slate-800 rounded-lg shadow-2xl animate-slide-up"
+      >
         {/* Header */}
         <div className="flex items-start justify-between p-6 border-b border-slate-800">
           <div>
-            <h2 className="text-2xl font-bold text-white">{deal.startupName}</h2>
+            <h2 id="deal-modal-title" className="text-2xl font-bold text-white">{deal.startupName}</h2>
             <div className="flex items-center gap-2 mt-2 text-sm">
               <span className={`stage-badge stage-${deal.investmentStage}`}>
                 {STAGE_LABELS[deal.investmentStage]}
@@ -76,10 +117,12 @@ export function DealModal({ deal, onClose }: DealModalProps) {
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             onClick={onClose}
             className="p-2 hover:bg-slate-800 rounded transition-colors text-slate-400 hover:text-white"
+            aria-label="Close deal details"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -220,7 +263,7 @@ export function DealModal({ deal, onClose }: DealModalProps) {
       </div>
     </>
   );
-}
+});
 
 interface InfoCardProps {
   icon: React.ReactNode;
