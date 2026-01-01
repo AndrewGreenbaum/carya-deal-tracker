@@ -299,12 +299,24 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
 
         async with SECEdgarScraper() as scraper:
             filings = await scraper.fetch_recent_filings(hours=days * 24)
-            # Convert filings to articles - to_normalized_article is async
+            logger.info(f"SEC EDGAR: Processing {len(filings)} filings")
+
+            # Convert filings to articles with full details
             articles = []
             for filing in filings:
+                # CRITICAL FIX: Fetch full details (amount, industry, state, investors)
+                # Without this, articles lack critical data for fund matching and stealth detection
+                result = await scraper.fetch_filing_details(filing)
+                if result is None:
+                    continue  # Skip filings with missing required data
+                filing = result
+                # Note: Rate limiting (1s) is built into fetch_filing_details()
+
                 matched_fund = scraper.match_tracked_fund(filing)
                 article = await scraper.to_normalized_article(filing, matched_fund)
                 articles.append(article)
+
+            logger.info(f"SEC EDGAR: Created {len(articles)} articles with full details")
 
         stats = await process_external_articles(articles, "sec_edgar")
         results["sec_edgar"] = stats
