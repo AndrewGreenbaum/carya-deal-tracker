@@ -25,6 +25,12 @@ from ...config.funds import FUND_REGISTRY
 
 logger = logging.getLogger(__name__)
 
+# SEC EDGAR rate limiting and retry configuration
+# SEC guidelines: "Do not send requests more frequently than once per second"
+SEC_REQUEST_DELAY = 1.0  # 1 second between requests (SEC compliant)
+SEC_MAX_RETRIES = 3  # Maximum retry attempts for transient failures
+SEC_RETRY_BACKOFF = 2.0  # Exponential backoff multiplier
+
 
 # SEC EDGAR Atom feed for recent Form D filings
 SEC_FORM_D_FEED = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=D&output=atom"
@@ -154,27 +160,68 @@ class SECEdgarScraper:
         Returns:
             List of FormDFiling objects
         """
-        try:
-            response = await self.client.get(SEC_FORM_D_FEED)
-            response.raise_for_status()
+        last_error = None
 
-            # Parse Atom feed
-            feed = feedparser.parse(response.text)
+        for attempt in range(SEC_MAX_RETRIES):
+            try:
+                response = await self.client.get(SEC_FORM_D_FEED)
+                response.raise_for_status()
 
-            filings = []
-            cutoff = datetime.utcnow() - timedelta(hours=hours)
+                # Parse Atom feed
+                feed = feedparser.parse(response.text)
 
-            for entry in feed.entries[:max_filings]:
-                # Parse entry
-                filing = self._parse_feed_entry(entry)
-                if filing and filing.filing_date >= cutoff.date():
-                    filings.append(filing)
+                filings = []
+                cutoff = datetime.utcnow() - timedelta(hours=hours)
 
-            return filings
+                for entry in feed.entries[:max_filings]:
+                    # Parse entry
+                    filing = self._parse_feed_entry(entry)
+                    if filing and filing.filing_date >= cutoff.date():
+                        filings.append(filing)
 
-        except Exception as e:
-            logger.error(f"SEC EDGAR fetch error: {e}")
-            return []
+                logger.info(f"SEC EDGAR: Fetched {len(filings)} filings from past {hours} hours")
+                return filings
+
+            except httpx.TimeoutException as e:
+                last_error = e
+                logger.warning(f"SEC EDGAR timeout (attempt {attempt + 1}/{SEC_MAX_RETRIES}): {e}")
+                if attempt < SEC_MAX_RETRIES - 1:
+                    await asyncio.sleep(SEC_RETRY_BACKOFF ** attempt)
+                continue
+
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                if e.response.status_code == 429:
+                    # Rate limited - wait longer
+                    retry_after = int(e.response.headers.get("Retry-After", 60))
+                    logger.warning(f"SEC EDGAR rate limited, waiting {retry_after}s")
+                    await asyncio.sleep(retry_after)
+                    continue
+                elif e.response.status_code >= 500:
+                    # Server error - retry with backoff
+                    logger.warning(f"SEC EDGAR server error {e.response.status_code} (attempt {attempt + 1})")
+                    if attempt < SEC_MAX_RETRIES - 1:
+                        await asyncio.sleep(SEC_RETRY_BACKOFF ** attempt)
+                    continue
+                else:
+                    # Client error (4xx) - don't retry
+                    logger.error(f"SEC EDGAR client error: {e.response.status_code}")
+                    return []
+
+            except httpx.ConnectError as e:
+                last_error = e
+                logger.warning(f"SEC EDGAR connection error (attempt {attempt + 1}/{SEC_MAX_RETRIES}): {e}")
+                if attempt < SEC_MAX_RETRIES - 1:
+                    await asyncio.sleep(SEC_RETRY_BACKOFF ** attempt)
+                continue
+
+            except Exception as e:
+                logger.error(f"SEC EDGAR unexpected error: {e}", exc_info=True)
+                return []
+
+        # All retries exhausted
+        logger.error(f"SEC EDGAR fetch failed after {SEC_MAX_RETRIES} attempts: {last_error}")
+        return []
 
     def _parse_feed_entry(self, entry: Dict[str, Any]) -> Optional[FormDFiling]:
         """Parse a single Atom feed entry into FormDFiling."""
@@ -216,7 +263,7 @@ class SECEdgarScraper:
             logger.error(f"Error parsing SEC entry: {e}")
             return None
 
-    async def fetch_filing_details(self, filing: FormDFiling) -> FormDFiling:
+    async def fetch_filing_details(self, filing: FormDFiling) -> Optional[FormDFiling]:
         """
         Fetch detailed Form D XML to extract amount raised and investors.
 
@@ -224,21 +271,30 @@ class SECEdgarScraper:
         - Total Offering Amount
         - Amount Sold
         - Names of Related Persons (investors)
+
+        Returns:
+            FormDFiling with details populated, or None if fetch failed critically
         """
+        # Validate accession_number before constructing URL
+        if not filing.accession_number:
+            logger.error(f"Missing accession number for {filing.company_name} (CIK: {filing.cik}) - skipping")
+            return None  # Return None for missing required field
+
+        # Build URL to Form D XML
+        # Format: /Archives/edgar/data/{cik}/{accession}/primary_doc.xml
+        accession_clean = filing.accession_number.replace("-", "")
+        xml_url = f"https://www.sec.gov/Archives/edgar/data/{filing.cik}/{accession_clean}/primary_doc.xml"
+
         try:
-            # Validate accession_number before constructing URL
-            if not filing.accession_number:
-                logger.warning(f"Missing accession number for {filing.company_name} (CIK: {filing.cik})")
-                return filing
-
-            # Build URL to Form D XML
-            # Format: /Archives/edgar/data/{cik}/{accession}/primary_doc.xml
-            accession_clean = filing.accession_number.replace("-", "")
-            xml_url = f"https://www.sec.gov/Archives/edgar/data/{filing.cik}/{accession_clean}/primary_doc.xml"
-
             response = await self.client.get(xml_url)
+
             if response.status_code != 200:
-                return filing
+                # FIX: Log HTTP failures instead of silent return
+                logger.warning(
+                    f"SEC EDGAR XML fetch failed for {filing.company_name}: "
+                    f"HTTP {response.status_code} from {xml_url}"
+                )
+                return filing  # Return filing without details (partial data)
 
             # Parse XML - SEC Form D may use namespace prefixes
             root = ET.fromstring(response.text)
@@ -306,8 +362,27 @@ class SECEdgarScraper:
 
             return filing
 
+        except ET.ParseError as e:
+            # Specific handling for malformed XML
+            logger.error(
+                f"SEC EDGAR XML parse error for {filing.company_name}: {e}",
+                exc_info=True
+            )
+            return filing  # Return partial filing
+
+        except httpx.TimeoutException as e:
+            logger.warning(f"SEC EDGAR timeout fetching details for {filing.company_name}: {e}")
+            return filing
+
+        except httpx.ConnectError as e:
+            logger.warning(f"SEC EDGAR connection error for {filing.company_name}: {e}")
+            return filing
+
         except Exception as e:
-            logger.error(f"Error fetching filing details for {filing.company_name}: {e}")
+            logger.error(
+                f"Unexpected error fetching filing details for {filing.company_name}: {e}",
+                exc_info=True
+            )
             return filing
 
     def match_tracked_fund(self, filing: FormDFiling) -> Optional[str]:
@@ -446,8 +521,14 @@ class SECEdgarScraper:
 
             # Optionally fetch full details
             if fetch_details:
-                filing = await self.fetch_filing_details(filing)
-                await asyncio.sleep(0.2)  # Rate limit
+                result = await self.fetch_filing_details(filing)
+                # FIX: Handle None returns from fetch_filing_details
+                if result is None:
+                    logger.debug(f"Skipping filing due to missing details: {filing.company_name}")
+                    continue
+                filing = result
+                # FIX: SEC-compliant rate limiting (1 second instead of 0.2s)
+                await asyncio.sleep(SEC_REQUEST_DELAY)
 
             # Check for tracked fund match
             fund_slug = self.match_tracked_fund(filing)

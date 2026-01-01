@@ -16,7 +16,9 @@ Scoring:
 """
 
 import asyncio
+import logging
 import re
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime, date
 from typing import List, Optional, Dict, Tuple
@@ -26,8 +28,11 @@ from .sec_edgar import (
     FormDFiling,
     VC_LIKELY_INDUSTRIES,
     MIN_VC_AMOUNT,
+    SEC_REQUEST_DELAY,
 )
 from .delaware_corps import DelawareCorpsScraper, DelawareEntity
+
+logger = logging.getLogger(__name__)
 
 
 # Priority levels
@@ -165,81 +170,90 @@ async def get_high_priority_leads(
     """
     leads = []
 
-    async with SECEdgarScraper() as sec_scraper:
-        async with DelawareCorpsScraper() as de_scraper:
-            # Fetch Form D filings
-            filings = await sec_scraper.fetch_recent_filings(hours=days_back * 24)
+    # FIX: Use AsyncExitStack to properly handle nested context managers
+    # This prevents resource leaks if inner context manager fails
+    async with AsyncExitStack() as stack:
+        sec_scraper = await stack.enter_async_context(SECEdgarScraper())
+        de_scraper = await stack.enter_async_context(DelawareCorpsScraper())
 
-            for filing in filings:
-                # Fetch filing details (amount, industry, state, etc.)
-                filing = await sec_scraper.fetch_filing_details(filing)
-                await asyncio.sleep(0.2)  # Rate limit SEC
+        # Fetch Form D filings
+        filings = await sec_scraper.fetch_recent_filings(hours=days_back * 24)
+        logger.info(f"SEC-Delaware crossref: Processing {len(filings)} filings")
 
-                # Apply filters
-                if delaware_only and filing.state_of_incorporation != "DE":
+        for filing in filings:
+            # Fetch filing details (amount, industry, state, etc.)
+            # Note: fetch_filing_details now includes SEC_REQUEST_DELAY internally
+            result = await sec_scraper.fetch_filing_details(filing)
+            if result is None:
+                continue  # Skip filings with missing required data
+            filing = result
+            # FIX: Removed redundant 0.2s sleep - SEC rate limiting is now in fetch_filing_details
+
+            # Apply filters
+            if delaware_only and filing.state_of_incorporation != "DE":
+                continue
+
+            if tech_only:
+                is_tech = False
+                if filing.industry:
+                    for ind in VC_LIKELY_INDUSTRIES:
+                        if ind.lower() in filing.industry.lower():
+                            is_tech = True
+                            break
+                if not is_tech:
                     continue
 
-                if tech_only:
-                    is_tech = False
-                    if filing.industry:
-                        for ind in VC_LIKELY_INDUSTRIES:
-                            if ind.lower() in filing.industry.lower():
-                                is_tech = True
-                                break
-                    if not is_tech:
-                        continue
+            amount = parse_amount(filing.total_offering) or parse_amount(filing.amount_raised)
+            if amount < min_amount:
+                continue
 
-                amount = parse_amount(filing.total_offering) or parse_amount(filing.amount_raised)
-                if amount < min_amount:
-                    continue
+            # Check for tracked fund match
+            matched_fund_slug = sec_scraper.match_tracked_fund(filing)
 
-                # Check for tracked fund match
-                matched_fund_slug = sec_scraper.match_tracked_fund(filing)
+            # Cross-reference with Delaware registry
+            entity = None
+            if filing.state_of_incorporation == "DE":
+                entity = await de_scraper.search_by_company_name(filing.company_name)
+                await asyncio.sleep(0.3)  # Rate limit OpenCorporates
 
-                # Cross-reference with Delaware registry
-                entity = None
-                if filing.state_of_incorporation == "DE":
-                    entity = await de_scraper.search_by_company_name(filing.company_name)
-                    await asyncio.sleep(0.3)  # Rate limit OpenCorporates
+            # Calculate score
+            score, breakdown = calculate_score(filing, entity, matched_fund_slug)
 
-                # Calculate score
-                score, breakdown = calculate_score(filing, entity, matched_fund_slug)
+            if score < min_score:
+                continue
 
-                if score < min_score:
-                    continue
+            # Determine priority
+            if score >= 10:
+                priority = PRIORITY_HIGH
+            elif score >= 7:
+                priority = PRIORITY_STRONG
+            else:
+                priority = PRIORITY_WATCH
 
-                # Determine priority
-                if score >= 10:
-                    priority = PRIORITY_HIGH
-                elif score >= 7:
-                    priority = PRIORITY_STRONG
-                else:
-                    priority = PRIORITY_WATCH
+            # Build lead object
+            lead = HighPriorityLead(
+                company_name=filing.company_name,
+                cik=filing.cik,
+                filing_date=filing.filing_date,
+                filing_url=filing.filing_url,
+                state_of_incorporation=filing.state_of_incorporation,
+                amount_raised=filing.amount_raised,
+                total_offering=filing.total_offering,
+                is_first_sale=filing.is_first_sale,
+                industry=filing.industry,
+                investors=filing.investors,
+                delaware_entity=entity,
+                score=score,
+                priority=priority,
+                score_breakdown=breakdown,
+                is_delaware=filing.state_of_incorporation == "DE",
+                is_tech_industry="tech_industry" in breakdown,
+                has_vc_fund_match=matched_fund_slug is not None,
+                has_startup_agent=entity.has_startup_agent if entity else False,
+                matched_fund_slug=matched_fund_slug,
+            )
 
-                # Build lead object
-                lead = HighPriorityLead(
-                    company_name=filing.company_name,
-                    cik=filing.cik,
-                    filing_date=filing.filing_date,
-                    filing_url=filing.filing_url,
-                    state_of_incorporation=filing.state_of_incorporation,
-                    amount_raised=filing.amount_raised,
-                    total_offering=filing.total_offering,
-                    is_first_sale=filing.is_first_sale,
-                    industry=filing.industry,
-                    investors=filing.investors,
-                    delaware_entity=entity,
-                    score=score,
-                    priority=priority,
-                    score_breakdown=breakdown,
-                    is_delaware=filing.state_of_incorporation == "DE",
-                    is_tech_industry="tech_industry" in breakdown,
-                    has_vc_fund_match=matched_fund_slug is not None,
-                    has_startup_agent=entity.has_startup_agent if entity else False,
-                    matched_fund_slug=matched_fund_slug,
-                )
-
-                leads.append(lead)
+            leads.append(lead)
 
     # Sort by score (highest first)
     leads.sort(key=lambda x: x.score, reverse=True)
