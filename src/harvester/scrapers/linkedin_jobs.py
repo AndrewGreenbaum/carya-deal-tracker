@@ -152,7 +152,28 @@ class LinkedInJobsScraper:
 
                 response.raise_for_status()
                 data = response.json()
-                return data.get("web", {}).get("results", [])
+
+                # Validate API response - check for errors
+                if "error" in data:
+                    error_msg = data.get("error", {})
+                    if isinstance(error_msg, dict):
+                        logger.error(f"Stealth detection API error: {error_msg.get('message', 'Unknown')}")
+                    else:
+                        logger.error(f"Stealth detection API error: {error_msg}")
+                    return []
+
+                # Extract results from web search response
+                web_data = data.get("web", {})
+                if not isinstance(web_data, dict):
+                    logger.warning(f"Stealth detection unexpected 'web' type: {type(web_data)}")
+                    return []
+
+                results = web_data.get("results", [])
+                if not isinstance(results, list):
+                    logger.warning(f"Stealth detection 'results' is not a list: {type(results)}")
+                    return []
+
+                return results
 
             except httpx.TimeoutException:
                 backoff = self.backoff_base ** attempt
@@ -233,8 +254,15 @@ class LinkedInJobsScraper:
                 matched_fund=matched_fund,
             )
 
-        except Exception as e:
-            logger.error(f"Error parsing LinkedIn job: {e}")
+        except (TypeError, AttributeError) as e:
+            # TypeError: unexpected None or wrong type in string operations
+            # AttributeError: method called on None
+            logger.warning(f"Error parsing stealth signal (type/attr): {e}")
+            return None
+        except (KeyError, ValueError) as e:
+            # KeyError: missing expected key (shouldn't happen with .get())
+            # ValueError: conversion/parsing error
+            logger.warning(f"Error parsing stealth signal (data): {e}")
             return None
 
     def job_to_article(self, job: LinkedInJob) -> NormalizedArticle:

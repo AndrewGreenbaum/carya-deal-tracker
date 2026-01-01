@@ -34,6 +34,12 @@ from ...config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# Rate limiting and retry configuration
+BRAVE_REQUEST_DELAY = 0.3  # 300ms between Brave Search requests
+OPENCORP_REQUEST_DELAY = 0.5  # 500ms between OpenCorporates requests
+MAX_RETRIES = 3  # Maximum retry attempts for transient failures
+RETRY_BACKOFF = 2.0  # Exponential backoff multiplier
+
 
 # Tech company name patterns
 TECH_NAME_PATTERNS = [
@@ -147,39 +153,71 @@ class DelawareCorpsScraper:
             logger.warning("BRAVE_SEARCH_KEY not configured for Delaware search")
             return entities
 
-        try:
-            brave_client = httpx.AsyncClient(
-                timeout=30,
-                headers={
-                    "X-Subscription-Token": settings.brave_search_key,
-                    "Accept": "application/json",
-                }
-            )
+        # FIX: Use async with to prevent HTTP client leak
+        async with httpx.AsyncClient(
+            timeout=30,
+            headers={
+                "X-Subscription-Token": settings.brave_search_key,
+                "Accept": "application/json",
+            }
+        ) as brave_client:
+            for query in DELAWARE_QUERIES[:3]:  # Limit queries
+                # Retry loop for transient failures
+                for attempt in range(MAX_RETRIES):
+                    try:
+                        response = await brave_client.get(
+                            "https://api.search.brave.com/res/v1/web/search",
+                            params={
+                                "q": query,
+                                "count": 20,
+                                "freshness": "pw",  # Past week
+                            }
+                        )
 
-            try:
-                for query in DELAWARE_QUERIES[:3]:  # Limit queries
-                    response = await brave_client.get(
-                        "https://api.search.brave.com/res/v1/web/search",
-                        params={
-                            "q": query,
-                            "count": 20,
-                            "freshness": "pw",  # Past week
-                        }
-                    )
+                        if response.status_code == 200:
+                            try:
+                                data = response.json()
+                            except ValueError as e:
+                                logger.warning(f"Delaware Brave JSON parse error: {e}")
+                                break  # No retry for parse errors
 
-                    if response.status_code == 200:
-                        data = response.json()
-                        for result in data.get("web", {}).get("results", []):
-                            entity = self._parse_search_result(result)
-                            if entity:
-                                entities.append(entity)
+                            for result in data.get("web", {}).get("results", []):
+                                entity = self._parse_search_result(result)
+                                if entity:
+                                    entities.append(entity)
+                            break  # Success - exit retry loop
 
-                    await asyncio.sleep(0.3)
-            finally:
-                await brave_client.aclose()
+                        elif response.status_code == 429:
+                            # Rate limited - check Retry-After header
+                            retry_after = int(response.headers.get("Retry-After", 60))
+                            logger.warning(f"Brave rate limited (429), waiting {retry_after}s")
+                            await asyncio.sleep(retry_after)
+                            # Continue to next attempt
 
-        except Exception as e:
-            logger.error(f"Delaware Brave search error: {e}")
+                        elif response.status_code in (401, 403):
+                            logger.error(f"Brave auth error ({response.status_code}): check API key")
+                            return entities  # Auth errors won't recover
+
+                        elif response.status_code >= 500:
+                            # Server error - retry with backoff
+                            wait_time = BRAVE_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
+                            logger.warning(f"Brave server error ({response.status_code}), retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
+                            await asyncio.sleep(wait_time)
+
+                        else:
+                            logger.warning(f"Brave unexpected status {response.status_code}")
+                            break  # Unknown error - don't retry
+
+                    except httpx.TimeoutException:
+                        wait_time = BRAVE_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
+                        logger.warning(f"Delaware Brave timeout, retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
+                        await asyncio.sleep(wait_time)
+
+                    except httpx.ConnectError as e:
+                        logger.error(f"Delaware Brave connection error: {e}")
+                        break  # Network issues unlikely to resolve quickly
+
+                await asyncio.sleep(BRAVE_REQUEST_DELAY)  # Rate limit between queries
 
         # Deduplicate by name
         seen_names = set()
@@ -262,51 +300,86 @@ class DelawareCorpsScraper:
         """
         entities = []
 
-        try:
-            # OpenCorporates search for recent Delaware tech companies
-            # Note: They have rate limits on free tier
-            response = await self.client.get(
-                "https://api.opencorporates.com/v0.4/companies/search",
-                params={
-                    "q": "technology",
-                    "jurisdiction_code": "us_de",
-                    "order": "incorporation_date",
-                    "per_page": 30,
-                }
-            )
+        # Retry loop for OpenCorporates with exponential backoff
+        for attempt in range(MAX_RETRIES):
+            try:
+                # OpenCorporates search for recent Delaware tech companies
+                # Note: They have rate limits on free tier
+                response = await self.client.get(
+                    "https://api.opencorporates.com/v0.4/companies/search",
+                    params={
+                        "q": "technology",
+                        "jurisdiction_code": "us_de",
+                        "order": "incorporation_date",
+                        "per_page": 30,
+                    }
+                )
 
-            if response.status_code == 200:
-                data = response.json()
-                for company in data.get("results", {}).get("companies", []):
-                    c = company.get("company", {})
-                    name = c.get("name", "")
+                if response.status_code == 200:
+                    try:
+                        data = response.json()
+                    except ValueError as e:
+                        logger.warning(f"OpenCorporates JSON parse error: {e}")
+                        break  # No retry for parse errors
 
-                    if self._has_tech_name(name):
-                        inc_date = c.get("incorporation_date")
-                        if inc_date:
-                            try:
-                                formation_date = datetime.strptime(inc_date, "%Y-%m-%d").date()
-                            except ValueError:
+                    for company in data.get("results", {}).get("companies", []):
+                        c = company.get("company", {})
+                        name = c.get("name", "")
+
+                        if self._has_tech_name(name):
+                            inc_date = c.get("incorporation_date")
+                            if inc_date:
+                                try:
+                                    formation_date = datetime.strptime(inc_date, "%Y-%m-%d").date()
+                                except ValueError:
+                                    formation_date = None
+                            else:
                                 formation_date = None
-                        else:
-                            formation_date = None
 
-                        entities.append(DelawareEntity(
-                            entity_name=name,
-                            entity_type=c.get("company_type", "Corporation"),
-                            file_number=c.get("company_number"),
-                            formation_date=formation_date,
-                            registered_agent=c.get("registered_agent_name"),
-                            status=c.get("current_status", "Active"),
-                            source_url=c.get("opencorporates_url", ""),
-                            has_tech_name=True,
-                            has_startup_agent=self._has_startup_agent(
-                                c.get("registered_agent_name", "")
-                            ),
-                        ))
+                            entities.append(DelawareEntity(
+                                entity_name=name,
+                                entity_type=c.get("company_type", "Corporation"),
+                                file_number=c.get("company_number"),
+                                formation_date=formation_date,
+                                registered_agent=c.get("registered_agent_name"),
+                                status=c.get("current_status", "Active"),
+                                source_url=c.get("opencorporates_url", ""),
+                                has_tech_name=True,
+                                has_startup_agent=self._has_startup_agent(
+                                    c.get("registered_agent_name", "")
+                                ),
+                            ))
+                    break  # Success - exit retry loop
 
-        except Exception as e:
-            logger.error(f"OpenCorporates search error: {e}")
+                elif response.status_code == 429:
+                    # Rate limited - use Retry-After or default wait
+                    retry_after = int(response.headers.get("Retry-After", 30))
+                    logger.warning(f"OpenCorporates rate limited (429), waiting {retry_after}s")
+                    await asyncio.sleep(retry_after)
+                    # Continue to next attempt
+
+                elif response.status_code in (401, 403):
+                    logger.error(f"OpenCorporates auth error ({response.status_code})")
+                    break  # Auth errors won't recover
+
+                elif response.status_code >= 500:
+                    # Server error - retry with backoff
+                    wait_time = OPENCORP_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
+                    logger.warning(f"OpenCorporates server error ({response.status_code}), retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
+                    await asyncio.sleep(wait_time)
+
+                else:
+                    logger.warning(f"OpenCorporates unexpected status {response.status_code}")
+                    break  # Unknown error - don't retry
+
+            except httpx.TimeoutException:
+                wait_time = OPENCORP_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
+                logger.warning(f"OpenCorporates timeout, retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
+                await asyncio.sleep(wait_time)
+
+            except httpx.ConnectError as e:
+                logger.error(f"OpenCorporates connection error: {e}")
+                break  # Network issues unlikely to resolve quickly
 
         return entities
 
@@ -335,64 +408,100 @@ class DelawareCorpsScraper:
         # Remove common suffixes for better matching
         clean_name = re.sub(r'\s*(Inc\.?|LLC|Corp\.?|Corporation|Ltd\.?)$', '', clean_name, flags=re.IGNORECASE).strip()
 
-        try:
-            # Try OpenCorporates API first (more reliable)
-            response = await self.client.get(
-                "https://api.opencorporates.com/v0.4/companies/search",
-                params={
-                    "q": clean_name,
-                    "jurisdiction_code": "us_de",
-                    "per_page": 5,
-                }
-            )
+        # Retry loop for OpenCorporates with exponential backoff
+        for attempt in range(MAX_RETRIES):
+            try:
+                # Try OpenCorporates API first (more reliable)
+                response = await self.client.get(
+                    "https://api.opencorporates.com/v0.4/companies/search",
+                    params={
+                        "q": clean_name,
+                        "jurisdiction_code": "us_de",
+                        "per_page": 5,
+                    }
+                )
 
-            if response.status_code == 200:
-                data = response.json()
-                companies = data.get("results", {}).get("companies", [])
+                if response.status_code == 200:
+                    try:
+                        data = response.json()
+                    except ValueError as e:
+                        logger.warning(f"OpenCorporates JSON parse error for '{company_name}': {e}")
+                        return None  # No retry for parse errors
 
-                for company in companies:
-                    c = company.get("company", {})
-                    name = c.get("name", "")
+                    companies = data.get("results", {}).get("companies", [])
 
-                    # Check for exact or fuzzy match
-                    name_lower = name.lower()
-                    search_lower = clean_name.lower()
+                    for company in companies:
+                        c = company.get("company", {})
+                        name = c.get("name", "")
 
-                    is_match = False
-                    if search_lower in name_lower or name_lower in search_lower:
-                        is_match = True
-                    elif fuzzy_match:
-                        # Check if main words match
-                        search_words = set(search_lower.split())
-                        name_words = set(name_lower.split())
-                        if len(search_words & name_words) >= min(2, len(search_words)):
+                        # Check for exact or fuzzy match
+                        name_lower = name.lower()
+                        search_lower = clean_name.lower()
+
+                        is_match = False
+                        if search_lower in name_lower or name_lower in search_lower:
                             is_match = True
+                        elif fuzzy_match:
+                            # Check if main words match
+                            search_words = set(search_lower.split())
+                            name_words = set(name_lower.split())
+                            if len(search_words & name_words) >= min(2, len(search_words)):
+                                is_match = True
 
-                    if is_match:
-                        inc_date = c.get("incorporation_date")
-                        formation_date = None
-                        if inc_date:
-                            try:
-                                formation_date = datetime.strptime(inc_date, "%Y-%m-%d").date()
-                            except ValueError:
-                                pass
+                        if is_match:
+                            inc_date = c.get("incorporation_date")
+                            formation_date = None
+                            if inc_date:
+                                try:
+                                    formation_date = datetime.strptime(inc_date, "%Y-%m-%d").date()
+                                except ValueError:
+                                    pass
 
-                        agent_name = c.get("registered_agent_name", "")
+                            agent_name = c.get("registered_agent_name", "")
 
-                        return DelawareEntity(
-                            entity_name=name,
-                            entity_type=c.get("company_type", "Corporation"),
-                            file_number=c.get("company_number"),
-                            formation_date=formation_date,
-                            registered_agent=agent_name,
-                            status=c.get("current_status", "Active"),
-                            source_url=c.get("opencorporates_url", ""),
-                            has_tech_name=self._has_tech_name(name),
-                            has_startup_agent=self._has_startup_agent(agent_name),
-                        )
+                            return DelawareEntity(
+                                entity_name=name,
+                                entity_type=c.get("company_type", "Corporation"),
+                                file_number=c.get("company_number"),
+                                formation_date=formation_date,
+                                registered_agent=agent_name,
+                                status=c.get("current_status", "Active"),
+                                source_url=c.get("opencorporates_url", ""),
+                                has_tech_name=self._has_tech_name(name),
+                                has_startup_agent=self._has_startup_agent(agent_name),
+                            )
 
-        except Exception as e:
-            logger.error(f"OpenCorporates company lookup error: {e}")
+                    return None  # No match found - don't retry
+
+                elif response.status_code == 429:
+                    # Rate limited - use Retry-After or default wait
+                    retry_after = int(response.headers.get("Retry-After", 30))
+                    logger.warning(f"OpenCorporates rate limited (429) for '{company_name}', waiting {retry_after}s")
+                    await asyncio.sleep(retry_after)
+                    # Continue to next attempt
+
+                elif response.status_code in (401, 403):
+                    logger.error(f"OpenCorporates auth error ({response.status_code})")
+                    return None  # Auth errors won't recover
+
+                elif response.status_code >= 500:
+                    # Server error - retry with backoff
+                    wait_time = OPENCORP_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
+                    logger.warning(f"OpenCorporates server error ({response.status_code}) for '{company_name}', retry {attempt + 1}/{MAX_RETRIES}")
+                    await asyncio.sleep(wait_time)
+
+                else:
+                    logger.warning(f"OpenCorporates unexpected status {response.status_code} for '{company_name}'")
+                    return None  # Unknown error - don't retry
+
+            except httpx.TimeoutException:
+                wait_time = OPENCORP_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
+                logger.warning(f"OpenCorporates timeout for '{company_name}', retry {attempt + 1}/{MAX_RETRIES}")
+                await asyncio.sleep(wait_time)
+
+            except httpx.ConnectError as e:
+                logger.error(f"OpenCorporates connection error for '{company_name}': {e}")
+                return None  # Network issues unlikely to resolve quickly
 
         return None
 

@@ -461,10 +461,33 @@ class BraveSearchScraper:
         return self._parse_news_results(data)
 
     def _parse_news_results(self, data: Dict[str, Any]) -> List[BraveSearchResult]:
-        """Parse Brave news API response."""
+        """Parse Brave news API response with validation."""
         results = []
 
-        for item in data.get("results", []):
+        # Validate response structure - check for API errors
+        if "error" in data:
+            error_msg = data.get("error", {})
+            if isinstance(error_msg, dict):
+                logger.error(f"Brave API error: {error_msg.get('message', 'Unknown error')}")
+            else:
+                logger.error(f"Brave API error: {error_msg}")
+            return []
+
+        # Check for expected response structure
+        if "results" not in data:
+            logger.warning(f"Brave API unexpected response structure: {list(data.keys())}")
+            # Try alternative keys that might contain results
+            if "web" in data and "results" in data.get("web", {}):
+                data["results"] = data["web"]["results"]
+            else:
+                return []
+
+        raw_results = data.get("results", [])
+        if not isinstance(raw_results, list):
+            logger.warning(f"Brave API 'results' is not a list: {type(raw_results)}")
+            return []
+
+        for item in raw_results:
             try:
                 # Parse date
                 pub_date = None
