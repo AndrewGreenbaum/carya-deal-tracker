@@ -15,10 +15,14 @@ import asyncio
 import hashlib
 import logging
 import instructor
-from anthropic import Anthropic
+from anthropic import Anthropic, APITimeoutError, APIError, RateLimitError
 from typing import Optional, List, Set
 
 logger = logging.getLogger(__name__)
+
+# API call configuration
+API_TIMEOUT_SECONDS = 60  # 60 second timeout for Claude calls
+MAX_RETRIES = 2  # Retry up to 2 times on transient errors
 
 # Session-based content hash cache (cleared between runs)
 # Prevents duplicate Claude calls for same article content
@@ -316,19 +320,53 @@ async def extract_deal(
     prompt = build_extraction_prompt(article_text, fund_context, source_url)
 
     # Use pre-built cached system message (optimization: created once at module load)
-    response = client.messages.create(
-        model=settings.llm_model,
-        max_tokens=settings.llm_max_tokens,
-        temperature=settings.llm_temperature,
-        system=CACHED_SYSTEM_MESSAGE,
-        messages=[{"role": "user", "content": prompt}],
-        response_model=DealExtraction,
-    )
+    # FIX: Add retry logic and error handling for API calls
+    last_error = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            response = client.messages.create(
+                model=settings.llm_model,
+                max_tokens=settings.llm_max_tokens,
+                temperature=settings.llm_temperature,
+                system=CACHED_SYSTEM_MESSAGE,
+                messages=[{"role": "user", "content": prompt}],
+                response_model=DealExtraction,
+                timeout=API_TIMEOUT_SECONDS,
+            )
 
-    # Post-process: verify tracked fund identification
-    response = _verify_tracked_fund(response)
+            # Post-process: verify tracked fund identification
+            response = _verify_tracked_fund(response)
+            return response
 
-    return response
+        except APITimeoutError as e:
+            last_error = e
+            logger.warning(f"Claude API timeout (attempt {attempt + 1}/{MAX_RETRIES + 1}): {source_url}")
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+            continue
+
+        except RateLimitError as e:
+            last_error = e
+            logger.warning(f"Claude API rate limit (attempt {attempt + 1}/{MAX_RETRIES + 1}): {e}")
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(5 * (attempt + 1))  # Longer backoff for rate limits
+            continue
+
+        except APIError as e:
+            last_error = e
+            logger.error(f"Claude API error (attempt {attempt + 1}/{MAX_RETRIES + 1}): {e}")
+            if attempt < MAX_RETRIES and e.status_code >= 500:
+                await asyncio.sleep(2 ** attempt)  # Retry server errors
+                continue
+            break  # Don't retry client errors (4xx)
+
+        except Exception as e:
+            logger.error(f"Unexpected error during extraction: {e}")
+            return None
+
+    # All retries exhausted
+    logger.error(f"Extraction failed after {MAX_RETRIES + 1} attempts for {source_url}: {last_error}")
+    return None
 
 
 async def extract_deal_batch(
@@ -389,7 +427,7 @@ async def extract_article(
     source_url: str = "",
     title: str = "",
     fund_context: Optional[FundConfig] = None
-) -> ArticleAnalysis:
+) -> Optional[ArticleAnalysis]:
     """
     Analyze a full article that may contain multiple deals.
 
@@ -400,25 +438,59 @@ async def extract_article(
         fund_context: Optional fund-specific extraction context
 
     Returns:
-        ArticleAnalysis with all deals found
+        ArticleAnalysis with all deals found, or None if extraction failed
     """
     prompt = build_extraction_prompt(article_text, fund_context, source_url)
 
     # Use pre-built cached system message (optimization: created once at module load)
-    response = client.messages.create(
-        model=settings.llm_model,
-        max_tokens=settings.llm_max_tokens,
-        temperature=settings.llm_temperature,
-        system=CACHED_SYSTEM_MESSAGE,
-        messages=[{"role": "user", "content": prompt}],
-        response_model=ArticleAnalysis,
-    )
+    # FIX: Add retry logic and error handling for API calls
+    last_error = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            response = client.messages.create(
+                model=settings.llm_model,
+                max_tokens=settings.llm_max_tokens,
+                temperature=settings.llm_temperature,
+                system=CACHED_SYSTEM_MESSAGE,
+                messages=[{"role": "user", "content": prompt}],
+                response_model=ArticleAnalysis,
+                timeout=API_TIMEOUT_SECONDS,
+            )
 
-    # Post-process each deal
-    for deal in response.deals:
-        _verify_tracked_fund(deal)
+            # Post-process each deal
+            for deal in response.deals:
+                _verify_tracked_fund(deal)
 
-    return response
+            return response
+
+        except APITimeoutError as e:
+            last_error = e
+            logger.warning(f"Claude API timeout (attempt {attempt + 1}/{MAX_RETRIES + 1}): {source_url}")
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(2 ** attempt)
+            continue
+
+        except RateLimitError as e:
+            last_error = e
+            logger.warning(f"Claude API rate limit (attempt {attempt + 1}/{MAX_RETRIES + 1}): {e}")
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(5 * (attempt + 1))
+            continue
+
+        except APIError as e:
+            last_error = e
+            logger.error(f"Claude API error (attempt {attempt + 1}/{MAX_RETRIES + 1}): {e}")
+            if attempt < MAX_RETRIES and e.status_code >= 500:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            break
+
+        except Exception as e:
+            logger.error(f"Unexpected error during article extraction: {e}")
+            return None
+
+    logger.error(f"Article extraction failed after {MAX_RETRIES + 1} attempts for {source_url}: {last_error}")
+    return None
 
 
 def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:

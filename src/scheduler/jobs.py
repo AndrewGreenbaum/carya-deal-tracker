@@ -197,6 +197,11 @@ async def process_external_articles(
                 fund_context=fund_config,
             )
 
+            # FIX: Handle None returns (duplicate content or extraction failure)
+            if extraction is None:
+                logger.debug(f"[{source_name}] Extraction returned None for {article.url}")
+                continue
+
             # Skip low-confidence extractions
             if extraction.confidence_score < settings.extraction_confidence_threshold:
                 continue
@@ -408,6 +413,13 @@ async def scheduled_scrape_job():
     """
     job_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     logger.info(f"[{job_id}] Starting scheduled scrape job")
+
+    # CRITICAL FIX: Clear content hash cache at start of each run
+    # Without this, duplicate detection prevents processing the same article
+    # across different runs (100% data loss after first run)
+    from ..analyst.extractor import clear_content_hash_cache
+    clear_content_hash_cache()
+    logger.info(f"[{job_id}] Content hash cache cleared for fresh run")
 
     start_time = datetime.utcnow()
 
