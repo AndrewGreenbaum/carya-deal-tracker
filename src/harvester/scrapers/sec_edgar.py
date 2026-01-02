@@ -275,6 +275,9 @@ class SECEdgarScraper:
         Returns:
             FormDFiling with details populated, or None if fetch failed critically
         """
+        # FIX: Add SEC rate limiting (1 request/second guideline)
+        await asyncio.sleep(SEC_REQUEST_DELAY)
+
         # Validate accession_number before constructing URL
         if not filing.accession_number:
             logger.error(f"Missing accession number for {filing.company_name} (CIK: {filing.cik}) - skipping")

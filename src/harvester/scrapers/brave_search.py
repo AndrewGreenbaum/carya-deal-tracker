@@ -489,6 +489,12 @@ class BraveSearchScraper:
 
         for item in raw_results:
             try:
+                # FIX: Validate URL is non-empty before storing (prevents dedup bug)
+                url = item.get("url", "")
+                if not url:
+                    logger.debug("Skipping Brave result with empty URL")
+                    continue
+
                 # Parse date
                 pub_date = None
                 age = item.get("age", "")
@@ -496,15 +502,19 @@ class BraveSearchScraper:
                     # Brave returns relative time like "2 days ago"
                     pub_date = self._parse_relative_date(age)
 
+                # FIX: Handle null meta_url (API can return "meta_url": null)
+                meta_url = item.get("meta_url")
+                source = meta_url.get("hostname", "") if isinstance(meta_url, dict) else ""
+
                 results.append(BraveSearchResult(
                     title=item.get("title", ""),
-                    url=item.get("url", ""),
+                    url=url,
                     description=item.get("description", ""),
                     published_date=pub_date,
-                    source=item.get("meta_url", {}).get("hostname", ""),
+                    source=source,
                     extra_snippets=item.get("extra_snippets", []),
                 ))
-            except Exception as e:
+            except (TypeError, KeyError, AttributeError) as e:
                 logger.warning(f"Error parsing Brave result: {e}")
                 continue
 

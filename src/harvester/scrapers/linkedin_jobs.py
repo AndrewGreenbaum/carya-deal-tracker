@@ -132,7 +132,14 @@ class LinkedInJobsScraper:
 
                 # Handle rate limiting (429)
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", 60))
+                    # FIX: Retry-After can be int OR HTTP-date string
+                    retry_after_header = response.headers.get("Retry-After", "60")
+                    try:
+                        retry_after = int(retry_after_header)
+                    except ValueError:
+                        # HTTP-date format - default to 60 seconds
+                        logger.warning(f"Non-numeric Retry-After header: {retry_after_header}")
+                        retry_after = 60
                     logger.warning(
                         f"Stealth detection rate limited. Waiting {retry_after}s "
                         f"(attempt {attempt + 1}/{self.max_retries})"
@@ -151,7 +158,13 @@ class LinkedInJobsScraper:
                     continue
 
                 response.raise_for_status()
-                data = response.json()
+
+                # FIX: Handle JSONDecodeError from malformed response
+                try:
+                    data = response.json()
+                except ValueError as e:
+                    logger.warning(f"Stealth detection JSON decode error: {e}")
+                    return []
 
                 # Validate API response - check for errors
                 if "error" in data:
@@ -225,7 +238,9 @@ class LinkedInJobsScraper:
                 if len(parts) >= 2:
                     company_name = parts[1].split(" | ")[0].strip()
             elif ":" in title:
-                company_name = title.split(":")[0].strip()
+                # FIX: Get part AFTER colon (company name), not before (job title)
+                # "ML Engineer: TechCorp" → "TechCorp" not "ML Engineer"
+                company_name = title.split(":")[-1].strip()
 
             # Fallback: use truncated title if no pattern matched
             if not company_name and title:

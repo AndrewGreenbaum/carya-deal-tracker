@@ -74,12 +74,40 @@ class HighPriorityLead:
 
 
 def parse_amount(amount_str: Optional[str]) -> int:
-    """Parse amount string like '$1,000,000' to integer."""
+    """Parse amount string like '$1,000,000' to integer.
+
+    Handles various formats:
+    - '$1,000,000' -> 1000000
+    - '$5M' or '$5 million' -> 5000000
+    - '$2-5M' (range) -> 2000000 (uses lower bound)
+    - '$1.5M' -> 1500000
+    """
     if not amount_str:
         return 0
     try:
-        clean = amount_str.replace("$", "").replace(",", "")
-        return int(clean)
+        clean = amount_str.replace("$", "").replace(",", "").strip()
+
+        # FIX: Detect multiplier suffix BEFORE handling ranges
+        # (so "$2-5M" correctly applies M to lower bound)
+        multiplier = 1
+        clean_lower = clean.lower()
+        if "m" in clean_lower or "million" in clean_lower:
+            multiplier = 1_000_000
+            clean = re.sub(r'[mM](?:illion)?', '', clean).strip()
+        elif "b" in clean_lower or "billion" in clean_lower:
+            multiplier = 1_000_000_000
+            clean = re.sub(r'[bB](?:illion)?', '', clean).strip()
+        elif "k" in clean_lower:
+            multiplier = 1_000
+            clean = re.sub(r'[kK]', '', clean).strip()
+
+        # Handle ranges like "$2-5" (after suffix removed) - extract lower bound
+        if "-" in clean:
+            parts = clean.split("-")
+            clean = parts[0].strip()  # Use lower bound
+
+        # Parse as float then convert (handles "$1.5M")
+        return int(float(clean) * multiplier)
     except (ValueError, TypeError):
         return 0
 

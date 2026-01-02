@@ -199,19 +199,26 @@ class DelawareCorpsScraper:
                             return entities  # Auth errors won't recover
 
                         elif response.status_code >= 500:
-                            # Server error - retry with backoff
-                            wait_time = BRAVE_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
-                            logger.warning(f"Brave server error ({response.status_code}), retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
-                            await asyncio.sleep(wait_time)
+                            # Server error - retry with backoff (only if not last attempt)
+                            if attempt < MAX_RETRIES - 1:
+                                wait_time = BRAVE_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
+                                logger.warning(f"Brave server error ({response.status_code}), retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
+                                await asyncio.sleep(wait_time)
+                            else:
+                                logger.warning(f"Brave server error ({response.status_code}), max retries exhausted")
 
                         else:
                             logger.warning(f"Brave unexpected status {response.status_code}")
                             break  # Unknown error - don't retry
 
                     except httpx.TimeoutException:
-                        wait_time = BRAVE_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
-                        logger.warning(f"Delaware Brave timeout, retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
-                        await asyncio.sleep(wait_time)
+                        # FIX: Only sleep if we'll actually retry
+                        if attempt < MAX_RETRIES - 1:
+                            wait_time = BRAVE_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
+                            logger.warning(f"Delaware Brave timeout, retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
+                            await asyncio.sleep(wait_time)
+                        else:
+                            logger.warning(f"Delaware Brave timeout, max retries exhausted")
 
                     except httpx.ConnectError as e:
                         logger.error(f"Delaware Brave connection error: {e}")
@@ -280,7 +287,7 @@ class DelawareCorpsScraper:
                 entity_name=entity_name,
                 entity_type="Corporation",  # Assume corp unless specified
                 file_number=None,
-                formation_date=date.today(),  # Approximate
+                formation_date=None,  # FIX: Don't assume today - unknown from search results
                 registered_agent=None,
                 status="Active",
                 source_url=url,
@@ -288,7 +295,9 @@ class DelawareCorpsScraper:
                 has_startup_agent=has_startup_agent,
             )
 
-        except Exception:
+        except (TypeError, AttributeError, ValueError) as e:
+            # FIX: Catch specific exceptions instead of broad Exception
+            logger.debug(f"Error parsing Delaware search result: {e}")
             return None
 
     async def search_aggregators(self) -> List[DelawareEntity]:
@@ -332,6 +341,8 @@ class DelawareCorpsScraper:
                                 try:
                                     formation_date = datetime.strptime(inc_date, "%Y-%m-%d").date()
                                 except ValueError:
+                                    # FIX: Log invalid date format instead of silent failure
+                                    logger.debug(f"Invalid date format for {name}: {inc_date}")
                                     formation_date = None
                             else:
                                 formation_date = None
@@ -363,19 +374,26 @@ class DelawareCorpsScraper:
                     break  # Auth errors won't recover
 
                 elif response.status_code >= 500:
-                    # Server error - retry with backoff
-                    wait_time = OPENCORP_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
-                    logger.warning(f"OpenCorporates server error ({response.status_code}), retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
-                    await asyncio.sleep(wait_time)
+                    # Server error - retry with backoff (only if not last attempt)
+                    if attempt < MAX_RETRIES - 1:
+                        wait_time = OPENCORP_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
+                        logger.warning(f"OpenCorporates server error ({response.status_code}), retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.warning(f"OpenCorporates server error ({response.status_code}), max retries exhausted")
 
                 else:
                     logger.warning(f"OpenCorporates unexpected status {response.status_code}")
                     break  # Unknown error - don't retry
 
             except httpx.TimeoutException:
-                wait_time = OPENCORP_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
-                logger.warning(f"OpenCorporates timeout, retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
-                await asyncio.sleep(wait_time)
+                # FIX: Only sleep if we'll actually retry
+                if attempt < MAX_RETRIES - 1:
+                    wait_time = OPENCORP_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
+                    logger.warning(f"OpenCorporates timeout, retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.warning(f"OpenCorporates timeout, max retries exhausted")
 
             except httpx.ConnectError as e:
                 logger.error(f"OpenCorporates connection error: {e}")
@@ -455,7 +473,8 @@ class DelawareCorpsScraper:
                                 try:
                                     formation_date = datetime.strptime(inc_date, "%Y-%m-%d").date()
                                 except ValueError:
-                                    pass
+                                    # FIX: Log invalid date format instead of silent pass
+                                    logger.debug(f"Invalid date format for {company_name}: {inc_date}")
 
                             agent_name = c.get("registered_agent_name", "")
 
@@ -485,19 +504,26 @@ class DelawareCorpsScraper:
                     return None  # Auth errors won't recover
 
                 elif response.status_code >= 500:
-                    # Server error - retry with backoff
-                    wait_time = OPENCORP_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
-                    logger.warning(f"OpenCorporates server error ({response.status_code}) for '{company_name}', retry {attempt + 1}/{MAX_RETRIES}")
-                    await asyncio.sleep(wait_time)
+                    # Server error - retry with backoff (only if not last attempt)
+                    if attempt < MAX_RETRIES - 1:
+                        wait_time = OPENCORP_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
+                        logger.warning(f"OpenCorporates server error ({response.status_code}) for '{company_name}', retry {attempt + 1}/{MAX_RETRIES}")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.warning(f"OpenCorporates server error ({response.status_code}) for '{company_name}', max retries exhausted")
 
                 else:
                     logger.warning(f"OpenCorporates unexpected status {response.status_code} for '{company_name}'")
                     return None  # Unknown error - don't retry
 
             except httpx.TimeoutException:
-                wait_time = OPENCORP_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
-                logger.warning(f"OpenCorporates timeout for '{company_name}', retry {attempt + 1}/{MAX_RETRIES}")
-                await asyncio.sleep(wait_time)
+                # FIX: Only sleep if we'll actually retry
+                if attempt < MAX_RETRIES - 1:
+                    wait_time = OPENCORP_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
+                    logger.warning(f"OpenCorporates timeout for '{company_name}', retry {attempt + 1}/{MAX_RETRIES}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.warning(f"OpenCorporates timeout for '{company_name}', max retries exhausted")
 
             except httpx.ConnectError as e:
                 logger.error(f"OpenCorporates connection error for '{company_name}': {e}")
