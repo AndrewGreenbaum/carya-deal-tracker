@@ -24,7 +24,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
@@ -122,10 +122,16 @@ class GoogleAlertsScraper:
 
             items = []
             for entry in feed.entries:
+                # FIX: Skip entries without URLs (empty URLs cause downstream issues)
+                if not entry.get('link'):
+                    continue
+
                 # Parse publication date
                 pub_date = None
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    pub_date = datetime(*entry.published_parsed[:6])
+                    # FIX: Check tuple length before unpacking (crash prevention)
+                    if len(entry.published_parsed) >= 6:
+                        pub_date = datetime(*entry.published_parsed[:6])
 
                 # Clean up description (remove HTML)
                 description = entry.get('summary', '')
@@ -152,8 +158,12 @@ class GoogleAlertsScraper:
 
             return items
 
+        except httpx.HTTPError as e:
+            # FIX: Specific exception + logger (crash prevention)
+            logger.error(f"HTTP error fetching Google Alert feed: {e}")
+            return []
         except Exception as e:
-            logger.error(f"Error fetching Google Alert feed: {e}")
+            logger.error(f"Unexpected error fetching Google Alert feed: {e}", exc_info=True)
             return []
 
     async def fetch_all_feeds(self) -> List[GoogleAlertItem]:
@@ -203,8 +213,12 @@ class GoogleAlertsScraper:
 
             return None
 
+        except httpx.HTTPError as e:
+            # FIX: Specific exception + logger (crash prevention)
+            logger.error(f"HTTP error fetching article {url}: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Error fetching article {url}: {e}")
+            logger.error(f"Unexpected error fetching article {url}: {e}", exc_info=True)
             return None
 
     async def scrape_all(self) -> List[NormalizedArticle]:
@@ -222,6 +236,12 @@ class GoogleAlertsScraper:
 
         articles = []
         for item in items:
+            # FIX: Skip articles without publication dates
+            # (defaulting to today corrupts data and defeats temporal filtering)
+            if not item.published:
+                logger.debug(f"Skipping article without date: {item.title}")
+                continue
+
             # Fetch full article content
             full_text = await self.fetch_full_article(item.url)
 
@@ -235,11 +255,12 @@ class GoogleAlertsScraper:
                 url=item.url,
                 title=item.title,
                 text=text,
-                published_date=item.published.date() if item.published else date.today(),
+                published_date=item.published.date(),
                 author=None,
                 tags=['google_alerts', item.source] if item.source else ['google_alerts'],
                 fund_slug=fund_slug,
-                fetched_at=datetime.utcnow(),
+                # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+                fetched_at=datetime.now(timezone.utc),
             ))
 
             # Rate limit
