@@ -15,7 +15,7 @@ import re
 import feedparser
 import httpx
 from dataclasses import dataclass, field
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from xml.etree import ElementTree as ET
 
@@ -171,7 +171,8 @@ class SECEdgarScraper:
                 feed = feedparser.parse(response.text)
 
                 filings = []
-                cutoff = datetime.utcnow() - timedelta(hours=hours)
+                # FIX: Use timezone-aware datetime (utcnow() is deprecated in Python 3.12+)
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
                 for entry in feed.entries[:max_filings]:
                     # Parse entry
@@ -193,7 +194,13 @@ class SECEdgarScraper:
                 last_error = e
                 if e.response.status_code == 429:
                     # Rate limited - wait longer
-                    retry_after = int(e.response.headers.get("Retry-After", 60))
+                    # FIX: Retry-After can be int OR HTTP-date string
+                    retry_after_header = e.response.headers.get("Retry-After", "60")
+                    try:
+                        retry_after = int(retry_after_header)
+                    except ValueError:
+                        logger.warning(f"Non-numeric Retry-After header: {retry_after_header}")
+                        retry_after = 60
                     logger.warning(f"SEC EDGAR rate limited, waiting {retry_after}s")
                     await asyncio.sleep(retry_after)
                     continue
@@ -241,7 +248,10 @@ class SECEdgarScraper:
             try:
                 filing_date = datetime.fromisoformat(updated.replace("Z", "+00:00")).date()
             except (ValueError, TypeError):
-                filing_date = date.today()
+                # FIX: Skip filings with unparsable dates instead of defaulting to today
+                # (which would incorrectly mark old filings as new)
+                logger.warning(f"SEC EDGAR: Unparsable date '{updated}' for {company_name} - skipping")
+                return None
 
             # Extract filing URL
             filing_url = entry.get("link", "")

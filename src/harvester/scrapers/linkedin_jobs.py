@@ -17,7 +17,7 @@ import asyncio
 import logging
 import httpx
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List, Optional, Dict, Any
 
 from ..base_scraper import NormalizedArticle
@@ -215,6 +215,27 @@ class LinkedInJobsScraper:
         logger.error(f"Stealth detection failed after {self.max_retries} attempts: {last_error}")
         return []
 
+    def _parse_relative_date(self, age_str: str) -> Optional[date]:
+        """Parse relative date string like '2 days ago' from Brave Search."""
+        try:
+            age_lower = age_str.lower()
+
+            if "hour" in age_lower or "minute" in age_lower:
+                return date.today()
+            elif "day" in age_lower:
+                days = int("".join(filter(str.isdigit, age_str)) or "1")
+                return date.today() - timedelta(days=days)
+            elif "week" in age_lower:
+                weeks = int("".join(filter(str.isdigit, age_str)) or "1")
+                return date.today() - timedelta(weeks=weeks)
+            elif "month" in age_lower:
+                months = int("".join(filter(str.isdigit, age_str)) or "1")
+                return date.today() - timedelta(days=months * 30)
+            else:
+                return date.today()
+        except Exception:
+            return None
+
     def parse_job_result(self, result: Dict[str, Any]) -> Optional[LinkedInJob]:
         """Parse Brave search result into LinkedInJob (or stealth signal)."""
         try:
@@ -258,13 +279,17 @@ class LinkedInJobsScraper:
             # (handles name variants, negative keywords, and disambiguation)
             matched_fund = match_fund_name(f"{title} {description}")
 
+            # FIX: Parse actual posted date from Brave Search age field
+            age = result.get("age", "")
+            posted_date = self._parse_relative_date(age) if age else date.today()
+
             return LinkedInJob(
                 title=title,
                 company_name=company_name,
                 url=url,
                 description=description,
                 location=None,  # Not easily available from search
-                posted_date=date.today(),  # Approximate
+                posted_date=posted_date,
                 is_stealth=is_stealth,
                 matched_fund=matched_fund,
             )
