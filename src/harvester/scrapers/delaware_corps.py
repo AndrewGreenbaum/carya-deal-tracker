@@ -26,7 +26,7 @@ import re
 import httpx
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
 from ..base_scraper import NormalizedArticle
@@ -46,13 +46,6 @@ TECH_NAME_PATTERNS = [
     r'\b(AI|ML|Labs?|Tech|Technologies|Systems|Software|Platform|Cloud|Data|Analytics|Cyber|Security)\b',
     r'\b(Automation|Robotics|Bio|Health|Med|Fin|Dev|Ops|Infrastructure)\b',
     r'\b(Intelligence|Agent|Bot|Quantum|Neural|Deep|Machine)\b',
-]
-
-# Common startup suffixes
-STARTUP_SUFFIXES = [
-    "Inc", "Inc.", "LLC", "Corp", "Corporation",
-    "Labs", "Technologies", "Systems", "AI",
-    "HQ", "Co", "Studio", "Ventures",
 ]
 
 # Registered agents popular with startups (signals VC-backed)
@@ -181,7 +174,9 @@ class DelawareCorpsScraper:
                                 logger.warning(f"Delaware Brave JSON parse error: {e}")
                                 break  # No retry for parse errors
 
-                            for result in data.get("web", {}).get("results", []):
+                            # FIX: Handle null results (key exists but value is None)
+                            results = data.get("web", {}).get("results") or []
+                            for result in results:
                                 entity = self._parse_search_result(result)
                                 if entity:
                                     entities.append(entity)
@@ -189,7 +184,13 @@ class DelawareCorpsScraper:
 
                         elif response.status_code == 429:
                             # Rate limited - check Retry-After header
-                            retry_after = int(response.headers.get("Retry-After", 60))
+                            # FIX: Retry-After can be int OR HTTP-date string
+                            retry_after_header = response.headers.get("Retry-After", "60")
+                            try:
+                                retry_after = int(retry_after_header)
+                            except ValueError:
+                                logger.warning(f"Non-numeric Retry-After header: {retry_after_header}")
+                                retry_after = 60
                             logger.warning(f"Brave rate limited (429), waiting {retry_after}s")
                             await asyncio.sleep(retry_after)
                             # Continue to next attempt
@@ -331,7 +332,9 @@ class DelawareCorpsScraper:
                         logger.warning(f"OpenCorporates JSON parse error: {e}")
                         break  # No retry for parse errors
 
-                    for company in data.get("results", {}).get("companies", []):
+                    # FIX: Handle null companies (key exists but value is None)
+                    companies = data.get("results", {}).get("companies") or []
+                    for company in companies:
                         c = company.get("company", {})
                         name = c.get("name", "")
 
@@ -364,7 +367,13 @@ class DelawareCorpsScraper:
 
                 elif response.status_code == 429:
                     # Rate limited - use Retry-After or default wait
-                    retry_after = int(response.headers.get("Retry-After", 30))
+                    # FIX: Retry-After can be int OR HTTP-date string
+                    retry_after_header = response.headers.get("Retry-After", "30")
+                    try:
+                        retry_after = int(retry_after_header)
+                    except ValueError:
+                        logger.warning(f"Non-numeric Retry-After header: {retry_after_header}")
+                        retry_after = 30
                     logger.warning(f"OpenCorporates rate limited (429), waiting {retry_after}s")
                     await asyncio.sleep(retry_after)
                     # Continue to next attempt
@@ -446,7 +455,8 @@ class DelawareCorpsScraper:
                         logger.warning(f"OpenCorporates JSON parse error for '{company_name}': {e}")
                         return None  # No retry for parse errors
 
-                    companies = data.get("results", {}).get("companies", [])
+                    # FIX: Handle null companies (key exists but value is None)
+                    companies = data.get("results", {}).get("companies") or []
 
                     for company in companies:
                         c = company.get("company", {})
@@ -494,7 +504,13 @@ class DelawareCorpsScraper:
 
                 elif response.status_code == 429:
                     # Rate limited - use Retry-After or default wait
-                    retry_after = int(response.headers.get("Retry-After", 30))
+                    # FIX: Retry-After can be int OR HTTP-date string
+                    retry_after_header = response.headers.get("Retry-After", "30")
+                    try:
+                        retry_after = int(retry_after_header)
+                    except ValueError:
+                        logger.warning(f"Non-numeric Retry-After header: {retry_after_header}")
+                        retry_after = 30
                     logger.warning(f"OpenCorporates rate limited (429) for '{company_name}', waiting {retry_after}s")
                     await asyncio.sleep(retry_after)
                     # Continue to next attempt
@@ -599,11 +615,14 @@ class DelawareCorpsScraper:
             url=entity.source_url or f"https://icis.corp.delaware.gov/",
             title=f"Delaware Filing: {entity.entity_name}",
             text="\n".join(text_parts),
-            published_date=entity.formation_date or date.today(),
+            # FIX: Use None instead of date.today() for unknown formation dates
+            # (date.today() misleadingly marks entities as just formed)
+            published_date=entity.formation_date,
             author="Delaware Division of Corporations",
             tags=tags,
             fund_slug="",
-            fetched_at=datetime.utcnow(),
+            # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+            fetched_at=datetime.now(timezone.utc),
         )
 
     def score_entity(self, entity: DelawareEntity) -> int:
