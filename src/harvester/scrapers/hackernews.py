@@ -15,13 +15,17 @@ Data Sources:
 """
 
 import asyncio
+import logging
 import httpx
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
 from ..base_scraper import NormalizedArticle
+from ..fund_matcher import match_fund_name
 from ...config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 # HN API endpoints
@@ -117,7 +121,8 @@ class HackerNewsScraper:
             List of search result dicts
         """
         try:
-            cutoff = int((datetime.utcnow() - timedelta(hours=hours_back)).timestamp())
+            # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+            cutoff = int((datetime.now(timezone.utc) - timedelta(hours=hours_back)).timestamp())
 
             params = {
                 "query": query,
@@ -136,8 +141,12 @@ class HackerNewsScraper:
             data = response.json()
             return data.get("hits", [])
 
+        except httpx.HTTPError as e:
+            # FIX: Specific exception + logger (not print)
+            logger.error(f"HTTP error searching HN Algolia: {e}")
+            return []
         except Exception as e:
-            print(f"Error searching HN Algolia: {e}")
+            logger.error(f"Unexpected error searching HN Algolia: {e}", exc_info=True)
             return []
 
     async def fetch_story(self, story_id: int) -> Optional[Dict[str, Any]]:
@@ -148,8 +157,11 @@ class HackerNewsScraper:
             )
             response.raise_for_status()
             return response.json()
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error fetching HN story {story_id}: {e}")
+            return None
         except Exception as e:
-            print(f"Error fetching HN story {story_id}: {e}")
+            logger.error(f"Unexpected error fetching HN story {story_id}: {e}", exc_info=True)
             return None
 
     async def fetch_top_stories(self, limit: int = 100) -> List[int]:
@@ -158,8 +170,11 @@ class HackerNewsScraper:
             response = await self.client.get(f"{HN_API_BASE}/topstories.json")
             response.raise_for_status()
             return response.json()[:limit]
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error fetching HN top stories: {e}")
+            return []
         except Exception as e:
-            print(f"Error fetching HN top stories: {e}")
+            logger.error(f"Unexpected error fetching HN top stories: {e}", exc_info=True)
             return []
 
     async def fetch_new_stories(self, limit: int = 100) -> List[int]:
@@ -168,11 +183,14 @@ class HackerNewsScraper:
             response = await self.client.get(f"{HN_API_BASE}/newstories.json")
             response.raise_for_status()
             return response.json()[:limit]
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error fetching HN new stories: {e}")
+            return []
         except Exception as e:
-            print(f"Error fetching HN new stories: {e}")
+            logger.error(f"Unexpected error fetching HN new stories: {e}", exc_info=True)
             return []
 
-    def parse_story(self, hit: Dict[str, Any]) -> HNStory:
+    def parse_story(self, hit: Dict[str, Any]) -> Optional[HNStory]:
         """Parse Algolia search hit into HNStory."""
         title = hit.get("title", "")
 
@@ -185,10 +203,22 @@ class HackerNewsScraper:
         elif title.lower().startswith("ask hn"):
             story_type = "ask_hn"
 
-        created = datetime.fromtimestamp(hit.get("created_at_i", 0))
+        # FIX: Handle missing timestamp (default 0 = 1970, corrupts data)
+        timestamp = hit.get("created_at_i")
+        if not timestamp:
+            logger.debug(f"Skipping HN story without timestamp: {hit.get('objectID')}")
+            return None
+        # FIX: Use timezone-aware datetime (fromtimestamp uses local timezone by default)
+        created = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+
+        # FIX: Convert string objectID to int (Algolia returns strings, but dedup uses int comparison)
+        try:
+            story_id = int(hit.get("objectID", 0))
+        except (ValueError, TypeError):
+            story_id = 0
 
         return HNStory(
-            id=hit.get("objectID", 0),
+            id=story_id,
             title=title,
             url=hit.get("url"),
             text=hit.get("story_text"),
@@ -206,7 +236,8 @@ class HackerNewsScraper:
             tags="story",
             hours_back=hours_back,
         )
-        return [self.parse_story(h) for h in hits]
+        # FIX: Filter out None values (parse_story returns None for invalid entries)
+        return [s for s in (self.parse_story(h) for h in hits) if s is not None]
 
     async def search_show_hn(self, hours_back: int = 168) -> List[HNStory]:
         """Search for Show HN posts."""
@@ -215,7 +246,8 @@ class HackerNewsScraper:
             tags="show_hn",
             hours_back=hours_back,
         )
-        return [self.parse_story(h) for h in hits]
+        # FIX: Filter out None values
+        return [s for s in (self.parse_story(h) for h in hits) if s is not None]
 
     async def search_funding_news(self, hours_back: int = 168) -> List[HNStory]:
         """Search for funding-related posts."""
@@ -233,22 +265,25 @@ class HackerNewsScraper:
                 story_id = hit.get("objectID")
                 if story_id not in seen_ids:
                     seen_ids.add(story_id)
-                    all_stories.append(self.parse_story(hit))
+                    # FIX: Handle None from parse_story
+                    story = self.parse_story(hit)
+                    if story:
+                        all_stories.append(story)
 
             await asyncio.sleep(0.3)
 
         return all_stories
 
     def match_tracked_fund(self, story: HNStory) -> Optional[str]:
-        """Check if story mentions any tracked fund."""
-        search_text = f"{story.title} {story.text or ''}".lower()
+        """Check if story mentions any tracked fund.
 
-        for slug, patterns in HN_FUND_PATTERNS.items():
-            for pattern in patterns:
-                if pattern.lower() in search_text:
-                    return slug
-
-        return None
+        FIX: Use centralized fund_matcher which has:
+        - All fund name variants
+        - Negative keywords to avoid false positives (benchmark != benchmarking)
+        - Disambiguation logic
+        """
+        search_text = f"{story.title} {story.text or ''}"
+        return match_fund_name(search_text)
 
     def is_funding_related(self, story: HNStory) -> bool:
         """Check if story is funding-related."""
@@ -291,7 +326,8 @@ class HackerNewsScraper:
             author=story.author,
             tags=['hackernews', story.story_type],
             fund_slug=fund_slug or "",
-            fetched_at=datetime.utcnow(),
+            # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+            fetched_at=datetime.now(timezone.utc),
         )
 
     async def scrape_all(self, hours_back: int = 168) -> List[NormalizedArticle]:
