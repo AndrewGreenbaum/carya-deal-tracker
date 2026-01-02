@@ -14,7 +14,10 @@ import asyncio
 import feedparser
 import httpx
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
@@ -100,10 +103,16 @@ class TechCrunchScraper:
 
             items = []
             for entry in feed.entries:
+                # FIX: Skip entries without URLs (empty URLs cause downstream issues)
+                if not entry.get('link'):
+                    continue
+
                 # Parse publication date
                 pub_date = None
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    pub_date = datetime(*entry.published_parsed[:6])
+                    # FIX: Check tuple length before unpacking (crash prevention)
+                    if len(entry.published_parsed) >= 6:
+                        pub_date = datetime(*entry.published_parsed[:6])
 
                 # Clean description
                 description = entry.get('summary', '')
@@ -132,15 +141,20 @@ class TechCrunchScraper:
 
             return items
 
+        except httpx.HTTPError as e:
+            # FIX: Specific exception + logger instead of print()
+            logger.error(f"HTTP error fetching TechCrunch feed {feed_url}: {e}")
+            return []
         except Exception as e:
-            print(f"Error fetching TechCrunch feed {feed_url}: {e}")
+            logger.error(f"Unexpected error fetching TechCrunch feed {feed_url}: {e}", exc_info=True)
             return []
 
     async def fetch_all_feeds(self, hours_back: int = 168) -> List[TechCrunchArticle]:
         """Fetch all configured RSS feeds."""
         all_items = []
         seen_urls = set()
-        cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+        # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
 
         for feed_url in self.feeds:
             items = await self.fetch_feed(feed_url)
@@ -205,8 +219,12 @@ class TechCrunchScraper:
 
             return None
 
+        except httpx.HTTPError as e:
+            # FIX: Specific exception + logger instead of print()
+            logger.error(f"HTTP error fetching TechCrunch article {url}: {e}")
+            return None
         except Exception as e:
-            print(f"Error fetching TechCrunch article {url}: {e}")
+            logger.error(f"Unexpected error fetching TechCrunch article {url}: {e}", exc_info=True)
             return None
 
     async def scrape_all(self, hours_back: int = 168) -> List[NormalizedArticle]:
@@ -227,6 +245,12 @@ class TechCrunchScraper:
             if not self.is_funding_article(article):
                 continue
 
+            # FIX: Skip articles without publication dates
+            # (defaulting to today corrupts data and defeats hours_back filter)
+            if not article.published:
+                logger.debug(f"Skipping article without date: {article.title}")
+                continue
+
             # Check for tracked fund mentions
             fund_slug = self.match_tracked_fund(article)
 
@@ -238,11 +262,12 @@ class TechCrunchScraper:
                 url=article.url,
                 title=article.title,
                 text=text,
-                published_date=article.published.date() if article.published else date.today(),
+                published_date=article.published.date(),
                 author=article.author,
                 tags=['techcrunch'] + article.categories,
                 fund_slug=fund_slug or "",
-                fetched_at=datetime.utcnow(),
+                # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+                fetched_at=datetime.now(timezone.utc),
             ))
 
             # Rate limit
