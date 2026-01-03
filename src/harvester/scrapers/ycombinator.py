@@ -18,7 +18,7 @@ import feedparser
 
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from bs4 import BeautifulSoup
 
@@ -32,12 +32,14 @@ ALGOLIA_INDEX = "YCCompany_production"
 # YC batch identifiers (format: "Winter 2024", "Summer 2024", etc.)
 def get_current_batches() -> List[str]:
     """Get recent YC batch identifiers in Algolia format."""
-    now = datetime.utcnow()
+    # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+    now = datetime.now(timezone.utc)
     year = now.year
     batches = []
 
+    # FIX: Don't fetch future batches (year + 1 doesn't exist yet)
     # Current and previous batches (Winter, Summer, Fall)
-    for y in range(year + 1, year - 2, -1):
+    for y in range(year, year - 2, -1):
         batches.extend([f"Winter {y}", f"Fall {y}", f"Summer {y}"])
 
     return batches[:8]  # Last 8 batches
@@ -130,12 +132,21 @@ class YCombinatorScraper:
             companies = []
 
             for hit in data.get("hits", []):
+                # FIX: Skip companies without slug (creates malformed URL)
+                slug = hit.get("slug", "")
+                if not slug:
+                    continue
+
+                # FIX: Filter None values from industries list before join (crash prevention)
+                industries_raw = hit.get("industries") or []
+                industries = ", ".join(i for i in industries_raw if i)
+
                 companies.append(YCCompany(
                     name=hit.get("name", ""),
-                    url=f"https://www.ycombinator.com/companies/{hit.get('slug', '')}",
+                    url=f"https://www.ycombinator.com/companies/{slug}",
                     description=hit.get("one_liner", ""),
                     batch=hit.get("batch", batch),
-                    industry=", ".join(hit.get("industries", [])) if hit.get("industries") else "",
+                    industry=industries,
                     location=hit.get("all_locations", ""),
                     website=hit.get("website", ""),
                     status=hit.get("status", ""),
@@ -143,8 +154,12 @@ class YCombinatorScraper:
 
             return companies
 
+        # FIX: Handle specific HTTP errors first, then general with exc_info
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error fetching YC companies from Algolia for batch {batch}: {e}")
+            return []
         except Exception as e:
-            logger.error(f"Error fetching YC companies from Algolia for batch {batch}: {e}")
+            logger.error(f"Unexpected error fetching YC companies from Algolia for batch {batch}: {e}", exc_info=True)
             return []
 
     async def fetch_recent_batch_companies(self) -> List[YCCompany]:
@@ -176,10 +191,19 @@ class YCombinatorScraper:
             feed = feedparser.parse(response.text)
 
             for entry in feed.entries[:20]:  # Last 20 posts
+                # FIX: Skip entries without URL (downstream issues)
+                if not entry.get('link'):
+                    continue
+
                 # Parse publication date
                 pub_date = None
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    pub_date = datetime(*entry.published_parsed[:6])
+                    # FIX: Check tuple length before unpacking (crash prevention)
+                    if len(entry.published_parsed) >= 6:
+                        try:
+                            pub_date = datetime(*entry.published_parsed[:6])
+                        except (TypeError, ValueError):
+                            pub_date = None
 
                 # Get description
                 description = entry.get('summary', '')
@@ -195,8 +219,11 @@ class YCombinatorScraper:
                     author=entry.get('author', None),
                 ))
 
+        # FIX: Handle specific HTTP errors first, then general with exc_info
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error fetching YC blog RSS: {e}")
         except Exception as e:
-            logger.error(f"Error fetching YC blog RSS: {e}")
+            logger.error(f"Unexpected error fetching YC blog RSS: {e}", exc_info=True)
 
         return posts
 
@@ -232,11 +259,13 @@ class YCombinatorScraper:
             url=company.url,
             title=f"YC {company.batch}: {company.name} - {company.description[:100]}",
             text="\n".join(text_parts),
-            published_date=date.today(),
+            # FIX: Use None instead of date.today() (YC companies don't have specific publish dates)
+            published_date=None,
             author="Y Combinator",
             tags=['ycombinator', 'demo_day', company.batch, company.industry.lower()] if company.industry else ['ycombinator', 'demo_day', company.batch],
             fund_slug="",  # YC is the fund here
-            fetched_at=datetime.utcnow(),
+            # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+            fetched_at=datetime.now(timezone.utc),
         )
 
     async def scrape_all(self, include_all_batches: bool = False) -> List[NormalizedArticle]:
@@ -263,15 +292,20 @@ class YCombinatorScraper:
         # Get blog posts for announcements
         blog_posts = await self.fetch_blog_posts()
         for post in blog_posts:
+            # FIX: Skip blog posts without dates (don't default to today)
+            if not post.published:
+                continue
+
             articles.append(NormalizedArticle(
                 url=post.url,
                 title=post.title,
                 text=f"{post.title}\n\n{post.description}",
-                published_date=post.published.date() if post.published else date.today(),
+                published_date=post.published.date(),
                 author=post.author,
                 tags=['ycombinator', 'blog'],
                 fund_slug="",
-                fetched_at=datetime.utcnow(),
+                # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+                fetched_at=datetime.now(timezone.utc),
             ))
 
         return articles
