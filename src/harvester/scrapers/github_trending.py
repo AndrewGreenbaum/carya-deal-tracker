@@ -10,15 +10,18 @@ Source: https://github.com/trending
 """
 
 import asyncio
+import logging
 import re
 import httpx
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 # GitHub Trending URLs by time range
@@ -104,8 +107,12 @@ class GitHubTrendingScraper:
             response = await self.client.get(url)
             response.raise_for_status()
             return response.text
+        except httpx.HTTPError as e:
+            # FIX: Specific exception + logger (not print)
+            logger.error(f"HTTP error fetching GitHub trending: {e}")
+            return ""
         except Exception as e:
-            print(f"Error fetching GitHub trending: {e}")
+            logger.error(f"Unexpected error fetching GitHub trending: {e}", exc_info=True)
             return ""
 
     def parse_trending_repos(self, html: str) -> List[TrendingRepo]:
@@ -121,7 +128,11 @@ class GitHubTrendingScraper:
                     continue
 
                 name = name_el.get_text(strip=True).replace('\n', '').replace(' ', '')
-                url = f"https://github.com{name_el.get('href', '')}"
+                # FIX: Validate href is not empty (prevents invalid "https://github.com" URLs)
+                href = name_el.get('href', '').strip()
+                if not href:
+                    continue
+                url = f"https://github.com{href}"
 
                 # Description
                 desc_el = article.select_one('p')
@@ -171,7 +182,8 @@ class GitHubTrendingScraper:
                 ))
 
             except Exception as e:
-                print(f"Error parsing trending repo: {e}")
+                # FIX: Use logger instead of print
+                logger.warning(f"Error parsing trending repo: {e}", exc_info=True)
                 continue
 
         return repos
@@ -225,8 +237,12 @@ class GitHubTrendingScraper:
                     return response.text[:5000]
 
             return None
+        except httpx.HTTPError as e:
+            # FIX: Specific exception + logger
+            logger.error(f"HTTP error fetching README for {repo.name}: {e}")
+            return None
         except Exception as e:
-            print(f"Error fetching README for {repo.name}: {e}")
+            logger.error(f"Unexpected error fetching README for {repo.name}: {e}", exc_info=True)
             return None
 
     async def repo_to_article(self, repo: TrendingRepo) -> NormalizedArticle:
@@ -255,11 +271,14 @@ class GitHubTrendingScraper:
             url=repo.url,
             title=f"GitHub Trending: {repo.name} (+{repo.stars_today} stars) - {repo.description[:80]}",
             text="\n".join(text_parts),
-            published_date=date.today(),
+            # FIX: Use None instead of date.today() (corrupts historical data)
+            # Trending repos don't have a specific publish date
+            published_date=None,
             author=repo.built_by[0] if repo.built_by else None,
             tags=['github', 'trending', repo.language.lower() if repo.language else 'unknown'],
             fund_slug="",  # No specific fund
-            fetched_at=datetime.utcnow(),
+            # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+            fetched_at=datetime.now(timezone.utc),
         )
 
     async def scrape_all(self, since: str = "daily", filter_enterprise: bool = True) -> List[NormalizedArticle]:
