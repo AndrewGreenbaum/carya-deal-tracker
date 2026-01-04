@@ -230,6 +230,10 @@ Article: "Startup XYZ announced today it has closed a $30M round led by Benchmar
 → is_new_announcement=True
 → announcement_evidence="announced today it has closed a $30M round led by Benchmark"
 
+CRITICAL: Return ONLY ONE deal per article - the PRIMARY funding announcement.
+If an article mentions multiple rounds (e.g., "just raised Series A" and "previously raised Seed"),
+extract ONLY the NEW/PRIMARY round being announced, NOT historical mentions.
+
 Output must be valid JSON matching the schema."""
 
 # Initialize the cached system message with the prompt text
