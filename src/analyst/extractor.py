@@ -166,6 +166,53 @@ Always explain your reasoning by:
 6. Flagging any ambiguity
 7. Making a final determination with confidence
 
+═══════════════════════════════════════════════════════════════════
+CRITICAL: NEW ANNOUNCEMENT VERIFICATION (PREVENTS FALSE POSITIVES)
+═══════════════════════════════════════════════════════════════════
+
+Before extracting ANY deal, you MUST determine: Is this article ANNOUNCING a new funding round?
+
+SET is_new_announcement=True FOR (REAL ANNOUNCEMENTS):
+- "Company X today announced a $50M Series A"
+- "Startup Y raises $30M led by Sequoia"
+- "Z closes seed round with $5M from a16z"
+- Press releases about funding closings
+- Recent news with specific amounts, dates, and lead investors
+- Articles where funding IS THE MAIN TOPIC
+
+SET is_new_announcement=False FOR (BACKGROUND MENTIONS - REJECT):
+- Company descriptions: "BuildOps, backed by Founders Fund, launches product..."
+- Historical references: "In 2022, they raised a Series A from..."
+- Investor relationships: "The Sequoia-backed startup announced..."
+- Partnership announcements mentioning investor backgrounds
+- Product launches that reference past funding
+- Opinion/blog posts that mention funding in passing
+- "Portfolio company" mentions without new funding news
+
+EVIDENCE REQUIREMENTS:
+- If is_new_announcement=True: Set announcement_evidence to the EXACT quote
+  Example: "raises $50M Series B led by Sequoia"
+- If is_new_announcement=False: Set announcement_rejection_reason explaining why
+  Example: "Partnership announcement; 'backed by' is historical context, not new funding"
+
+EXAMPLES:
+
+Article: "BuildOps, backed by Founders Fund and Meritech, expands Bluon integration"
+→ is_new_announcement=False
+→ announcement_rejection_reason="Partnership/product announcement; 'backed by' describes existing investor relationship, not new funding"
+
+Article: "Acme raises $50M Series B led by Sequoia to expand AI platform"
+→ is_new_announcement=True
+→ announcement_evidence="raises $50M Series B led by Sequoia"
+
+Article: "The a16z-backed startup launched its new API today"
+→ is_new_announcement=False
+→ announcement_rejection_reason="Product launch; 'a16z-backed' is company background, not new funding"
+
+Article: "Startup XYZ announced today it has closed a $30M round led by Benchmark"
+→ is_new_announcement=True
+→ announcement_evidence="announced today it has closed a $30M round led by Benchmark"
+
 Output must be valid JSON matching the schema."""
 
 # Initialize the cached system message with the prompt text
@@ -308,6 +355,10 @@ async def extract_deal(
             verification_snippet=None,
             confidence_score=0.1,
             thesis_drift_score=0.0,
+            # NEW: Mark as not a new announcement
+            is_new_announcement=False,
+            announcement_evidence=None,
+            announcement_rejection_reason="No funding keywords detected - not a funding article",
             reasoning=ChainOfThought(
                 verb_analysis="No funding keywords detected",
                 lead_signals=[],

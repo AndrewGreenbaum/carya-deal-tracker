@@ -90,6 +90,7 @@ class ScrapingResult:
         self.articles_found = 0
         self.articles_skipped_duplicate = 0
         self.articles_skipped_no_funding = 0
+        self.articles_rejected_not_announcement = 0  # NEW: Track false positive rejections
         self.deals_extracted = 0
         self.deals_saved = 0
         self.errors: List[str] = []
@@ -112,6 +113,7 @@ class ScrapingResult:
             f"articles_found={self.articles_found} "
             f"skipped_duplicate={self.articles_skipped_duplicate} "
             f"skipped_no_funding={self.articles_skipped_no_funding} "
+            f"rejected_not_announcement={self.articles_rejected_not_announcement} "
             f"deals_extracted={self.deals_extracted} "
             f"deals_saved={self.deals_saved} "
             f"errors={len(self.errors)} "
@@ -144,7 +146,7 @@ async def process_article(
 
     Returns:
         Tuple of (success: bool, status: str)
-        Status can be: "saved", "low_confidence", "error:{message}"
+        Status can be: "saved", "low_confidence", "not_new_announcement", "error:{message}"
     """
     try:
         # Extract deal information using Claude
@@ -153,6 +155,17 @@ async def process_article(
             source_url=article.url,
             fund_context=fund_config,
         )
+
+        # NEW: Reject non-announcements (false positive prevention)
+        # This catches articles that mention funding as background context
+        if not extraction.is_new_announcement:
+            rejection_reason = extraction.announcement_rejection_reason or "not a new funding announcement"
+            logger.info(
+                f"Rejecting non-announcement: {extraction.startup_name} - "
+                f"Reason: {rejection_reason} - "
+                f"URL: {article.url}"
+            )
+            return False, "not_new_announcement"
 
         # Skip low-confidence extractions (threshold from settings)
         if extraction.confidence_score < settings.extraction_confidence_threshold:
@@ -271,6 +284,8 @@ async def scrape_fund(fund_slug: str) -> ScrapingResult:
                             result.deals_saved += 1
                         elif status == "low_confidence":
                             result.articles_skipped_no_funding += 1
+                        elif status == "not_new_announcement":
+                            result.articles_rejected_not_announcement += 1
                         elif status.startswith("error:"):
                             result.errors.append(status)
 

@@ -188,6 +188,24 @@ class DealExtraction(BaseModel):
         description="How far this deal is from fund's typical thesis (0=typical, 1=unusual)"
     )
 
+    # NEW: Announcement verification (prevents false positives from background mentions)
+    is_new_announcement: bool = Field(
+        default=True,
+        description="True ONLY if this article is ANNOUNCING a new funding round. "
+                    "False if funding is mentioned as background/historical context "
+                    "(e.g., 'backed by X' company descriptions, past funding references)."
+    )
+    announcement_evidence: Optional[str] = Field(
+        default=None,
+        description="Exact quote proving this is a NEW announcement "
+                    "(e.g., 'today announced', 'just raised', 'closes $X round')"
+    )
+    announcement_rejection_reason: Optional[str] = Field(
+        default=None,
+        description="If is_new_announcement=False, explain why "
+                    "(e.g., 'historical mention', 'company background', 'partnership announcement')"
+    )
+
 
 class ArticleAnalysis(BaseModel):
     """

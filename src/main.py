@@ -211,6 +211,9 @@ class ExtractionResponse(BaseModel):
     tracked_fund_role: Optional[str]
     confidence_score: float
     reasoning_summary: str
+    # NEW: Announcement verification (false positive prevention)
+    is_new_announcement: bool = True
+    announcement_rejection_reason: Optional[str] = None
 
 
 class HealthResponse(BaseModel):
@@ -675,7 +678,9 @@ async def extract_funding_deal(
             tracked_fund_name=result.tracked_fund_name,
             tracked_fund_role=result.tracked_fund_role.value if result.tracked_fund_role else None,
             confidence_score=result.confidence_score,
-            reasoning_summary=result.reasoning.final_reasoning[:500]
+            reasoning_summary=result.reasoning.final_reasoning[:500],
+            is_new_announcement=result.is_new_announcement,
+            announcement_rejection_reason=result.announcement_rejection_reason,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -719,7 +724,9 @@ async def extract_funding_deals_batch(
                 tracked_fund_name=result.tracked_fund_name,
                 tracked_fund_role=result.tracked_fund_role.value if result.tracked_fund_role else None,
                 confidence_score=result.confidence_score,
-                reasoning_summary=result.reasoning.final_reasoning[:500]
+                reasoning_summary=result.reasoning.final_reasoning[:500],
+                is_new_announcement=result.is_new_announcement,
+                announcement_rejection_reason=result.announcement_rejection_reason,
             ))
 
         return responses
@@ -740,6 +747,7 @@ class ScrapeResponse(BaseModel):
     fund_slug: str
     articles_found: int
     articles_skipped_duplicate: int = 0
+    articles_rejected_not_announcement: int = 0  # NEW: Track false positive rejections
     deals_extracted: int = 0
     deals_saved: int
     errors: List[str]
@@ -797,6 +805,7 @@ async def run_scraper(
         fund_slug=result.fund_slug,
         articles_found=result.articles_found,
         articles_skipped_duplicate=result.articles_skipped_duplicate,
+        articles_rejected_not_announcement=result.articles_rejected_not_announcement,
         deals_extracted=result.deals_extracted,
         deals_saved=result.deals_saved,
         errors=result.errors,
@@ -840,6 +849,7 @@ async def run_scrapers_batch(
             fund_slug=r.fund_slug,
             articles_found=r.articles_found,
             articles_skipped_duplicate=r.articles_skipped_duplicate,
+            articles_rejected_not_announcement=r.articles_rejected_not_announcement,
             deals_extracted=r.deals_extracted,
             deals_saved=r.deals_saved,
             errors=r.errors,
@@ -877,6 +887,7 @@ async def run_all_scrapers(
             fund_slug=r.fund_slug,
             articles_found=r.articles_found,
             articles_skipped_duplicate=r.articles_skipped_duplicate,
+            articles_rejected_not_announcement=r.articles_rejected_not_announcement,
             deals_extracted=r.deals_extracted,
             deals_saved=r.deals_saved,
             errors=r.errors,
