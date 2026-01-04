@@ -275,9 +275,17 @@ def _is_duplicate_content(text: str) -> bool:
     Returns True if duplicate (should skip), False if new.
     """
     content_hash = _compute_content_hash(text)
+    text_preview = text[:100].replace('\n', ' ') if text else "(empty)"
+
     if content_hash in _content_hash_cache:
-        logger.debug(f"Skipping duplicate content (hash: {content_hash})")
+        logger.warning(
+            f"Duplicate content detected - hash={content_hash}, "
+            f"cache_size={len(_content_hash_cache)}, "
+            f"text_preview='{text_preview}...'"
+        )
         return True
+
+    logger.debug(f"New content - hash={content_hash}, adding to cache (size={len(_content_hash_cache)})")
     _content_hash_cache.add(content_hash)
     return False
 
@@ -285,8 +293,9 @@ def _is_duplicate_content(text: str) -> bool:
 def clear_content_hash_cache() -> None:
     """Clear the content hash cache. Call between scrape runs."""
     global _content_hash_cache
+    cache_size = len(_content_hash_cache)
     _content_hash_cache.clear()
-    logger.debug("Content hash cache cleared")
+    logger.info(f"Content hash cache cleared (had {cache_size} entries)")
 
 
 def build_extraction_prompt(
