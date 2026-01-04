@@ -96,10 +96,21 @@ PARTICIPANT (NOT LEAD - these should be EXCLUDED):
 - "investors included"
 - "with participation from"
 
-VERIFICATION SNIPPET (REQUIRED):
+VERIFICATION SNIPPET (CRITICAL - STRICT REQUIREMENTS):
 You MUST extract the EXACT quote from the article proving lead status.
-Set verification_snippet to the phrase like: "led by Sequoia Capital"
-If no explicit lead language exists, set tracked_fund_is_lead=False.
+The snippet MUST contain one of these lead phrases:
+- "led by", "led the", "leads", "leading", "co-led", "co-leads"
+- "headed by", "lead investor", "spearheaded"
+
+VALID snippets: "led by Sequoia Capital", "Series A led by a16z", "Greylock leads the round"
+INVALID snippets: "backed by X", "invested in", "announced our investment", "excited to partner"
+
+If the article only says "invested in", "backed by", "participated in", or "announced investment":
+→ This is NOT proof of lead status
+→ Set tracked_fund_is_lead=False
+→ Set verification_snippet=null
+
+Only set tracked_fund_is_lead=True if you find EXPLICIT lead language.
 
 TRACKED FUNDS (identify these specifically):
 - Founders Fund, Benchmark, Sequoia Capital, Khosla Ventures, Index Ventures
@@ -544,12 +555,51 @@ async def extract_article(
     return None
 
 
+def _has_lead_language(snippet: str) -> bool:
+    """
+    Check if a verification snippet contains lead investor language.
+
+    Returns True if snippet proves lead status, False otherwise.
+    """
+    import re
+
+    if not snippet:
+        return False
+
+    snippet_lower = snippet.lower()
+
+    # Strong lead phrases (require word boundaries to avoid false positives)
+    lead_patterns = [
+        r'\bled\s+by\b',           # 'led by'
+        r'\bled\s+the\b',          # 'led the round'
+        r'\bleads?\s+',            # 'lead ', 'leads '
+        r'\bleading\b',            # 'leading'
+        r'\bco-led\b',             # 'co-led'
+        r'\bco-leads?\b',          # 'co-lead'
+        r'\bheaded\s+by\b',        # 'headed by'
+        r'\blead\s+investor\b',    # 'lead investor'
+        r'\bspearheaded\b',        # 'spearheaded'
+    ]
+
+    for pattern in lead_patterns:
+        if re.search(pattern, snippet_lower):
+            return True
+
+    return False
+
+
 def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
     """
     Post-process to verify tracked fund identification.
 
-    Ensures the tracked_fund fields are consistent with lead_investors.
-    Now marks ALL matching investors (for co-leads), not just the first.
+    STRICT VERIFICATION:
+    - Only sets tracked_fund_is_lead=True if:
+      1. A tracked fund is in lead_investors with CONFIRMED_LEAD role
+      2. The verification_snippet contains actual lead language
+    - Downgrades to participant if snippet is missing or invalid
+
+    This prevents false positives where the LLM claims lead status
+    without proper evidence.
     """
     # Lazy import to avoid circular dependency
     from ..harvester.fund_matcher import match_fund_name
@@ -558,18 +608,47 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
     matched_leads = []
     matched_participants = []
 
+    # Validate verification snippet FIRST
+    has_valid_snippet = _has_lead_language(deal.verification_snippet)
+
+    if deal.verification_snippet and not has_valid_snippet:
+        logger.warning(
+            f"Invalid verification snippet for {deal.startup_name}: "
+            f"'{deal.verification_snippet[:60]}...' - missing lead language"
+        )
+
     # Check ALL lead investors against our fund registry
     for investor in deal.lead_investors:
         matched_fund = match_fund_name(investor.name)
         if matched_fund:
             investor.is_tracked_fund = True
             matched_leads.append((matched_fund, investor))
+
             # Set deal-level fields for the FIRST matching lead
-            if not deal.tracked_fund_is_lead and investor.role in [LeadStatus.CONFIRMED_LEAD, LeadStatus.LIKELY_LEAD]:
-                deal.tracked_fund_is_lead = True
-                deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
-                deal.tracked_fund_role = investor.role
-                deal.tracked_fund_partner = investor.partner_name
+            # STRICT: Require CONFIRMED_LEAD role AND valid snippet
+            if not deal.tracked_fund_is_lead:
+                if investor.role == LeadStatus.CONFIRMED_LEAD and has_valid_snippet:
+                    deal.tracked_fund_is_lead = True
+                    deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
+                    deal.tracked_fund_role = investor.role
+                    deal.tracked_fund_partner = investor.partner_name
+                elif investor.role == LeadStatus.LIKELY_LEAD and has_valid_snippet:
+                    # Accept LIKELY_LEAD only with valid snippet
+                    deal.tracked_fund_is_lead = True
+                    deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
+                    deal.tracked_fund_role = investor.role
+                    deal.tracked_fund_partner = investor.partner_name
+                else:
+                    # Downgrade: no snippet or invalid snippet
+                    logger.info(
+                        f"Downgrading {deal.startup_name} lead claim: "
+                        f"role={investor.role.value}, has_valid_snippet={has_valid_snippet}"
+                    )
+                    # Set as tracked fund but NOT as lead
+                    if not deal.tracked_fund_name:
+                        deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
+                        deal.tracked_fund_role = LeadStatus.PARTICIPANT
+                        deal.tracked_fund_partner = investor.partner_name
 
     # Log if multiple tracked funds co-led
     if len(matched_leads) > 1:
