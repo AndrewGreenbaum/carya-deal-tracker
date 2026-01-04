@@ -23,9 +23,12 @@ OPTIMIZATION:
 """
 
 import asyncio
+import logging
 import httpx
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 from typing import List, Optional, Dict, Any
 
 from ..base_scraper import NormalizedArticle
@@ -118,7 +121,7 @@ class TwitterMonitor:
             return []
 
         if not self._check_rate_limit():
-            print("Rate limit reached for this run")
+            logger.warning("Rate limit reached for this run")
             return []
 
         try:
@@ -129,25 +132,37 @@ class TwitterMonitor:
             )
 
             if user_response.status_code == 401:
-                print("Twitter API: Invalid or expired Bearer Token")
+                logger.error("Twitter API: Invalid or expired Bearer Token")
                 return []
 
             if user_response.status_code == 429:
-                print("Twitter API: Rate limited")
+                logger.warning("Twitter API: Rate limited")
                 return []
 
             if user_response.status_code != 200:
                 return []
 
-            user_data = user_response.json()
+            # FIX: Handle JSON parse errors
+            try:
+                user_data = user_response.json()
+            except (ValueError, TypeError) as e:
+                logger.error(f"Failed to parse JSON response for @{username}: {e}")
+                return []
+
             if "data" not in user_data:
                 return []
 
-            user_id = user_data["data"]["id"]
+            # FIX: Use .get() to prevent KeyError
+            user_id = user_data["data"].get("id")
+            if not user_id:
+                logger.error(f"Missing user ID in response for @{username}")
+                return []
+
             self._request_count += 1
 
             # Get user's tweets
-            start_time = (datetime.utcnow() - timedelta(hours=hours_back)).isoformat() + "Z"
+            # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+            start_time = (datetime.now(timezone.utc) - timedelta(hours=hours_back)).isoformat()
 
             tweets_response = await self.client.get(
                 f"{self.base_url}/users/{user_id}/tweets",
@@ -164,28 +179,52 @@ class TwitterMonitor:
                 return []
 
             self._request_count += 1
-            data = tweets_response.json()
+
+            # FIX: Handle JSON parse errors
+            try:
+                data = tweets_response.json()
+            except (ValueError, TypeError) as e:
+                logger.error(f"Failed to parse tweets JSON for @{username}: {e}")
+                return []
 
             tweets = []
             for tweet_data in data.get("data", []):
-                created_at = datetime.fromisoformat(
-                    tweet_data["created_at"].replace("Z", "+00:00")
-                )
+                # FIX: Validate required fields before accessing
+                tweet_id = tweet_data.get("id")
+                tweet_text = tweet_data.get("text", "")
+                created_at_str = tweet_data.get("created_at")
+
+                if not tweet_id or not created_at_str:
+                    logger.warning(f"Skipping tweet with missing id or created_at")
+                    continue
+
+                # FIX: Handle fromisoformat errors
+                try:
+                    created_at = datetime.fromisoformat(
+                        created_at_str.replace("Z", "+00:00")
+                    )
+                except (ValueError, AttributeError) as e:
+                    logger.warning(f"Invalid created_at format: {created_at_str}")
+                    continue
 
                 tweets.append(Tweet(
-                    id=tweet_data["id"],
-                    text=tweet_data["text"],
+                    id=tweet_id,
+                    text=tweet_text,
                     author_username=username,
                     author_name=user_data["data"].get("name", username),
                     created_at=created_at,
-                    url=f"https://twitter.com/{username}/status/{tweet_data['id']}",
+                    url=f"https://twitter.com/{username}/status/{tweet_id}",
                     metrics=tweet_data.get("public_metrics", {}),
                 ))
 
             return tweets
 
+        # FIX: Handle specific HTTP errors first, then general with exc_info
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error fetching tweets for @{username}: {e}")
+            return []
         except Exception as e:
-            print(f"Error fetching tweets for @{username}: {e}")
+            logger.error(f"Unexpected error fetching tweets for @{username}: {e}", exc_info=True)
             return []
 
     async def search_tweets(
@@ -206,11 +245,12 @@ class TwitterMonitor:
             return []
 
         if not self._check_rate_limit():
-            print("Rate limit reached for this run")
+            logger.warning("Rate limit reached for this run")
             return []
 
         try:
-            start_time = (datetime.utcnow() - timedelta(hours=hours_back)).isoformat() + "Z"
+            # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+            start_time = (datetime.now(timezone.utc) - timedelta(hours=hours_back)).isoformat()
 
             response = await self.client.get(
                 f"{self.base_url}/tweets/search/recent",
@@ -225,51 +265,79 @@ class TwitterMonitor:
             )
 
             if response.status_code == 401:
-                print("Twitter API: Invalid or expired Bearer Token")
+                logger.error("Twitter API: Invalid or expired Bearer Token")
                 return []
 
             if response.status_code == 429:
-                print("Twitter API: Rate limited")
+                logger.warning("Twitter API: Rate limited")
                 return []
 
             if response.status_code != 200:
-                print(f"Twitter API error: {response.status_code}")
+                logger.warning(f"Twitter API error: {response.status_code}")
                 return []
 
             self._request_count += 1
-            data = response.json()
+
+            # FIX: Handle JSON parse errors
+            try:
+                data = response.json()
+            except (ValueError, TypeError) as e:
+                logger.error(f"Failed to parse search tweets JSON: {e}")
+                return []
 
             # Build user lookup from includes
+            # FIX: Use .get() to prevent KeyError
             users = {}
             for user in data.get("includes", {}).get("users", []):
-                users[user["id"]] = {
-                    "username": user["username"],
-                    "name": user["name"],
+                user_id = user.get("id")
+                if not user_id:
+                    continue
+                users[user_id] = {
+                    "username": user.get("username", "unknown"),
+                    "name": user.get("name", "Unknown"),
                 }
 
             tweets = []
             for tweet_data in data.get("data", []):
+                # FIX: Validate required fields before accessing
+                tweet_id = tweet_data.get("id")
+                tweet_text = tweet_data.get("text", "")
+                created_at_str = tweet_data.get("created_at")
+
+                if not tweet_id or not created_at_str:
+                    logger.warning(f"Skipping search tweet with missing id or created_at")
+                    continue
+
                 author_id = tweet_data.get("author_id", "")
                 author_info = users.get(author_id, {"username": "unknown", "name": "Unknown"})
 
-                created_at = datetime.fromisoformat(
-                    tweet_data["created_at"].replace("Z", "+00:00")
-                )
+                # FIX: Handle fromisoformat errors
+                try:
+                    created_at = datetime.fromisoformat(
+                        created_at_str.replace("Z", "+00:00")
+                    )
+                except (ValueError, AttributeError) as e:
+                    logger.warning(f"Invalid created_at format: {created_at_str}")
+                    continue
 
                 tweets.append(Tweet(
-                    id=tweet_data["id"],
-                    text=tweet_data["text"],
+                    id=tweet_id,
+                    text=tweet_text,
                     author_username=author_info["username"],
                     author_name=author_info["name"],
                     created_at=created_at,
-                    url=f"https://twitter.com/{author_info['username']}/status/{tweet_data['id']}",
+                    url=f"https://twitter.com/{author_info['username']}/status/{tweet_id}",
                     metrics=tweet_data.get("public_metrics", {}),
                 ))
 
             return tweets
 
+        # FIX: Handle specific HTTP errors first, then general with exc_info
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error searching tweets: {e}")
+            return []
         except Exception as e:
-            print(f"Error searching tweets: {e}")
+            logger.error(f"Unexpected error searching tweets: {e}", exc_info=True)
             return []
 
     def _is_funding_related(self, text: str) -> bool:
@@ -345,8 +413,8 @@ class TwitterMonitor:
         Returns normalized articles ready for extraction.
         """
         if not self.bearer_token:
-            print("Twitter API: TWITTER_BEARER_TOKEN not configured")
-            print("Get one at: https://developer.twitter.com/")
+            logger.warning("Twitter API: TWITTER_BEARER_TOKEN not configured")
+            logger.info("Get one at: https://developer.twitter.com/")
             return []
 
         articles = []
@@ -366,19 +434,24 @@ class TwitterMonitor:
                 continue
             seen_ids.add(tweet.id)
 
+            # FIX: Only add "..." if text is actually truncated
+            text_preview = tweet.text[:100] if tweet.text else ""
+            title_suffix = "..." if len(tweet.text) > 100 else ""
+
             # Create normalized article from tweet
             articles.append(NormalizedArticle(
                 url=tweet.url,
-                title=f"@{tweet.author_username}: {tweet.text[:100]}...",
+                title=f"@{tweet.author_username}: {text_preview}{title_suffix}",
                 text=tweet.text,
                 published_date=tweet.created_at.date(),
                 author=tweet.author_name,
                 tags=['twitter', tweet.author_username],
                 fund_slug=None,
-                fetched_at=datetime.utcnow(),
+                # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+                fetched_at=datetime.now(timezone.utc),
             ))
 
-        print(f"Twitter: Found {len(articles)} funding-related tweets (used {self._request_count} API calls)")
+        logger.info(f"Twitter: Found {len(articles)} funding-related tweets (used {self._request_count} API calls)")
         return articles
 
 
