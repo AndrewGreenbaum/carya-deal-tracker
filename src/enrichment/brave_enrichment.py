@@ -168,7 +168,14 @@ class BraveEnrichmentClient:
 
                 # Handle rate limiting (429)
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", 60))
+                    # FIX: Retry-After can be int OR HTTP-date string
+                    retry_after_header = response.headers.get("Retry-After", "60")
+                    try:
+                        retry_after = int(retry_after_header)
+                    except ValueError:
+                        # HTTP-date format (e.g., "Wed, 21 Oct 2025 07:28:00 GMT")
+                        logger.warning(f"Non-numeric Retry-After header: {retry_after_header}")
+                        retry_after = 60
                     logger.warning(
                         f"Brave enrichment rate limited. Waiting {retry_after}s "
                         f"(attempt {attempt + 1}/{self.max_retries})"
@@ -187,7 +194,14 @@ class BraveEnrichmentClient:
                     continue
 
                 response.raise_for_status()
-                data = response.json()
+
+                # FIX: Handle JSONDecodeError from malformed response
+                try:
+                    data = response.json()
+                except ValueError as e:
+                    logger.warning(f"Brave enrichment JSON decode error: {e}")
+                    return []
+
                 return data.get("web", {}).get("results", [])
 
             except httpx.TimeoutException:
