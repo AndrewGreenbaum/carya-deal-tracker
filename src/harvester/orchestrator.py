@@ -43,7 +43,7 @@ from .scrapers.general_catalyst import GeneralCatalystScraper
 from .scrapers.first_round import FirstRoundScraper
 from ..config.funds import FUND_REGISTRY, FundConfig, ScraperType
 from ..config.settings import settings
-from ..analyst.extractor import extract_deal
+from ..analyst.extractor import extract_deal, clear_content_hash_cache
 from ..archivist.storage import save_deal
 from ..archivist.database import get_session
 from ..archivist.models import Article
@@ -231,6 +231,9 @@ async def scrape_fund(fund_slug: str) -> ScrapingResult:
     """
     result = ScrapingResult(fund_slug)
     start_time = time.perf_counter()
+
+    # FIX: Clear content hash cache to prevent false duplicate detection
+    clear_content_hash_cache()
 
     # Check if fund exists
     if fund_slug not in FUND_REGISTRY:
