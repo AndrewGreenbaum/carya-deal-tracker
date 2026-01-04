@@ -4,19 +4,20 @@ Shared Brave Search API Client.
 Provides a reusable HTTP client with:
 - Exponential backoff retry logic
 - Rate limit (HTTP 429) handling
+- Parallel query execution with semaphore
+- TTL caching for partner queries
 - Configurable timeouts and delays
-- Proper error logging
 
 Used by:
 - brave_search.py (news search)
 - brave_enrichment.py (company enrichment)
-- linkedin_jobs.py (stealth detection)
-- delaware_corps.py (incorporation search)
 """
 
 import asyncio
+import hashlib
 import logging
-from typing import Optional, Dict, Any
+from time import time
+from typing import Optional, Dict, Any, List, Tuple
 
 import httpx
 
@@ -34,6 +35,56 @@ class BraveAPIError(Exception):
     pass
 
 
+class TTLCache:
+    """Simple TTL cache for query results."""
+
+    def __init__(self, ttl_seconds: int = 3600):
+        self._cache: Dict[str, Tuple[float, Any]] = {}
+        self._ttl = ttl_seconds
+
+    def _make_key(self, query: str, search_type: str, freshness: str) -> str:
+        """Create cache key from query parameters."""
+        key_str = f"{search_type}:{freshness}:{query}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+
+    def get(self, query: str, search_type: str, freshness: str) -> Optional[Any]:
+        """Get cached result if not expired."""
+        key = self._make_key(query, search_type, freshness)
+        if key in self._cache:
+            timestamp, value = self._cache[key]
+            if time() - timestamp < self._ttl:
+                return value
+            del self._cache[key]
+        return None
+
+    def set(self, query: str, search_type: str, freshness: str, value: Any):
+        """Store result in cache."""
+        key = self._make_key(query, search_type, freshness)
+        self._cache[key] = (time(), value)
+
+    def clear(self):
+        """Clear all cached entries."""
+        self._cache.clear()
+
+    def size(self) -> int:
+        """Return number of cached entries."""
+        return len(self._cache)
+
+
+# Singleton cache instance (1 hour TTL)
+_query_cache = TTLCache(ttl_seconds=3600)
+
+
+def get_query_cache() -> TTLCache:
+    """Get the shared query cache."""
+    return _query_cache
+
+
+def clear_query_cache():
+    """Clear the query cache."""
+    _query_cache.clear()
+
+
 class BraveClient:
     """
     Shared async HTTP client for Brave Search API.
@@ -41,6 +92,8 @@ class BraveClient:
     Features:
     - Exponential backoff retry on failures
     - HTTP 429 rate limit handling with Retry-After
+    - Parallel query execution with semaphore
+    - Optional TTL caching
     - Configurable via settings
     """
 
@@ -184,6 +237,7 @@ class BraveClient:
         query: str,
         count: int = 20,
         freshness: str = "pw",
+        use_cache: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Execute news search on Brave API.
@@ -192,10 +246,18 @@ class BraveClient:
             query: Search query string
             count: Number of results (max 100)
             freshness: pd=past day, pw=past week, pm=past month
+            use_cache: If True, check/store in TTL cache
 
         Returns:
             Raw API response or None on failure
         """
+        # Check cache first
+        if use_cache:
+            cached = _query_cache.get(query, "news", freshness)
+            if cached is not None:
+                logger.debug(f"Cache hit for news query: {query[:50]}...")
+                return cached
+
         params = {
             "q": query,
             "count": count,
@@ -203,13 +265,20 @@ class BraveClient:
             "text_decorations": False,
             "safesearch": "off",
         }
-        return await self.request(BRAVE_NEWS_API, params)
+        result = await self.request(BRAVE_NEWS_API, params)
+
+        # Store in cache
+        if use_cache and result is not None:
+            _query_cache.set(query, "news", freshness, result)
+
+        return result
 
     async def search_web(
         self,
         query: str,
         count: int = 20,
         freshness: Optional[str] = None,
+        use_cache: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Execute web search on Brave API.
@@ -218,10 +287,20 @@ class BraveClient:
             query: Search query string
             count: Number of results (max 100)
             freshness: Optional - pd=past day, pw=past week, pm=past month
+            use_cache: If True, check/store in TTL cache
 
         Returns:
             Raw API response or None on failure
         """
+        cache_freshness = freshness or "none"
+
+        # Check cache first
+        if use_cache:
+            cached = _query_cache.get(query, "web", cache_freshness)
+            if cached is not None:
+                logger.debug(f"Cache hit for web query: {query[:50]}...")
+                return cached
+
         params = {
             "q": query,
             "count": count,
@@ -230,7 +309,66 @@ class BraveClient:
         }
         if freshness:
             params["freshness"] = freshness
-        return await self.request(BRAVE_WEB_API, params)
+
+        result = await self.request(BRAVE_WEB_API, params)
+
+        # Store in cache
+        if use_cache and result is not None:
+            _query_cache.set(query, "web", cache_freshness, result)
+
+        return result
+
+    async def search_batch(
+        self,
+        queries: List[Tuple[str, str, int, str, bool]],
+        max_concurrent: int = 3,
+        delay_between: float = 0.3,
+    ) -> Dict[str, Optional[Dict[str, Any]]]:
+        """
+        Execute multiple queries with controlled parallelism.
+
+        Args:
+            queries: List of (query, search_type, count, freshness, use_cache) tuples
+                     search_type: "news" or "web"
+            max_concurrent: Maximum concurrent requests (default 3)
+            delay_between: Delay between requests in seconds (default 0.3)
+
+        Returns:
+            Dict mapping query string to result (or None on failure)
+        """
+        semaphore = asyncio.Semaphore(max_concurrent)
+        results: Dict[str, Optional[Dict[str, Any]]] = {}
+
+        async def search_with_limit(
+            query: str,
+            search_type: str,
+            count: int,
+            freshness: str,
+            use_cache: bool,
+        ) -> Tuple[str, Optional[Dict[str, Any]]]:
+            async with semaphore:
+                if search_type == "news":
+                    result = await self.search_news(query, count, freshness, use_cache)
+                else:
+                    result = await self.search_web(query, count, freshness or None, use_cache)
+                await asyncio.sleep(delay_between)
+                return (query, result)
+
+        tasks = [
+            search_with_limit(q, t, c, f, cache)
+            for q, t, c, f, cache in queries
+        ]
+
+        task_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for res in task_results:
+            if isinstance(res, Exception):
+                logger.error(f"Batch query error: {res}")
+            else:
+                query, result = res
+                results[query] = result
+
+        return results
 
     async def delay(self):
         """Wait for configured rate limit delay between requests."""
