@@ -152,35 +152,62 @@ async def get_lead_investor_for_deal(deal_id: int) -> Optional[str]:
         return row
 
 
-async def update_company_website(company_id: int, website: str) -> bool:
-    """Update company website in database."""
+async def update_company_website_in_session(
+    session,
+    company_id: int,
+    website: str,
+) -> bool:
+    """Update company website using an existing session."""
     try:
-        async with get_session() as session:
-            company = await session.get(PortfolioCompany, company_id)
-            if company:
-                company.website = website
-                company.updated_at = datetime.now(timezone.utc)
-                await session.commit()
-                return True
+        stmt = select(PortfolioCompany).where(PortfolioCompany.id == company_id)
+        result = await session.execute(stmt)
+        company = result.scalar_one_or_none()
+        if company:
+            company.website = website
+            company.updated_at = datetime.now(timezone.utc)
+            logger.info(f"Updated company {company_id} ({company.name}) website to {website}")
+            return True
+        else:
+            logger.warning(f"Company {company_id} not found")
         return False
     except Exception as e:
         logger.error(f"Error updating company {company_id} website: {e}")
         return False
 
 
-async def update_deal_founders(deal_id: int, founders: List[Dict]) -> bool:
-    """Update deal founders JSON with LinkedIn URLs."""
+async def update_deal_founders_in_session(
+    session,
+    deal_id: int,
+    founders: List[Dict],
+) -> bool:
+    """Update deal founders JSON using an existing session."""
     try:
-        async with get_session() as session:
-            deal = await session.get(Deal, deal_id)
-            if deal:
-                deal.founders_json = json.dumps(founders)
-                await session.commit()
-                return True
+        stmt = select(Deal).where(Deal.id == deal_id)
+        result = await session.execute(stmt)
+        deal = result.scalar_one_or_none()
+        if deal:
+            deal.founders_json = json.dumps(founders)
+            logger.info(f"Updated deal {deal_id} founders")
+            return True
+        else:
+            logger.warning(f"Deal {deal_id} not found")
         return False
     except Exception as e:
         logger.error(f"Error updating deal {deal_id} founders: {e}")
         return False
+
+
+# Keep legacy functions for backwards compatibility
+async def update_company_website(company_id: int, website: str) -> bool:
+    """Update company website in database."""
+    async with get_session() as session:
+        return await update_company_website_in_session(session, company_id, website)
+
+
+async def update_deal_founders(deal_id: int, founders: List[Dict]) -> bool:
+    """Update deal founders JSON with LinkedIn URLs."""
+    async with get_session() as session:
+        return await update_deal_founders_in_session(session, deal_id, founders)
 
 
 class BackfillEnrichmentClient(BraveEnrichmentClient):
@@ -352,42 +379,53 @@ async def backfill_websites(
     if not deals:
         return stats
 
-    async with BackfillEnrichmentClient() as client:
-        for i, deal in enumerate(deals):
-            company_name = deal["company_name"]
-            company_id = deal["company_id"]
-            deal_id = deal["deal_id"]
-            category = deal.get("enterprise_category")
+    # Use a single session for all updates
+    async with get_session() as session:
+        async with BackfillEnrichmentClient() as client:
+            for i, deal in enumerate(deals):
+                company_name = deal["company_name"]
+                company_id = deal["company_id"]
+                deal_id = deal["deal_id"]
+                category = deal.get("enterprise_category")
 
-            # Get lead investor for context
-            investor = await get_lead_investor_for_deal(deal_id)
+                # Get lead investor for context
+                investor = await get_lead_investor_for_deal(deal_id)
 
-            logger.info(f"[{i+1}/{len(deals)}] Enriching {company_name}...")
+                logger.info(f"[{i+1}/{len(deals)}] Enriching {company_name}...")
 
-            try:
-                website = await client.find_website_with_fallbacks(
-                    company_name=company_name,
-                    investor=investor,
-                    category=category,
-                )
+                try:
+                    website = await client.find_website_with_fallbacks(
+                        company_name=company_name,
+                        investor=investor,
+                        category=category,
+                    )
 
-                if website:
-                    stats.websites_found += 1
-                    if not dry_run:
-                        await update_company_website(company_id, website)
-                    logger.info(f"  -> Found: {website}")
-                else:
+                    if website:
+                        stats.websites_found += 1
+                        if not dry_run:
+                            success = await update_company_website_in_session(
+                                session, company_id, website
+                            )
+                            if not success:
+                                logger.error(f"  -> Failed to save website for {company_name}")
+                        logger.info(f"  -> Found: {website}")
+                    else:
+                        stats.failed_website += 1
+                        logger.warning(f"  -> Not found")
+
+                except Exception as e:
                     stats.failed_website += 1
-                    logger.warning(f"  -> Not found")
+                    logger.error(f"  -> Error: {e}")
 
-            except Exception as e:
-                stats.failed_website += 1
-                logger.error(f"  -> Error: {e}")
+                stats.total_processed += 1
 
-            stats.total_processed += 1
+                # Rate limit
+                await asyncio.sleep(0.5)
 
-            # Rate limit
-            await asyncio.sleep(0.5)
+                # Commit every 10 updates to avoid losing all progress
+                if stats.total_processed % 10 == 0:
+                    await session.commit()
+                    logger.info(f"  -> Committed {stats.total_processed} updates")
 
     logger.info(f"Website backfill complete: {stats.websites_found} found, {stats.failed_website} failed")
     return stats
@@ -420,56 +458,63 @@ async def backfill_linkedin(
     if not deals:
         return stats
 
-    async with BackfillEnrichmentClient() as client:
-        for i, deal in enumerate(deals):
-            company_name = deal["company_name"]
-            deal_id = deal["deal_id"]
-            founders = deal["founders"]
-            founders_missing = deal["founders_missing_linkedin"]
+    # Use a single session for all updates
+    async with get_session() as session:
+        async with BackfillEnrichmentClient() as client:
+            for i, deal in enumerate(deals):
+                company_name = deal["company_name"]
+                deal_id = deal["deal_id"]
+                founders = deal["founders"]
+                founders_missing = deal["founders_missing_linkedin"]
 
-            # Get lead investor for context
-            investor = await get_lead_investor_for_deal(deal_id)
+                # Get lead investor for context
+                investor = await get_lead_investor_for_deal(deal_id)
 
-            logger.info(f"[{i+1}/{len(deals)}] Enriching LinkedIn for {company_name} ({len(founders_missing)} founders)...")
+                logger.info(f"[{i+1}/{len(deals)}] Enriching LinkedIn for {company_name} ({len(founders_missing)} founders)...")
 
-            updated_founders = list(founders)  # Copy
-            founders_enriched = 0
+                updated_founders = list(founders)  # Copy
+                founders_enriched = 0
 
-            for founder in founders_missing:
-                founder_name = founder.get("name", "")
+                for founder in founders_missing:
+                    founder_name = founder.get("name", "")
 
-                try:
-                    linkedin_url = await client.find_linkedin_with_fallbacks(
-                        founder_name=founder_name,
-                        company_name=company_name,
-                        investor=investor,
-                    )
+                    try:
+                        linkedin_url = await client.find_linkedin_with_fallbacks(
+                            founder_name=founder_name,
+                            company_name=company_name,
+                            investor=investor,
+                        )
 
-                    if linkedin_url:
-                        # Update the founder in the list
-                        for f in updated_founders:
-                            if f.get("name") == founder_name:
-                                f["linkedin_url"] = linkedin_url
-                                founders_enriched += 1
-                                break
-                        logger.info(f"  -> {founder_name}: {linkedin_url}")
-                    else:
-                        logger.warning(f"  -> {founder_name}: Not found")
+                        if linkedin_url:
+                            # Update the founder in the list
+                            for f in updated_founders:
+                                if f.get("name") == founder_name:
+                                    f["linkedin_url"] = linkedin_url
+                                    founders_enriched += 1
+                                    break
+                            logger.info(f"  -> {founder_name}: {linkedin_url}")
+                        else:
+                            logger.warning(f"  -> {founder_name}: Not found")
 
-                except Exception as e:
-                    logger.error(f"  -> {founder_name}: Error - {e}")
+                    except Exception as e:
+                        logger.error(f"  -> {founder_name}: Error - {e}")
 
-                # Rate limit between founders
-                await asyncio.sleep(0.3)
+                    # Rate limit between founders
+                    await asyncio.sleep(0.3)
 
-            if founders_enriched > 0:
-                stats.linkedins_found += founders_enriched
-                if not dry_run:
-                    await update_deal_founders(deal_id, updated_founders)
-            else:
-                stats.failed_linkedin += 1
+                if founders_enriched > 0:
+                    stats.linkedins_found += founders_enriched
+                    if not dry_run:
+                        await update_deal_founders_in_session(session, deal_id, updated_founders)
+                else:
+                    stats.failed_linkedin += 1
 
-            stats.total_processed += 1
+                stats.total_processed += 1
+
+                # Commit every 10 updates
+                if stats.total_processed % 10 == 0:
+                    await session.commit()
+                    logger.info(f"  -> Committed {stats.total_processed} updates")
 
     logger.info(f"LinkedIn backfill complete: {stats.linkedins_found} found, {stats.failed_linkedin} deals with no results")
     return stats
