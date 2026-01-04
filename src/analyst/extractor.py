@@ -359,10 +359,12 @@ async def extract_deal(
     Returns:
         DealExtraction with structured deal information, or None if duplicate
     """
-    # Early exit: check for duplicate content (saves API calls)
-    if not skip_dedup_check and _is_duplicate_content(article_text):
-        logger.info(f"Skipping duplicate content for: {source_url}")
-        return None
+    # DISABLED: Content hash dedup was causing issues on Railway
+    # The cache wasn't being cleared properly between runs, causing all articles
+    # to be flagged as duplicates. URL-based dedup in orchestrator is sufficient.
+    # if not skip_dedup_check and _is_duplicate_content(article_text):
+    #     logger.info(f"Skipping duplicate content for: {source_url}")
+    #     return None
 
     # Early exit: check if text is likely about funding
     if not skip_funding_check and not is_likely_funding_content(article_text):
