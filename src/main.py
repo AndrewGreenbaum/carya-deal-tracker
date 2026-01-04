@@ -31,7 +31,7 @@ from sqlalchemy.orm import selectinload
 
 from .config import settings, FUND_REGISTRY, get_all_funds
 from .analyst import extract_deal, DealExtraction, LeadStatus
-from .analyst.extractor import extract_deal_batch
+from .analyst.extractor import extract_deal_batch, clear_content_hash_cache
 from .archivist import (
     get_db,
     get_session,
@@ -798,6 +798,9 @@ async def run_scraper(
             status_code=400,
             detail=f"Scraper not implemented for '{fund_slug}'"
         )
+
+    # FIX: Clear content hash cache before scraping to prevent false duplicates
+    clear_content_hash_cache()
 
     result = await scrape_fund(fund_slug)
 
