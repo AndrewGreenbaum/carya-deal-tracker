@@ -2565,6 +2565,148 @@ async def enrich_founder_linkedin(
     )
 
 
+class BackfillResponse(BaseModel):
+    """Response from backfill operations."""
+    status: str
+    websites_found: int
+    websites_failed: int
+    linkedins_found: int
+    linkedins_failed: int
+    total_processed: int
+
+
+class EnrichmentCoverageResponse(BaseModel):
+    """Enrichment coverage statistics."""
+    total_deals: int
+    with_website: int
+    website_percentage: float
+    with_founders: int
+    with_linkedin: int
+    linkedin_percentage: float
+    missing_website: int
+    missing_linkedin: int
+
+
+@app.get("/enrichment/stats", response_model=EnrichmentCoverageResponse)
+async def get_enrichment_stats(
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Get current enrichment coverage statistics.
+
+    Shows how many deals have websites, LinkedIn, etc.
+    """
+    from .harvester.backfill_enrichment import get_enrichment_coverage
+
+    try:
+        stats = await get_enrichment_coverage()
+        return EnrichmentCoverageResponse(**stats)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/enrichment/backfill-all", response_model=BackfillResponse)
+async def backfill_all_enrichment(
+    limit: Optional[int] = Query(None, ge=1, le=500, description="Limit per category (None = all)"),
+    dry_run: bool = Query(False, description="Preview without saving"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run full backfill of ALL deals missing website or LinkedIn.
+
+    WARNING: This may take a long time (1-2 hours for ~200 deals).
+    Uses multiple fallback search strategies for hard-to-find companies.
+
+    Targets:
+    - Website: 95%+ coverage (MANDATORY)
+    - LinkedIn: 50%+ coverage (best effort)
+    """
+    from .harvester.backfill_enrichment import backfill_all
+
+    try:
+        website_stats, linkedin_stats = await backfill_all(
+            limit=limit,
+            dry_run=dry_run,
+        )
+
+        return BackfillResponse(
+            status="completed" if not dry_run else "dry_run",
+            websites_found=website_stats.websites_found,
+            websites_failed=website_stats.failed_website,
+            linkedins_found=linkedin_stats.linkedins_found,
+            linkedins_failed=linkedin_stats.failed_linkedin,
+            total_processed=website_stats.total_processed + linkedin_stats.total_processed,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/enrichment/backfill-websites", response_model=BackfillResponse)
+async def backfill_websites_only(
+    limit: Optional[int] = Query(None, ge=1, le=500, description="Limit (None = all)"),
+    dry_run: bool = Query(False, description="Preview without saving"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Backfill ONLY website enrichment for deals missing websites.
+
+    Uses multiple search strategies:
+    1. Company + Investor context
+    2. Company + Category
+    3. Company + "official site"
+    4. Company + startup
+    5. Crunchbase reference
+    """
+    from .harvester.backfill_enrichment import backfill_websites
+
+    try:
+        stats = await backfill_websites(limit=limit, dry_run=dry_run)
+
+        return BackfillResponse(
+            status="completed" if not dry_run else "dry_run",
+            websites_found=stats.websites_found,
+            websites_failed=stats.failed_website,
+            linkedins_found=0,
+            linkedins_failed=0,
+            total_processed=stats.total_processed,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/enrichment/backfill-linkedin", response_model=BackfillResponse)
+async def backfill_linkedin_only(
+    limit: Optional[int] = Query(None, ge=1, le=500, description="Limit (None = all)"),
+    dry_run: bool = Query(False, description="Preview without saving"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Backfill ONLY LinkedIn enrichment for founders missing LinkedIn URLs.
+
+    Uses multiple search strategies:
+    1. site:linkedin.com/in + founder + company
+    2. Founder + company + CEO/founder
+    3. Founder + investor context
+    4. Founder + LinkedIn profile
+    5. Just founder name
+    """
+    from .harvester.backfill_enrichment import backfill_linkedin
+
+    try:
+        stats = await backfill_linkedin(limit=limit, dry_run=dry_run)
+
+        return BackfillResponse(
+            status="completed" if not dry_run else "dry_run",
+            websites_found=0,
+            websites_failed=0,
+            linkedins_found=stats.linkedins_found,
+            linkedins_failed=stats.failed_linkedin,
+            total_processed=stats.total_processed,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ----- CLI Runner -----
 
 def run_server():

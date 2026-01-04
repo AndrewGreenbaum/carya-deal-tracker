@@ -479,10 +479,11 @@ async def scheduled_scrape_job():
         )
 
         # ===== PHASE 3: Enrich new deals =====
-        if total_deals > 0:
-            logger.info(f"[{job_id}] Phase 3: Starting automatic enrichment for new deals")
-            enriched = await enrich_new_deals(limit=min(total_deals + 10, 50))
-            logger.info(f"[{job_id}] Enrichment complete: {enriched} companies updated")
+        # Always run enrichment to catch up on any missing data
+        logger.info(f"[{job_id}] Phase 3: Starting automatic enrichment (website + LinkedIn)")
+        # Increased limit to 100 for aggressive coverage (was 50)
+        enriched = await enrich_new_deals(limit=100)
+        logger.info(f"[{job_id}] Enrichment complete: {enriched} companies updated")
 
         # Send notification
         await send_scrape_summary(

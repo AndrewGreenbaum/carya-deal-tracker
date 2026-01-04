@@ -175,42 +175,60 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
             />
           </div>
 
-          {/* Company Links */}
+          {/* Company Links - Always show icons */}
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
               Company Links
             </label>
             <div className="flex flex-wrap gap-3">
-              {deal.companyWebsite && (
+              {/* Website - always show, green when available */}
+              {deal.companyWebsite ? (
                 <a
                   href={deal.companyWebsite}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-sm text-white transition-colors"
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-emerald-700/50 rounded text-sm text-white transition-colors"
+                  title={deal.companyWebsite}
                 >
-                  <Globe className="w-4 h-4 text-blue-400" />
-                  Website
+                  <Globe className="w-4 h-4 text-emerald-400" />
+                  <span className="text-emerald-300">{extractDomain(deal.companyWebsite)}</span>
                 </a>
+              ) : (
+                <span
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-900 border border-slate-800 rounded text-sm text-slate-600 cursor-not-allowed"
+                  title="Website not available"
+                >
+                  <Globe className="w-4 h-4" />
+                  No website
+                </span>
               )}
-              {deal.companyLinkedin && (
+
+              {/* Company LinkedIn - always show if exists */}
+              {deal.companyLinkedin ? (
                 <a
                   href={deal.companyLinkedin}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-sm text-white transition-colors"
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-blue-700/50 rounded text-sm text-white transition-colors"
+                  title={deal.companyLinkedin}
                 >
-                  <Linkedin className="w-4 h-4 text-blue-500" />
-                  Company LinkedIn
+                  <Linkedin className="w-4 h-4 text-blue-400" />
+                  <span className="text-blue-300">Company</span>
                 </a>
-              )}
-              {!deal.companyWebsite && !deal.companyLinkedin && (
-                <span className="text-slate-500 italic text-sm">No company links available</span>
+              ) : (
+                <span
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-900 border border-slate-800 rounded text-sm text-slate-600 cursor-not-allowed"
+                  title="Company LinkedIn not available"
+                >
+                  <Linkedin className="w-4 h-4" />
+                  No Company LinkedIn
+                </span>
               )}
             </div>
           </div>
 
-          {/* CEO/Main Founder - only show first founder */}
-          {deal.founders && deal.founders.length > 0 && deal.founders[0] && (
+          {/* CEO/Main Founder - always show section with LinkedIn status */}
+          {deal.founders && deal.founders.length > 0 && deal.founders[0] ? (
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
                 CEO / Founder
@@ -223,17 +241,33 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
                     <span className="text-slate-500 text-sm">• {deal.founders[0].title}</span>
                   )}
                 </div>
-                {deal.founders[0].linkedinUrl && (
+                {/* LinkedIn - always show status */}
+                {deal.founders[0].linkedinUrl ? (
                   <a
                     href={deal.founders[0].linkedinUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-sm transition-colors"
+                    title={deal.founders[0].linkedinUrl}
                   >
                     <Linkedin className="w-3 h-3" />
                     LinkedIn
                   </a>
+                ) : (
+                  <span className="flex items-center gap-1 text-slate-600 text-sm" title="LinkedIn not found">
+                    <Linkedin className="w-3 h-3" />
+                    No LinkedIn
+                  </span>
                 )}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                CEO / Founder
+              </label>
+              <div className="flex items-center p-3 bg-slate-900/50 border border-slate-800 rounded">
+                <span className="text-slate-500 italic text-sm">No founder information available</span>
               </div>
             </div>
           )}
@@ -300,6 +334,15 @@ function formatDate(dateString: string): string {
     });
   } catch {
     return dateString;
+  }
+}
+
+function extractDomain(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.replace('www.', '');
+  } catch {
+    return url;
   }
 }
 
