@@ -212,7 +212,8 @@ class ExtractionResponse(BaseModel):
     confidence_score: float
     reasoning_summary: str
     # NEW: Announcement verification (false positive prevention)
-    is_new_announcement: bool = True
+    is_new_announcement: bool = False  # FIX: Safe default
+    announcement_evidence: Optional[str] = None  # FIX 4: Add missing field
     announcement_rejection_reason: Optional[str] = None
 
 
@@ -680,6 +681,7 @@ async def extract_funding_deal(
             confidence_score=result.confidence_score,
             reasoning_summary=result.reasoning.final_reasoning[:500],
             is_new_announcement=result.is_new_announcement,
+            announcement_evidence=result.announcement_evidence,
             announcement_rejection_reason=result.announcement_rejection_reason,
         )
     except Exception as e:
@@ -726,6 +728,7 @@ async def extract_funding_deals_batch(
                 confidence_score=result.confidence_score,
                 reasoning_summary=result.reasoning.final_reasoning[:500],
                 is_new_announcement=result.is_new_announcement,
+                announcement_evidence=result.announcement_evidence,
                 announcement_rejection_reason=result.announcement_rejection_reason,
             ))
 

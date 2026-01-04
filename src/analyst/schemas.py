@@ -4,7 +4,7 @@ Pydantic schemas for deal extraction with Instructor.
 These schemas enforce structured JSON output from the LLM.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import List, Optional
 from enum import Enum
 from datetime import date
@@ -190,7 +190,7 @@ class DealExtraction(BaseModel):
 
     # NEW: Announcement verification (prevents false positives from background mentions)
     is_new_announcement: bool = Field(
-        default=True,
+        default=False,  # FIX 2: Safe default - reject if unsure
         description="True ONLY if this article is ANNOUNCING a new funding round. "
                     "False if funding is mentioned as background/historical context "
                     "(e.g., 'backed by X' company descriptions, past funding references)."
@@ -205,6 +205,16 @@ class DealExtraction(BaseModel):
         description="If is_new_announcement=False, explain why "
                     "(e.g., 'historical mention', 'company background', 'partnership announcement')"
     )
+
+    # FIX 3: Validate announcement fields match is_new_announcement state
+    @model_validator(mode='after')
+    def validate_announcement_fields(self) -> 'DealExtraction':
+        """Ensure evidence/reason fields are populated appropriately."""
+        if not self.is_new_announcement:
+            # Non-announcements must have a rejection reason
+            if not self.announcement_rejection_reason:
+                self.announcement_rejection_reason = "Not a new funding announcement"
+        return self
 
 
 class ArticleAnalysis(BaseModel):

@@ -156,6 +156,11 @@ async def process_article(
             fund_context=fund_config,
         )
 
+        # FIX 1: Handle None return (API failures, timeouts, etc.)
+        if extraction is None:
+            logger.warning(f"Extraction failed (API error) for {article.url}")
+            return False, "error:extraction_failed"
+
         # NEW: Reject non-announcements (false positive prevention)
         # This catches articles that mention funding as background context
         if not extraction.is_new_announcement:
@@ -170,8 +175,9 @@ async def process_article(
         # Skip low-confidence extractions (threshold from settings)
         if extraction.confidence_score < settings.extraction_confidence_threshold:
             logger.info(
-                f"Skipping low-confidence extraction for {article.title}: "
-                f"{extraction.confidence_score:.2f} < {settings.extraction_confidence_threshold}"
+                f"Skipping low-confidence extraction: {extraction.startup_name} - "
+                f"Score: {extraction.confidence_score:.2f} < {settings.extraction_confidence_threshold} - "
+                f"URL: {article.url}"
             )
             return False, "low_confidence"
 
