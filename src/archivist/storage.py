@@ -33,31 +33,50 @@ def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
     Examples:
         "$30M" → 30000000
         "$30 million" → 30000000
+        "$30mn" → 30000000
         "$2.5B" → 2500000000
         "$500K" → 500000
+        "$25-30 million" → 25000000 (takes first number)
         None → None
     """
     if not amount_str:
         return None
 
-    # Remove $ and whitespace
+    # Remove $ and whitespace, lowercase
     clean = amount_str.replace("$", "").replace(",", "").strip().lower()
 
+    # Handle "undisclosed" or similar
+    if "undisclosed" in clean or "unknown" in clean:
+        return None
+
+    # Handle ranges like "25-30 million" - take the first number
+    # Also handles "25 to 30 million"
+    clean = re.sub(r'(\d+)\s*[-–—to]+\s*\d+', r'\1', clean)
+
     # Extract number and multiplier
-    match = re.match(r'([\d.]+)\s*(million|m|billion|b|thousand|k)?', clean)
+    # Added "mn" as alternative for million (common in some sources)
+    match = re.match(r'([\d.]+)\s*(million|mn|mm|m|billion|bn|b|thousand|k)?', clean)
     if not match:
         return None
 
-    num = float(match.group(1))
+    try:
+        num = float(match.group(1))
+    except ValueError:
+        return None
+
     multiplier = match.group(2) or ""
 
-    if multiplier in ("million", "m"):
+    if multiplier in ("million", "m", "mn", "mm"):
         return int(num * 1_000_000)
-    elif multiplier in ("billion", "b"):
+    elif multiplier in ("billion", "b", "bn"):
         return int(num * 1_000_000_000)
     elif multiplier in ("thousand", "k"):
         return int(num * 1_000)
     else:
+        # If no multiplier and number is small, assume it might be in millions
+        # e.g., "raised 30" often means $30M
+        if num < 1000:
+            return int(num)  # Return raw number, don't assume
         return int(num)
 
 
@@ -68,17 +87,96 @@ def normalize_company_name(name: str) -> str:
     Examples:
         "Valerie Health" → "valeriehealth"
         "Valerie" → "valerie"
-        "The AI Company, Inc." → "theaicompany"
+        "The AI Company, Inc." → "aicompany"
+        "OpenAI Technologies" → "openai"
+        "Anthropic, Inc." → "anthropic"
     """
-    # Lowercase
-    name = name.lower()
-    # Remove common suffixes
-    for suffix in [", inc.", ", inc", " inc.", " inc", ", llc", " llc",
-                   ", ltd", " ltd", " corp", ", corp"]:
-        name = name.replace(suffix, "")
-    # Remove non-alphanumeric
+    # Lowercase first
+    name = name.lower().strip()
+
+    # Remove "the" prefix (common in company names)
+    if name.startswith("the "):
+        name = name[4:]
+
+    # Remove common suffixes (order matters - longer first)
+    suffixes = [
+        ", incorporated", " incorporated",
+        ", technologies", " technologies",
+        ", corporation", " corporation",
+        ", limited", " limited",
+        ", company", " company",
+        ", inc.", " inc.",
+        ", inc", " inc",
+        ", llc", " llc",
+        ", ltd.", " ltd.",
+        ", ltd", " ltd",
+        ", corp.", " corp.",
+        ", corp", " corp",
+        ", co.", " co.",
+        ", co", " co",
+        " labs", " lab",
+        " tech",
+        " ai",  # Be careful: only remove if it's a suffix
+    ]
+
+    for suffix in suffixes:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+            break  # Only remove one suffix
+
+    # Remove non-alphanumeric characters
     name = re.sub(r'[^a-z0-9]', '', name)
+
     return name
+
+
+def company_names_match(name1: str, name2: str) -> bool:
+    """
+    Check if two company names likely refer to the same company.
+
+    Uses normalized comparison with strict suffix matching.
+    Errs on the side of NOT matching (false negatives are better than false positives).
+
+    Examples:
+        ("Valerie Health", "Valerie") → True  (health is a known suffix)
+        ("Ramp", "Ramp AI") → True  (ai is a known suffix)
+        ("OpenAI", "OpenAPI") → False  (different names)
+        ("Glean", "Glean AI") → True  (ai is a known suffix)
+        ("Amazon", "Amazonia") → False  (ia is not a known suffix)
+    """
+    norm1 = normalize_company_name(name1)
+    norm2 = normalize_company_name(name2)
+
+    # Exact match after normalization
+    if norm1 == norm2:
+        return True
+
+    # Empty check
+    if not norm1 or not norm2:
+        return False
+
+    # One must be a prefix of the other (for short names)
+    # This handles "Ramp" vs "Ramp AI" → "ramp" vs "rampai"
+    shorter, longer = (norm1, norm2) if len(norm1) <= len(norm2) else (norm2, norm1)
+
+    # Shorter name must be at least 3 chars to be a valid prefix
+    if len(shorter) >= 3 and longer.startswith(shorter):
+        # The suffix MUST be in our explicit list of known company suffixes
+        # This is strict to avoid false positives like Amazon/Amazonia
+        suffix = longer[len(shorter):]
+        # Only allow known company name suffixes (NOT generic word endings)
+        # Be strict - 'data' removed because Meta vs Metadata is a false positive
+        known_company_suffixes = {
+            'ai', 'hq', 'app', 'io', 'labs', 'lab', 'tech',
+            'health', 'cloud', 'ml', 'ops', 'dev',
+            'x', 'go', 'ly', 'fy', 'ify'  # Common startup suffixes
+        }
+        if suffix in known_company_suffixes:
+            return True
+
+    # NO fuzzy matching - too many false positives
+    # If names don't match exactly or with known suffix, they're different companies
+    return False
 
 
 async def get_or_create_company(
@@ -151,54 +249,70 @@ async def find_duplicate_deal(
     Check if a similar deal already exists.
 
     Match criteria:
-    - Company name starts with same normalized prefix (min 6 chars)
+    - Company names match (using smart fuzzy matching)
     - Same round type
-    - Same normalized amount (within 10% tolerance)
-    - Date within 14 days
+    - Same normalized amount (within 10% tolerance) OR one/both amounts missing
+    - Date within 14 days OR deals from last 60 days if no date
 
     Returns existing Deal if found, None otherwise.
+
+    OPTIMIZED:
+    - Single query with JOIN (no N+1 problem)
+    - LIMIT clause to prevent scanning thousands of rows
+    - Date fallback for deals without announced_date
     """
-    # Normalize inputs
-    normalized_name = normalize_company_name(company_name)
+    from sqlalchemy import or_
+
+    # Normalize inputs for comparison
     normalized_amount = normalize_amount(amount)
 
-    # Query recent deals with same round type
-    stmt = select(Deal).join(PortfolioCompany).where(
-        Deal.round_type == round_type
+    # Build query with JOIN to get company name in one query (fixes N+1)
+    stmt = (
+        select(Deal, PortfolioCompany)
+        .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
+        .where(Deal.round_type == round_type)
     )
 
-    # Date filter: within 14 days if we have a date
+    # Date filter with fallback for missing dates
     if announced_date:
+        # Look within 14 days of the announced date
         date_start = announced_date - timedelta(days=14)
         date_end = announced_date + timedelta(days=14)
+        # Include deals with matching date OR deals with NULL date (recent ones)
+        recent_cutoff = date.today() - timedelta(days=60)
         stmt = stmt.where(
-            Deal.announced_date.between(date_start, date_end)
+            or_(
+                Deal.announced_date.between(date_start, date_end),
+                # Also check deals with NULL date created recently
+                (Deal.announced_date.is_(None) & (Deal.created_at >= datetime.combine(recent_cutoff, datetime.min.time())))
+            )
         )
+    else:
+        # No date provided: only look at recent deals (last 60 days)
+        # This prevents matching against ancient deals
+        recent_cutoff = date.today() - timedelta(days=60)
+        stmt = stmt.where(
+            or_(
+                Deal.announced_date >= recent_cutoff,
+                # Also include NULL dates created recently
+                (Deal.announced_date.is_(None) & (Deal.created_at >= datetime.combine(recent_cutoff, datetime.min.time())))
+            )
+        )
+
+    # LIMIT to prevent scanning too many rows
+    stmt = stmt.limit(200)
 
     result = await session.execute(stmt)
-    candidates = result.scalars().all()
+    candidates = result.all()  # Returns list of (Deal, PortfolioCompany) tuples
 
-    for deal in candidates:
-        # Get company name
-        company_stmt = select(PortfolioCompany).where(
-            PortfolioCompany.id == deal.company_id
-        )
-        company_result = await session.execute(company_stmt)
-        company = company_result.scalar_one_or_none()
-        if not company:
-            continue
-
-        existing_normalized = normalize_company_name(company.name)
-
-        # Fuzzy name match: one must be prefix of the other (min 6 chars)
-        if len(normalized_name) >= 6 and len(existing_normalized) >= 6:
-            if not (normalized_name.startswith(existing_normalized[:6]) or
-                    existing_normalized.startswith(normalized_name[:6])):
-                continue
-        elif normalized_name != existing_normalized:
+    for deal, company in candidates:
+        # Use the improved company_names_match function
+        if not company_names_match(company_name, company.name):
             continue
 
         # Amount match: within 10% tolerance
+        # If either amount is missing, we still consider it a potential match
+        # (articles sometimes don't mention the amount)
         if normalized_amount and deal.amount:
             existing_amount = normalize_amount(deal.amount)
             if existing_amount:
@@ -214,6 +328,17 @@ async def find_duplicate_deal(
         return deal
 
     return None
+
+
+async def check_article_url_exists(session: AsyncSession, url: str) -> bool:
+    """
+    Check if an article with this URL already exists in the database.
+
+    Used to prevent duplicate article records when linking to existing deals.
+    """
+    stmt = select(Article).where(Article.url == url).limit(1)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none() is not None
 
 
 async def save_deal(
@@ -259,17 +384,22 @@ async def save_deal(
             f"Skipping duplicate deal: {extraction.startup_name} "
             f"{extraction.round_label.value} - matches deal #{existing_deal.id}"
         )
-        # Still save the article linked to existing deal
-        article = Article(
-            deal_id=existing_deal.id,
-            url=article_url,
-            title=article_title,
-            source_fund_slug=source_fund_slug,
-            extracted_text=article_text,
-            is_processed=True,
-        )
-        session.add(article)
-        await session.flush()
+        # Check if this article URL already exists (prevent duplicate articles)
+        if not await check_article_url_exists(session, article_url):
+            # Link article to existing deal
+            article = Article(
+                deal_id=existing_deal.id,
+                url=article_url,
+                title=article_title,
+                source_fund_slug=source_fund_slug,
+                extracted_text=article_text,
+                is_processed=True,
+            )
+            session.add(article)
+            await session.flush()
+            logger.debug(f"Linked new article to existing deal #{existing_deal.id}")
+        else:
+            logger.debug(f"Article URL already exists, skipping: {article_url}")
         return None  # Signal that this was a duplicate
 
     # Get or create company with website and LinkedIn
