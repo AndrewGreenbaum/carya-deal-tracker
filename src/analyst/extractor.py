@@ -15,14 +15,15 @@ import asyncio
 import hashlib
 import logging
 import instructor
+import httpx
 from anthropic import Anthropic, APITimeoutError, APIError, RateLimitError
 from typing import Optional, List, Set
 
 logger = logging.getLogger(__name__)
 
-# API call configuration
-API_TIMEOUT_SECONDS = 60  # 60 second timeout for Claude calls
-MAX_RETRIES = 2  # Retry up to 2 times on transient errors
+# API call configuration - increased for reliability
+API_TIMEOUT_SECONDS = 90  # 90 second timeout for Claude calls (was 60)
+MAX_RETRIES = 3  # Retry up to 3 times on transient errors (was 2)
 
 # Session-based content hash cache (cleared between runs)
 # Prevents duplicate Claude calls for same article content
@@ -35,7 +36,12 @@ from ..config.funds import FUND_REGISTRY, FundConfig
 
 
 # Initialize Instructor with Anthropic client
-client = instructor.from_anthropic(Anthropic(api_key=settings.anthropic_api_key))
+# FIX: Configure timeout at client level for reliable timeout handling
+_anthropic_client = Anthropic(
+    api_key=settings.anthropic_api_key,
+    timeout=httpx.Timeout(API_TIMEOUT_SECONDS, connect=30.0),  # 90s total, 30s connect
+)
+client = instructor.from_anthropic(_anthropic_client)
 
 # Pre-built cached system message (optimization: created once, reused across calls)
 # Anthropic's prompt caching uses content-based caching, but we save object creation overhead
@@ -384,6 +390,8 @@ async def extract_deal(
     # Use pre-built cached system message (optimization: created once at module load)
     # FIX: Add retry logic and error handling for API calls
     last_error = None
+    article_len = len(article_text)
+
     for attempt in range(MAX_RETRIES + 1):
         try:
             response = client.messages.create(
@@ -393,7 +401,6 @@ async def extract_deal(
                 system=CACHED_SYSTEM_MESSAGE,
                 messages=[{"role": "user", "content": prompt}],
                 response_model=DealExtraction,
-                timeout=API_TIMEOUT_SECONDS,
             )
 
             # Post-process: verify tracked fund identification
@@ -402,16 +409,24 @@ async def extract_deal(
 
         except APITimeoutError as e:
             last_error = e
-            logger.warning(f"Claude API timeout (attempt {attempt + 1}/{MAX_RETRIES + 1}): {source_url}")
+            backoff = 2 ** attempt
+            logger.warning(
+                f"Claude API timeout (attempt {attempt + 1}/{MAX_RETRIES + 1}, "
+                f"article_len={article_len}, backoff={backoff}s): {source_url}"
+            )
             if attempt < MAX_RETRIES:
-                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                await asyncio.sleep(backoff)
             continue
 
         except RateLimitError as e:
             last_error = e
-            logger.warning(f"Claude API rate limit (attempt {attempt + 1}/{MAX_RETRIES + 1}): {e}")
+            backoff = 10 * (attempt + 1)  # 10s, 20s, 30s, 40s
+            logger.warning(
+                f"Claude API rate limit (attempt {attempt + 1}/{MAX_RETRIES + 1}, "
+                f"backoff={backoff}s): {e}"
+            )
             if attempt < MAX_RETRIES:
-                await asyncio.sleep(5 * (attempt + 1))  # Longer backoff for rate limits
+                await asyncio.sleep(backoff)
             continue
 
         except APIError as e:
@@ -423,11 +438,14 @@ async def extract_deal(
             break  # Don't retry client errors (4xx)
 
         except Exception as e:
-            logger.error(f"Unexpected error during extraction: {e}")
+            logger.error(f"Unexpected error during extraction for {source_url}: {type(e).__name__}: {e}")
             return None
 
     # All retries exhausted
-    logger.error(f"Extraction failed after {MAX_RETRIES + 1} attempts for {source_url}: {last_error}")
+    logger.error(
+        f"Extraction failed after {MAX_RETRIES + 1} attempts for {source_url} "
+        f"(article_len={article_len}): {type(last_error).__name__}: {last_error}"
+    )
     return None
 
 
@@ -505,8 +523,9 @@ async def extract_article(
     prompt = build_extraction_prompt(article_text, fund_context, source_url)
 
     # Use pre-built cached system message (optimization: created once at module load)
-    # FIX: Add retry logic and error handling for API calls
     last_error = None
+    article_len = len(article_text)
+
     for attempt in range(MAX_RETRIES + 1):
         try:
             response = client.messages.create(
@@ -516,7 +535,6 @@ async def extract_article(
                 system=CACHED_SYSTEM_MESSAGE,
                 messages=[{"role": "user", "content": prompt}],
                 response_model=ArticleAnalysis,
-                timeout=API_TIMEOUT_SECONDS,
             )
 
             # Post-process each deal
@@ -527,16 +545,24 @@ async def extract_article(
 
         except APITimeoutError as e:
             last_error = e
-            logger.warning(f"Claude API timeout (attempt {attempt + 1}/{MAX_RETRIES + 1}): {source_url}")
+            backoff = 2 ** attempt
+            logger.warning(
+                f"Claude API timeout (attempt {attempt + 1}/{MAX_RETRIES + 1}, "
+                f"article_len={article_len}, backoff={backoff}s): {source_url}"
+            )
             if attempt < MAX_RETRIES:
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(backoff)
             continue
 
         except RateLimitError as e:
             last_error = e
-            logger.warning(f"Claude API rate limit (attempt {attempt + 1}/{MAX_RETRIES + 1}): {e}")
+            backoff = 10 * (attempt + 1)
+            logger.warning(
+                f"Claude API rate limit (attempt {attempt + 1}/{MAX_RETRIES + 1}, "
+                f"backoff={backoff}s): {e}"
+            )
             if attempt < MAX_RETRIES:
-                await asyncio.sleep(5 * (attempt + 1))
+                await asyncio.sleep(backoff)
             continue
 
         except APIError as e:
@@ -548,10 +574,13 @@ async def extract_article(
             break
 
         except Exception as e:
-            logger.error(f"Unexpected error during article extraction: {e}")
+            logger.error(f"Unexpected error during article extraction for {source_url}: {type(e).__name__}: {e}")
             return None
 
-    logger.error(f"Article extraction failed after {MAX_RETRIES + 1} attempts for {source_url}: {last_error}")
+    logger.error(
+        f"Article extraction failed after {MAX_RETRIES + 1} attempts for {source_url} "
+        f"(article_len={article_len}): {type(last_error).__name__}: {last_error}"
+    )
     return None
 
 
