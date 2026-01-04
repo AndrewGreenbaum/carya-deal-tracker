@@ -192,6 +192,15 @@ async def process_article(
                 source_fund_slug=article.fund_slug,
                 article_published_date=article.published_date,
             )
+
+            # Check if this was a duplicate (save_deal returns None for duplicates)
+            if deal is None:
+                logger.info(
+                    f"Duplicate deal detected: {extraction.startup_name} - "
+                    f"{extraction.round_label.value} - article linked to existing deal"
+                )
+                return False, "duplicate"
+
             logger.info(
                 f"Saved deal: {extraction.startup_name} - "
                 f"{extraction.round_label.value} - "
@@ -288,6 +297,9 @@ async def scrape_fund(fund_slug: str) -> ScrapingResult:
                         result.deals_extracted += 1
                         if success:
                             result.deals_saved += 1
+                        elif status == "duplicate":
+                            # Deal-level duplicate (same company/round/amount)
+                            result.articles_skipped_duplicate += 1
                         elif status == "low_confidence":
                             result.articles_skipped_no_funding += 1
                         elif status == "not_new_announcement":

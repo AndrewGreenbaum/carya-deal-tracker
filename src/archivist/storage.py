@@ -3,10 +3,14 @@ Storage pipeline for persisting extracted deals to the database.
 """
 
 import json
-from datetime import datetime, date
+import re
+import logging
+from datetime import datetime, date, timedelta
 from typing import Optional
 from sqlalchemy import select, nullslast
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     Fund,
@@ -20,6 +24,61 @@ from .database import get_session
 from ..analyst.schemas import DealExtraction, LeadStatus, EnterpriseCategory
 from ..config.funds import FUND_REGISTRY
 # NOTE: match_fund_name is imported lazily inside save_deal() to avoid circular import
+
+
+def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
+    """
+    Normalize amount string to integer (in dollars).
+
+    Examples:
+        "$30M" → 30000000
+        "$30 million" → 30000000
+        "$2.5B" → 2500000000
+        "$500K" → 500000
+        None → None
+    """
+    if not amount_str:
+        return None
+
+    # Remove $ and whitespace
+    clean = amount_str.replace("$", "").replace(",", "").strip().lower()
+
+    # Extract number and multiplier
+    match = re.match(r'([\d.]+)\s*(million|m|billion|b|thousand|k)?', clean)
+    if not match:
+        return None
+
+    num = float(match.group(1))
+    multiplier = match.group(2) or ""
+
+    if multiplier in ("million", "m"):
+        return int(num * 1_000_000)
+    elif multiplier in ("billion", "b"):
+        return int(num * 1_000_000_000)
+    elif multiplier in ("thousand", "k"):
+        return int(num * 1_000)
+    else:
+        return int(num)
+
+
+def normalize_company_name(name: str) -> str:
+    """
+    Normalize company name for fuzzy matching.
+
+    Examples:
+        "Valerie Health" → "valeriehealth"
+        "Valerie" → "valerie"
+        "The AI Company, Inc." → "theaicompany"
+    """
+    # Lowercase
+    name = name.lower()
+    # Remove common suffixes
+    for suffix in [", inc.", ", inc", " inc.", " inc", ", llc", " llc",
+                   ", ltd", " ltd", " corp", ", corp"]:
+        name = name.replace(suffix, "")
+    # Remove non-alphanumeric
+    name = re.sub(r'[^a-z0-9]', '', name)
+    return name
 
 
 async def get_or_create_company(
@@ -81,6 +140,82 @@ async def get_or_create_fund(session: AsyncSession, slug: str) -> Optional[Fund]
     return fund
 
 
+async def find_duplicate_deal(
+    session: AsyncSession,
+    company_name: str,
+    round_type: str,
+    amount: Optional[str],
+    announced_date: Optional[date],
+) -> Optional[Deal]:
+    """
+    Check if a similar deal already exists.
+
+    Match criteria:
+    - Company name starts with same normalized prefix (min 6 chars)
+    - Same round type
+    - Same normalized amount (within 10% tolerance)
+    - Date within 14 days
+
+    Returns existing Deal if found, None otherwise.
+    """
+    # Normalize inputs
+    normalized_name = normalize_company_name(company_name)
+    normalized_amount = normalize_amount(amount)
+
+    # Query recent deals with same round type
+    stmt = select(Deal).join(PortfolioCompany).where(
+        Deal.round_type == round_type
+    )
+
+    # Date filter: within 14 days if we have a date
+    if announced_date:
+        date_start = announced_date - timedelta(days=14)
+        date_end = announced_date + timedelta(days=14)
+        stmt = stmt.where(
+            Deal.announced_date.between(date_start, date_end)
+        )
+
+    result = await session.execute(stmt)
+    candidates = result.scalars().all()
+
+    for deal in candidates:
+        # Get company name
+        company_stmt = select(PortfolioCompany).where(
+            PortfolioCompany.id == deal.company_id
+        )
+        company_result = await session.execute(company_stmt)
+        company = company_result.scalar_one_or_none()
+        if not company:
+            continue
+
+        existing_normalized = normalize_company_name(company.name)
+
+        # Fuzzy name match: one must be prefix of the other (min 6 chars)
+        if len(normalized_name) >= 6 and len(existing_normalized) >= 6:
+            if not (normalized_name.startswith(existing_normalized[:6]) or
+                    existing_normalized.startswith(normalized_name[:6])):
+                continue
+        elif normalized_name != existing_normalized:
+            continue
+
+        # Amount match: within 10% tolerance
+        if normalized_amount and deal.amount:
+            existing_amount = normalize_amount(deal.amount)
+            if existing_amount:
+                tolerance = max(normalized_amount, existing_amount) * 0.1
+                if abs(normalized_amount - existing_amount) > tolerance:
+                    continue
+
+        # Found a match!
+        logger.info(
+            f"Found duplicate deal: '{company_name}' matches existing '{company.name}' "
+            f"(deal #{deal.id}, {deal.round_type}, {deal.amount})"
+        )
+        return deal
+
+    return None
+
+
 async def save_deal(
     session: AsyncSession,
     extraction: DealExtraction,
@@ -89,7 +224,7 @@ async def save_deal(
     article_text: Optional[str] = None,
     source_fund_slug: Optional[str] = None,
     article_published_date: Optional[date] = None,
-) -> Deal:
+) -> Optional[Deal]:
     """
     Save an extracted deal to the database.
 
@@ -98,10 +233,44 @@ async def save_deal(
     - Deal record
     - DealInvestor records for all investors
     - Article record linked to the deal
+
+    Returns None if deal is a duplicate (article is still linked to existing deal).
     """
     # Lazy import to avoid circular dependency
     # (storage.py -> harvester -> orchestrator.py -> storage.py)
     from ..harvester.fund_matcher import match_fund_name
+
+    # Determine announced_date for duplicate check
+    announced_date = extraction.round_date
+    if announced_date is None and article_published_date:
+        announced_date = article_published_date
+
+    # Check for duplicate deal BEFORE creating new records
+    existing_deal = await find_duplicate_deal(
+        session,
+        company_name=extraction.startup_name,
+        round_type=extraction.round_label.value,
+        amount=extraction.amount,
+        announced_date=announced_date,
+    )
+
+    if existing_deal:
+        logger.info(
+            f"Skipping duplicate deal: {extraction.startup_name} "
+            f"{extraction.round_label.value} - matches deal #{existing_deal.id}"
+        )
+        # Still save the article linked to existing deal
+        article = Article(
+            deal_id=existing_deal.id,
+            url=article_url,
+            title=article_title,
+            source_fund_slug=source_fund_slug,
+            extracted_text=article_text,
+            is_processed=True,
+        )
+        session.add(article)
+        await session.flush()
+        return None  # Signal that this was a duplicate
 
     # Get or create company with website and LinkedIn
     company = await get_or_create_company(
@@ -125,10 +294,7 @@ async def save_deal(
         ]
         founders_json = json.dumps(founders_data)
 
-    # Determine announced_date with fallback to article published date
-    announced_date = extraction.round_date
-    if announced_date is None and article_published_date:
-        announced_date = article_published_date
+    # announced_date was already determined above for duplicate check
 
     # Create deal with enterprise AI classification
     deal = Deal(
