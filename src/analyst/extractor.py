@@ -17,6 +17,7 @@ import logging
 import instructor
 import httpx
 from anthropic import Anthropic, APITimeoutError, APIError, RateLimitError
+from instructor.core import InstructorRetryException
 from typing import Optional, List, Set
 
 logger = logging.getLogger(__name__)
@@ -440,6 +441,16 @@ async def extract_deal(
                 await asyncio.sleep(2 ** attempt)  # Retry server errors
                 continue
             break  # Don't retry client errors (4xx)
+
+        except InstructorRetryException as e:
+            # Instructor validation failed - log details to diagnose
+            logger.error(
+                f"Instructor validation failed for {source_url}: {e}\n"
+                f"  Last attempt messages: {getattr(e, 'last_completion', 'N/A')}\n"
+                f"  Validation errors: {getattr(e, 'errors', 'N/A')}"
+            )
+            # This is a validation error, not transient - don't retry
+            return None
 
         except Exception as e:
             logger.error(f"Unexpected error during extraction for {source_url}: {type(e).__name__}: {e}")
