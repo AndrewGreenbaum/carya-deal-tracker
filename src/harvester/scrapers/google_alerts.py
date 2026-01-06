@@ -11,10 +11,7 @@ SETUP:
 4. Copy the RSS feed URL
 5. Add to GOOGLE_ALERTS_FEEDS in this file or via environment variable
 
-Example alert queries:
-- "Sequoia Capital" "led by" "funding"
-- "a16z" OR "Andreessen Horowitz" "led" "Series"
-- "Founders Fund" "investment" "led"
+RECOMMENDED: Create all 25 alerts (7 grouped + 18 individual) for maximum coverage.
 """
 
 import asyncio
@@ -25,7 +22,7 @@ import httpx
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 from datetime import datetime, date, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from bs4 import BeautifulSoup
 
 from ..base_scraper import NormalizedArticle
@@ -33,11 +30,15 @@ from ..fund_matcher import match_fund_name
 from ...config.settings import settings
 
 
-# OPTIMIZED: 7 grouped Google Alerts queries (instead of 18 individual)
+# Concurrency limits for parallel fetching
+MAX_CONCURRENT_FEEDS = 5
+MAX_CONCURRENT_ARTICLES = 10
+
+
+# OPTIMIZED: 7 grouped Google Alerts queries
 # Creates comprehensive coverage with fewer alerts to manage
-# Copy these queries to https://google.com/alerts and set delivery to "RSS feed"
-OPTIMAL_ALERT_QUERIES = {
-    # Group A: Top-tier funds (Sequoia, a16z, Benchmark, Founders Fund, Khosla)
+GROUPED_ALERT_QUERIES = {
+    # Group A: Top-tier funds (Sequoia, a16z, Benchmark, Founders Fund)
     "vc_group_a": '("Sequoia Capital" OR "a16z" OR "Andreessen Horowitz" OR "Benchmark" OR "Founders Fund") "led" funding',
 
     # Group B: Major funds (Khosla, Index, Insight, Bessemer, Greylock)
@@ -59,27 +60,35 @@ OPTIMAL_ALERT_QUERIES = {
     "series_rounds": '("Series A" OR "Series B" OR "Series C") "led by" venture million',
 }
 
-# Legacy: Individual fund queries (kept for reference)
-DEFAULT_ALERT_QUERIES = {
-    "sequoia": '"Sequoia Capital" "led" "funding"',
-    "a16z": '"Andreessen Horowitz" OR "a16z" "led" "Series"',
-    "founders_fund": '"Founders Fund" "led" "investment"',
-    "benchmark": '"Benchmark" "led" "venture"',
-    "khosla": '"Khosla Ventures" "led" "funding"',
-    "index": '"Index Ventures" "led" "Series"',
-    "insight": '"Insight Partners" "led" "funding"',
-    "bessemer": '"Bessemer" OR "BVP" "led" "venture"',
-    "greylock": '"Greylock" "led" "funding"',
-    "gv": '"Google Ventures" OR "GV" "led" "investment"',
-    "menlo": '"Menlo Ventures" "led" "funding"',
-    "thrive": '"Thrive Capital" "led" "Series"',
-    "accel": '"Accel" "led" "funding"',
-    "felicis": '"Felicis" "led" "investment"',
-    "general_catalyst": '"General Catalyst" "led" "funding"',
-    "first_round": '"First Round Capital" "led" "seed"',
-    "redpoint": '"Redpoint" "led" "venture"',
-    "usv": '"Union Square Ventures" "led" "funding"',
+# INDIVIDUAL: 18 fund-specific queries for granular coverage
+# These catch edge cases the grouped queries might miss
+INDIVIDUAL_ALERT_QUERIES = {
+    "sequoia": '"Sequoia Capital" "led" funding',
+    "a16z": '("Andreessen Horowitz" OR "a16z") "led" funding',
+    "founders_fund": '"Founders Fund" "led" funding',
+    "benchmark": '("Benchmark Capital" OR "Benchmark Partners") "led" funding',
+    "khosla": '"Khosla Ventures" "led" funding',
+    "index": '"Index Ventures" "led" funding',
+    "insight": '"Insight Partners" "led" funding',
+    "bessemer": '("Bessemer Venture Partners" OR "BVP") "led" funding',
+    "greylock": '("Greylock Partners" OR "Greylock") "led" funding',
+    "gv": '"Google Ventures" "led" funding',
+    "menlo": '"Menlo Ventures" "led" funding',
+    "thrive": '"Thrive Capital" "led" funding',
+    "accel": '("Accel Partners" OR "Accel") "led" funding',
+    "felicis": '"Felicis Ventures" "led" funding',
+    "general_catalyst": '"General Catalyst" "led" funding',
+    "first_round": '"First Round Capital" "led" funding',
+    "redpoint": '"Redpoint Ventures" "led" funding',
+    "usv": '"Union Square Ventures" "led" funding',
 }
+
+# Combined: All 25 queries for maximum coverage
+ALL_ALERT_QUERIES = {**GROUPED_ALERT_QUERIES, **INDIVIDUAL_ALERT_QUERIES}
+
+# Legacy alias for backwards compatibility
+OPTIMAL_ALERT_QUERIES = GROUPED_ALERT_QUERIES
+DEFAULT_ALERT_QUERIES = INDIVIDUAL_ALERT_QUERIES
 
 
 @dataclass
@@ -97,6 +106,7 @@ class GoogleAlertsScraper:
     Scraper for Google Alerts RSS feeds.
 
     Polls configured RSS feeds for new funding news.
+    Optimized for parallel fetching with rate limiting.
     """
 
     def __init__(self, feed_urls: Optional[List[str]] = None):
@@ -108,9 +118,11 @@ class GoogleAlertsScraper:
                       If None, uses feeds from settings or defaults.
         """
         self.feed_urls = feed_urls or self._get_configured_feeds()
+        # Increased connection pool for parallel fetching
         self.client = httpx.AsyncClient(
             timeout=30,
-            headers={"User-Agent": "BudTracker/1.0 (Investment Research)"}
+            headers={"User-Agent": "BudTracker/1.0 (Investment Research)"},
+            limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
         )
 
     def _get_configured_feeds(self) -> List[str]:
@@ -138,8 +150,6 @@ class GoogleAlertsScraper:
 
     async def fetch_feed(self, feed_url: str, max_retries: int = 3) -> List[GoogleAlertItem]:
         """Fetch and parse a single RSS feed with retry logic."""
-        last_error = None
-
         for attempt in range(max_retries):
             try:
                 response = await self.client.get(feed_url)
@@ -150,13 +160,12 @@ class GoogleAlertsScraper:
 
                 items = []
                 for entry in feed.entries:
-                    # FIX: Skip entries without URLs (empty URLs cause downstream issues)
+                    # Skip entries without URLs (empty URLs cause downstream issues)
                     if not entry.get('link'):
                         continue
 
                     # Parse publication date with fallbacks
                     pub_date = None
-                    # Try multiple date fields in order of preference
                     for date_field in ['published_parsed', 'updated_parsed', 'created_parsed']:
                         date_tuple = getattr(entry, date_field, None)
                         if date_tuple and len(date_tuple) >= 6:
@@ -189,9 +198,7 @@ class GoogleAlertsScraper:
                 return items
 
             except httpx.HTTPError as e:
-                last_error = e
                 if attempt < max_retries - 1:
-                    # Exponential backoff: 1s, 2s, 4s
                     delay = 2 ** attempt
                     logger.warning(f"HTTP error fetching feed (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
                     await asyncio.sleep(delay)
@@ -205,20 +212,36 @@ class GoogleAlertsScraper:
         return []
 
     async def fetch_all_feeds(self) -> List[GoogleAlertItem]:
-        """Fetch all configured RSS feeds."""
+        """Fetch all configured RSS feeds in parallel with rate limiting."""
+        if not self.feed_urls:
+            return []
+
         all_items = []
         seen_urls = set()
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_FEEDS)
 
-        for feed_url in self.feed_urls:
-            items = await self.fetch_feed(feed_url)
-            for item in items:
+        async def fetch_with_limit(feed_url: str) -> List[GoogleAlertItem]:
+            async with semaphore:
+                items = await self.fetch_feed(feed_url)
+                # Small delay between feeds for rate limiting
+                await asyncio.sleep(0.3)
+                return items
+
+        # Fetch all feeds in parallel
+        tasks = [fetch_with_limit(url) for url in self.feed_urls]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Process results and deduplicate
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Feed fetch failed: {result}")
+                continue
+            for item in result:
                 if item.url not in seen_urls:
                     seen_urls.add(item.url)
                     all_items.append(item)
 
-            # Small delay between feeds
-            await asyncio.sleep(0.5)
-
+        logger.info(f"Fetched {len(all_items)} unique articles from {len(self.feed_urls)} feeds")
         return all_items
 
     async def fetch_full_article(self, url: str, max_retries: int = 2) -> Optional[str]:
@@ -285,7 +308,7 @@ class GoogleAlertsScraper:
 
     async def scrape_all(self) -> List[NormalizedArticle]:
         """
-        Full scraping pipeline.
+        Full scraping pipeline with parallel article fetching.
 
         Returns list of normalized articles ready for extraction.
         """
@@ -293,20 +316,43 @@ class GoogleAlertsScraper:
             logger.warning("No Google Alerts RSS feeds configured. Set GOOGLE_ALERTS_FEEDS environment variable.")
             return []
 
-        # Fetch all alert items
+        # Fetch all alert items (parallel)
         items = await self.fetch_all_feeds()
 
-        articles = []
+        # Filter items with dates
+        valid_items = []
         for item in items:
-            # FIX: Skip articles without publication dates
-            # (defaulting to today corrupts data and defeats temporal filtering)
             if not item.published:
                 logger.debug(f"Skipping article without date: {item.title}")
                 continue
+            valid_items.append(item)
 
-            # Fetch full article content
-            full_text = await self.fetch_full_article(item.url)
+        if not valid_items:
+            logger.info("No valid articles found with publication dates")
+            return []
 
+        logger.info(f"Processing {len(valid_items)} articles with valid dates")
+
+        # Fetch article content in parallel
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_ARTICLES)
+
+        async def fetch_article_with_limit(item: GoogleAlertItem) -> Tuple[GoogleAlertItem, Optional[str]]:
+            async with semaphore:
+                full_text = await self.fetch_full_article(item.url)
+                await asyncio.sleep(0.2)  # Rate limit
+                return (item, full_text)
+
+        tasks = [fetch_article_with_limit(item) for item in valid_items]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Build normalized articles
+        articles = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Article fetch failed: {result}")
+                continue
+
+            item, full_text = result
             text = full_text or f"{item.title}\n\n{item.description}"
 
             # Match fund from article content using centralized fund matcher
@@ -321,13 +367,10 @@ class GoogleAlertsScraper:
                 author=None,
                 tags=['google_alerts', item.source] if item.source else ['google_alerts'],
                 fund_slug=fund_slug,
-                # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
                 fetched_at=datetime.now(timezone.utc),
             ))
 
-            # Rate limit
-            await asyncio.sleep(0.3)
-
+        logger.info(f"Scraped {len(articles)} articles from Google Alerts")
         return articles
 
 
@@ -336,21 +379,27 @@ def get_alert_setup_instructions() -> str:
     instructions = """
 === GOOGLE ALERTS SETUP INSTRUCTIONS ===
 
-STATUS: NOT CONFIGURED - RSS feed URLs required
-
-SETUP TIME: ~5 minutes (one-time manual setup)
+SETUP TIME: ~15 minutes (one-time manual setup)
 COST: FREE
+RECOMMENDED: Create all 25 alerts for maximum coverage
 
 1. Go to https://google.com/alerts (sign in with Google account)
 
-2. Create these 7 optimized alerts (copy-paste each query):
+2. CREATE GROUPED ALERTS (7 alerts - covers all funds efficiently):
 
 """
-    for name, query in OPTIMAL_ALERT_QUERIES.items():
+    for name, query in GROUPED_ALERT_QUERIES.items():
         instructions += f"   {name}:\n   {query}\n\n"
 
     instructions += """
-3. For EACH alert:
+3. CREATE INDIVIDUAL FUND ALERTS (18 alerts - catches edge cases):
+
+"""
+    for name, query in INDIVIDUAL_ALERT_QUERIES.items():
+        instructions += f"   {name}:\n   {query}\n\n"
+
+    instructions += """
+4. For EACH alert:
    - Click "Show options" (dropdown arrow)
    - Set "How often" to "As-it-happens"
    - Set "Sources" to "News"
@@ -359,21 +408,21 @@ COST: FREE
    - Set "Deliver to" to "RSS feed" (CRITICAL!)
    - Click "Create Alert"
 
-4. Copy RSS feed URLs:
+5. Copy RSS feed URLs:
    - After creating each alert, an RSS icon appears
    - Right-click the RSS icon → Copy link address
-   - Save all 7 URLs
+   - Save all 25 URLs
 
-5. Add to Railway:
-   railway variables set GOOGLE_ALERTS_FEEDS="url1,url2,url3,url4,url5,url6,url7"
+6. Add to Railway:
+   railway variables set GOOGLE_ALERTS_FEEDS="url1,url2,url3,...,url25"
 
    Or set in Railway dashboard → Variables → Add:
-   GOOGLE_ALERTS_FEEDS = url1,url2,url3,url4,url5,url6,url7
+   GOOGLE_ALERTS_FEEDS = url1,url2,url3,...,url25
 
-6. Verify configuration:
+7. Verify configuration:
    curl -X POST https://bud-tracker-backend-production.up.railway.app/scrapers/google-alerts -H "X-API-Key: dev-key"
 
-Expected result after setup: 7 feeds configured, articles found > 0
+Expected result: feeds_configured: 25, articles_found: 50+
 """
     return instructions
 
