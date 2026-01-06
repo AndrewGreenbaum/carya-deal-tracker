@@ -33,8 +33,33 @@ from ..fund_matcher import match_fund_name
 from ...config.settings import settings
 
 
-# Default Google Alerts RSS feeds for tracked funds
-# Users should create their own alerts and add URLs here
+# OPTIMIZED: 7 grouped Google Alerts queries (instead of 18 individual)
+# Creates comprehensive coverage with fewer alerts to manage
+# Copy these queries to https://google.com/alerts and set delivery to "RSS feed"
+OPTIMAL_ALERT_QUERIES = {
+    # Group A: Top-tier funds (Sequoia, a16z, Benchmark, Founders Fund, Khosla)
+    "vc_group_a": '("Sequoia Capital" OR "a16z" OR "Andreessen Horowitz" OR "Benchmark" OR "Founders Fund") "led" funding',
+
+    # Group B: Major funds (Khosla, Index, Insight, Bessemer, Greylock)
+    "vc_group_b": '("Khosla Ventures" OR "Index Ventures" OR "Insight Partners" OR "Bessemer" OR "Greylock") "led" funding',
+
+    # Group C: Growth funds (GV, Menlo, USV, Thrive)
+    "vc_group_c": '("GV" OR "Google Ventures" OR "Menlo Ventures" OR "USV" OR "Union Square Ventures" OR "Thrive Capital") "led" funding',
+
+    # Group D: Early-stage funds (Accel, Felicis, General Catalyst, First Round, Redpoint)
+    "vc_group_d": '("Accel" OR "Felicis" OR "General Catalyst" OR "First Round Capital" OR "Redpoint") "led" funding',
+
+    # Enterprise AI funding (core focus)
+    "enterprise_ai": '("Enterprise AI" OR "B2B AI" OR "LLMOps" OR "AI infrastructure") funding raised',
+
+    # Stealth startup announcements (early signals)
+    "stealth_mode": '("emerges from stealth" OR "exits stealth" OR "out of stealth") startup funding',
+
+    # Series rounds with lead language
+    "series_rounds": '("Series A" OR "Series B" OR "Series C") "led by" venture million',
+}
+
+# Legacy: Individual fund queries (kept for reference)
 DEFAULT_ALERT_QUERIES = {
     "sequoia": '"Sequoia Capital" "led" "funding"',
     "a16z": '"Andreessen Horowitz" OR "a16z" "led" "Series"',
@@ -274,25 +299,44 @@ def get_alert_setup_instructions() -> str:
     instructions = """
 === GOOGLE ALERTS SETUP INSTRUCTIONS ===
 
-1. Go to https://google.com/alerts
+STATUS: NOT CONFIGURED - RSS feed URLs required
 
-2. Create alerts for each tracked fund. Suggested queries:
+SETUP TIME: ~5 minutes (one-time manual setup)
+COST: FREE
+
+1. Go to https://google.com/alerts (sign in with Google account)
+
+2. Create these 7 optimized alerts (copy-paste each query):
+
 """
-    for fund, query in DEFAULT_ALERT_QUERIES.items():
-        instructions += f"   - {fund}: {query}\n"
+    for name, query in OPTIMAL_ALERT_QUERIES.items():
+        instructions += f"   {name}:\n   {query}\n\n"
 
     instructions += """
-3. For each alert:
-   - Click "Show options"
-   - Set "Deliver to" to "RSS feed"
+3. For EACH alert:
+   - Click "Show options" (dropdown arrow)
+   - Set "How often" to "As-it-happens"
+   - Set "Sources" to "News"
+   - Set "Language" to "English"
+   - Set "Region" to "United States"
+   - Set "Deliver to" to "RSS feed" (CRITICAL!)
    - Click "Create Alert"
 
-4. Copy the RSS feed URLs (right-click the RSS icon)
+4. Copy RSS feed URLs:
+   - After creating each alert, an RSS icon appears
+   - Right-click the RSS icon → Copy link address
+   - Save all 7 URLs
 
-5. Add to Railway environment variable:
-   GOOGLE_ALERTS_FEEDS=url1,url2,url3,...
+5. Add to Railway:
+   railway variables set GOOGLE_ALERTS_FEEDS="url1,url2,url3,url4,url5,url6,url7"
 
-Or update src/harvester/scrapers/google_alerts.py with your feed URLs.
+   Or set in Railway dashboard → Variables → Add:
+   GOOGLE_ALERTS_FEEDS = url1,url2,url3,url4,url5,url6,url7
+
+6. Verify configuration:
+   curl -X POST https://bud-tracker-backend-production.up.railway.app/scrapers/google-alerts -H "X-API-Key: dev-key"
+
+Expected result after setup: 7 feeds configured, articles found > 0
 """
     return instructions
 
