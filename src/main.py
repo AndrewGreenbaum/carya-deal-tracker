@@ -1132,6 +1132,10 @@ async def run_firecrawl_scraper_endpoint(
 class GoogleAlertsResponse(BaseModel):
     feeds_configured: int
     articles_found: int
+    articles_skipped_duplicate: int = 0
+    deals_extracted: int = 0
+    deals_saved: int = 0
+    errors: int = 0
     setup_instructions: Optional[str] = None
 
 
@@ -1142,10 +1146,12 @@ async def run_google_alerts_scraper(
     """
     Run Google Alerts RSS scraper.
 
-    Fetches articles from configured Google Alerts RSS feeds.
+    Fetches articles from configured Google Alerts RSS feeds and processes
+    them through the extraction pipeline to save deals.
     Set GOOGLE_ALERTS_FEEDS environment variable with comma-separated feed URLs.
     """
     from .harvester.scrapers.google_alerts import GoogleAlertsScraper, get_alert_setup_instructions
+    from .scheduler.jobs import process_external_articles
 
     feed_urls = []
     if settings.google_alerts_feeds:
@@ -1162,9 +1168,16 @@ async def run_google_alerts_scraper(
         async with GoogleAlertsScraper(feed_urls) as scraper:
             articles = await scraper.scrape_all()
 
+        # Process articles through extraction pipeline (CRITICAL FIX)
+        stats = await process_external_articles(articles, "google_alerts")
+
         return GoogleAlertsResponse(
             feeds_configured=len(feed_urls),
             articles_found=len(articles),
+            articles_skipped_duplicate=stats.get("articles_skipped_duplicate", 0),
+            deals_extracted=stats.get("deals_extracted", 0),
+            deals_saved=stats.get("deals_saved", 0),
+            errors=stats.get("errors", 0),
         )
 
     except Exception as e:

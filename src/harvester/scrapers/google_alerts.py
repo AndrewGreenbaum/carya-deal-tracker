@@ -136,60 +136,73 @@ class GoogleAlertsScraper:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.client.aclose()
 
-    async def fetch_feed(self, feed_url: str) -> List[GoogleAlertItem]:
-        """Fetch and parse a single RSS feed."""
-        try:
-            response = await self.client.get(feed_url)
-            response.raise_for_status()
+    async def fetch_feed(self, feed_url: str, max_retries: int = 3) -> List[GoogleAlertItem]:
+        """Fetch and parse a single RSS feed with retry logic."""
+        last_error = None
 
-            # Parse RSS feed
-            feed = feedparser.parse(response.text)
+        for attempt in range(max_retries):
+            try:
+                response = await self.client.get(feed_url)
+                response.raise_for_status()
 
-            items = []
-            for entry in feed.entries:
-                # FIX: Skip entries without URLs (empty URLs cause downstream issues)
-                if not entry.get('link'):
-                    continue
+                # Parse RSS feed
+                feed = feedparser.parse(response.text)
 
-                # Parse publication date
-                pub_date = None
-                if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    # FIX: Check tuple length before unpacking (crash prevention)
-                    if len(entry.published_parsed) >= 6:
-                        pub_date = datetime(*entry.published_parsed[:6])
+                items = []
+                for entry in feed.entries:
+                    # FIX: Skip entries without URLs (empty URLs cause downstream issues)
+                    if not entry.get('link'):
+                        continue
 
-                # Clean up description (remove HTML)
-                description = entry.get('summary', '')
-                if description:
-                    soup = BeautifulSoup(description, 'lxml')
-                    description = soup.get_text(strip=True)
+                    # Parse publication date with fallbacks
+                    pub_date = None
+                    # Try multiple date fields in order of preference
+                    for date_field in ['published_parsed', 'updated_parsed', 'created_parsed']:
+                        date_tuple = getattr(entry, date_field, None)
+                        if date_tuple and len(date_tuple) >= 6:
+                            pub_date = datetime(*date_tuple[:6])
+                            break
 
-                # Extract source from title if present
-                title = entry.get('title', '')
-                source = ''
-                if ' - ' in title:
-                    parts = title.rsplit(' - ', 1)
-                    if len(parts) == 2:
-                        title = parts[0]
-                        source = parts[1]
+                    # Clean up description (remove HTML)
+                    description = entry.get('summary', '')
+                    if description:
+                        soup = BeautifulSoup(description, 'lxml')
+                        description = soup.get_text(strip=True)
 
-                items.append(GoogleAlertItem(
-                    title=title,
-                    url=entry.get('link', ''),
-                    description=description[:500],  # Truncate long descriptions
-                    published=pub_date,
-                    source=source,
-                ))
+                    # Extract source from title if present
+                    title = entry.get('title', '')
+                    source = ''
+                    if ' - ' in title:
+                        parts = title.rsplit(' - ', 1)
+                        if len(parts) == 2:
+                            title = parts[0]
+                            source = parts[1]
 
-            return items
+                    items.append(GoogleAlertItem(
+                        title=title,
+                        url=entry.get('link', ''),
+                        description=description[:500],  # Truncate long descriptions
+                        published=pub_date,
+                        source=source,
+                    ))
 
-        except httpx.HTTPError as e:
-            # FIX: Specific exception + logger (crash prevention)
-            logger.error(f"HTTP error fetching Google Alert feed: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error fetching Google Alert feed: {e}", exc_info=True)
-            return []
+                return items
+
+            except httpx.HTTPError as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 1s, 2s, 4s
+                    delay = 2 ** attempt
+                    logger.warning(f"HTTP error fetching feed (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"HTTP error fetching Google Alert feed after {max_retries} attempts: {e}")
+
+            except Exception as e:
+                logger.error(f"Unexpected error fetching Google Alert feed: {e}", exc_info=True)
+                return []
+
+        return []
 
     async def fetch_all_feeds(self) -> List[GoogleAlertItem]:
         """Fetch all configured RSS feeds."""
@@ -208,43 +221,67 @@ class GoogleAlertsScraper:
 
         return all_items
 
-    async def fetch_full_article(self, url: str) -> Optional[str]:
-        """Fetch full article content from URL."""
-        try:
-            response = await self.client.get(
-                url,
-                follow_redirects=True,
-                timeout=15,
-            )
-            response.raise_for_status()
+    async def fetch_full_article(self, url: str, max_retries: int = 2) -> Optional[str]:
+        """Fetch full article content from URL with retry logic."""
+        # Extended list of article content selectors (ordered by specificity)
+        ARTICLE_SELECTORS = [
+            # News site specific
+            '[data-testid="article-body"]',  # Modern news sites
+            '.article__body', '.article-content', '.article-text',
+            '.story-body', '.story-content', '.story__body',
+            '.entry-content', '.post-body', '.post-content',
+            # General purpose
+            'article', '[role="article"]',
+            '.article', '.post', '.entry',
+            'main article', 'main .content',
+            # Fallbacks
+            'main', '.content', '#content',
+            '.body-content', '.page-content',
+        ]
 
-            soup = BeautifulSoup(response.text, 'lxml')
+        for attempt in range(max_retries):
+            try:
+                response = await self.client.get(
+                    url,
+                    follow_redirects=True,
+                    timeout=15,
+                )
+                response.raise_for_status()
 
-            # Remove unwanted elements
-            for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'ads']):
-                tag.decompose()
+                soup = BeautifulSoup(response.text, 'lxml')
 
-            # Try common article selectors
-            for selector in ['article', '.article-body', '.post-content', 'main', '.content']:
-                content = soup.select_one(selector)
-                if content:
-                    text = content.get_text(separator='\n', strip=True)
-                    if len(text) > 200:
-                        return text[:5000]
+                # Remove unwanted elements
+                for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'ads', 'noscript', 'iframe']):
+                    tag.decompose()
 
-            # Fallback to body
-            if soup.body:
-                return soup.body.get_text(separator='\n', strip=True)[:5000]
+                # Try extended list of article selectors
+                for selector in ARTICLE_SELECTORS:
+                    content = soup.select_one(selector)
+                    if content:
+                        text = content.get_text(separator='\n', strip=True)
+                        if len(text) > 200:
+                            return text[:5000]
 
-            return None
+                # Fallback to body
+                if soup.body:
+                    return soup.body.get_text(separator='\n', strip=True)[:5000]
 
-        except httpx.HTTPError as e:
-            # FIX: Specific exception + logger (crash prevention)
-            logger.error(f"HTTP error fetching article {url}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error fetching article {url}: {e}", exc_info=True)
-            return None
+                return None
+
+            except httpx.HTTPError as e:
+                if attempt < max_retries - 1:
+                    delay = 2 ** attempt
+                    logger.warning(f"HTTP error fetching article (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {url}")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"HTTP error fetching article after {max_retries} attempts {url}: {e}")
+                    return None
+
+            except Exception as e:
+                logger.error(f"Unexpected error fetching article {url}: {e}", exc_info=True)
+                return None
+
+        return None
 
     async def scrape_all(self) -> List[NormalizedArticle]:
         """
