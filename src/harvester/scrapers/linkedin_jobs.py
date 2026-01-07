@@ -15,20 +15,16 @@ Uses Brave Search API to find stealth startup signals.
 
 import asyncio
 import logging
-import httpx
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
 from ..base_scraper import NormalizedArticle
 from ..fund_matcher import match_fund_name
+from ...common.brave_client import get_brave_client
 from ...config.settings import settings
 
 logger = logging.getLogger(__name__)
-
-
-# Brave Search API (reuse existing key)
-BRAVE_WEB_API = "https://api.search.brave.com/res/v1/web/search"
 
 # Stealth job search queries - broader search without site: restriction
 # Brave Search doesn't index LinkedIn Jobs well, so we search for stealth company news instead
@@ -80,7 +76,7 @@ class LinkedInJobsScraper:
     """
     Scraper for LinkedIn job posts indicating stealth startups.
 
-    Uses Brave Search API to find LinkedIn job posts that mention:
+    Uses shared BraveClient to find LinkedIn job posts that mention:
     - Stealth startup/mode
     - VC backing (tracked funds)
     - Recent funding
@@ -89,131 +85,58 @@ class LinkedInJobsScraper:
     """
 
     def __init__(self):
-        self.api_key = settings.brave_search_key
-        self.timeout = settings.brave_search_timeout
-        self.max_retries = settings.brave_search_max_retries
         self.rate_limit_delay = settings.brave_search_rate_limit_delay
-        self.backoff_base = settings.brave_search_backoff_base
-        self.client = httpx.AsyncClient(
-            timeout=self.timeout,
-            headers={
-                "X-Subscription-Token": self.api_key,
-                "Accept": "application/json",
-            }
-        )
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.client.aclose()
+        pass  # No client to close - using shared BraveClient
 
     async def search_brave(
         self,
         query: str,
         count: int = 20,
     ) -> List[Dict[str, Any]]:
-        """Execute web search via Brave API with retry logic."""
-        if not self.api_key:
+        """Execute web search via shared BraveClient."""
+        client = get_brave_client()
+
+        if not client.validate_api_key():
             logger.warning("BRAVE_SEARCH_KEY not configured for stealth detection")
             return []
 
-        params = {
-            "q": query,
-            "count": count,
-            "freshness": "pm",  # Past month
-            "safesearch": "off",
-        }
+        # Use shared client's search_web method (handles retry, rate limiting, caching)
+        data = await client.search_web(
+            query=query,
+            count=count,
+            freshness="pm",  # Past month
+            use_cache=True,  # Cache stealth queries (they're stable)
+        )
 
-        last_error = None
-        for attempt in range(self.max_retries):
-            try:
-                response = await self.client.get(BRAVE_WEB_API, params=params)
+        if data is None:
+            return []
 
-                # Handle rate limiting (429)
-                if response.status_code == 429:
-                    # FIX: Retry-After can be int OR HTTP-date string
-                    retry_after_header = response.headers.get("Retry-After", "60")
-                    try:
-                        retry_after = int(retry_after_header)
-                    except ValueError:
-                        # HTTP-date format - default to 60 seconds
-                        logger.warning(f"Non-numeric Retry-After header: {retry_after_header}")
-                        retry_after = 60
-                    logger.warning(
-                        f"Stealth detection rate limited. Waiting {retry_after}s "
-                        f"(attempt {attempt + 1}/{self.max_retries})"
-                    )
-                    await asyncio.sleep(retry_after)
-                    continue
+        # Validate API response - check for errors
+        if "error" in data:
+            error_msg = data.get("error", {})
+            if isinstance(error_msg, dict):
+                logger.error(f"Stealth detection API error: {error_msg.get('message', 'Unknown')}")
+            else:
+                logger.error(f"Stealth detection API error: {error_msg}")
+            return []
 
-                # Handle server errors with backoff
-                if response.status_code >= 500:
-                    backoff = self.backoff_base ** attempt
-                    logger.warning(
-                        f"Stealth detection server error {response.status_code}. "
-                        f"Retrying in {backoff:.1f}s (attempt {attempt + 1}/{self.max_retries})"
-                    )
-                    await asyncio.sleep(backoff)
-                    continue
+        # Extract results from web search response
+        web_data = data.get("web", {})
+        if not isinstance(web_data, dict):
+            logger.warning(f"Stealth detection unexpected 'web' type: {type(web_data)}")
+            return []
 
-                response.raise_for_status()
+        results = web_data.get("results", [])
+        if not isinstance(results, list):
+            logger.warning(f"Stealth detection 'results' is not a list: {type(results)}")
+            return []
 
-                # FIX: Handle JSONDecodeError from malformed response
-                try:
-                    data = response.json()
-                except ValueError as e:
-                    logger.warning(f"Stealth detection JSON decode error: {e}")
-                    return []
-
-                # Validate API response - check for errors
-                if "error" in data:
-                    error_msg = data.get("error", {})
-                    if isinstance(error_msg, dict):
-                        logger.error(f"Stealth detection API error: {error_msg.get('message', 'Unknown')}")
-                    else:
-                        logger.error(f"Stealth detection API error: {error_msg}")
-                    return []
-
-                # Extract results from web search response
-                web_data = data.get("web", {})
-                if not isinstance(web_data, dict):
-                    logger.warning(f"Stealth detection unexpected 'web' type: {type(web_data)}")
-                    return []
-
-                results = web_data.get("results", [])
-                if not isinstance(results, list):
-                    logger.warning(f"Stealth detection 'results' is not a list: {type(results)}")
-                    return []
-
-                return results
-
-            except httpx.TimeoutException:
-                backoff = self.backoff_base ** attempt
-                logger.warning(
-                    f"Stealth detection timeout. Retrying in {backoff:.1f}s "
-                    f"(attempt {attempt + 1}/{self.max_retries})"
-                )
-                last_error = "timeout"
-                await asyncio.sleep(backoff)
-
-            except httpx.HTTPStatusError as e:
-                if 400 <= e.response.status_code < 500:
-                    logger.error(f"Stealth detection client error: {e.response.status_code}")
-                    return []
-                last_error = str(e)
-
-            except httpx.RequestError as e:
-                backoff = self.backoff_base ** attempt
-                logger.warning(
-                    f"Stealth detection network error: {e}. Retrying in {backoff:.1f}s "
-                    f"(attempt {attempt + 1}/{self.max_retries})"
-                )
-                last_error = str(e)
-                await asyncio.sleep(backoff)
-
-        logger.error(f"Stealth detection failed after {self.max_retries} attempts: {last_error}")
-        return []
+        return results
 
     def _parse_relative_date(self, age_str: str) -> Optional[date]:
         """Parse relative date string like '2 days ago' from Brave Search."""
@@ -338,7 +261,7 @@ class LinkedInJobsScraper:
             author="LinkedIn Jobs",
             tags=tags,
             fund_slug=job.matched_fund or "",
-            fetched_at=datetime.utcnow(),
+            fetched_at=datetime.now(timezone.utc),
         )
 
     async def scrape_all(self) -> List[NormalizedArticle]:
@@ -351,7 +274,8 @@ class LinkedInJobsScraper:
         Returns:
             List of NormalizedArticle objects for stealth signals.
         """
-        if not self.api_key:
+        client = get_brave_client()
+        if not client.validate_api_key():
             logger.warning("BRAVE_SEARCH_KEY not configured - skipping LinkedIn Jobs")
             return []
 

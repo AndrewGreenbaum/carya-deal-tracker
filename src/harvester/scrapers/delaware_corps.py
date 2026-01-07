@@ -30,12 +30,12 @@ from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
 from ..base_scraper import NormalizedArticle
+from ...common.brave_client import get_brave_client
 from ...config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Rate limiting and retry configuration
-BRAVE_REQUEST_DELAY = 0.3  # 300ms between Brave Search requests
+# Rate limiting and retry configuration for OpenCorporates (not Brave - uses shared client)
 OPENCORP_REQUEST_DELAY = 0.5  # 500ms between OpenCorporates requests
 MAX_RETRIES = 3  # Maximum retry attempts for transient failures
 RETRY_BACKOFF = 2.0  # Exponential backoff multiplier
@@ -138,94 +138,35 @@ class DelawareCorpsScraper:
         max_results: int = 50,
     ) -> List[DelawareEntity]:
         """
-        Search for recent Delaware incorporations via Brave Search.
+        Search for recent Delaware incorporations via shared BraveClient.
         """
         entities = []
 
-        if not settings.brave_search_key:
+        brave_client = get_brave_client()
+        if not brave_client.validate_api_key():
             logger.warning("BRAVE_SEARCH_KEY not configured for Delaware search")
             return entities
 
-        # FIX: Use async with to prevent HTTP client leak
-        async with httpx.AsyncClient(
-            timeout=30,
-            headers={
-                "X-Subscription-Token": settings.brave_search_key,
-                "Accept": "application/json",
-            }
-        ) as brave_client:
-            for query in DELAWARE_QUERIES[:3]:  # Limit queries
-                # Retry loop for transient failures
-                for attempt in range(MAX_RETRIES):
-                    try:
-                        response = await brave_client.get(
-                            "https://api.search.brave.com/res/v1/web/search",
-                            params={
-                                "q": query,
-                                "count": 20,
-                                "freshness": "pw",  # Past week
-                            }
-                        )
+        for query in DELAWARE_QUERIES[:3]:  # Limit queries
+            # Use shared BraveClient (handles retry, rate limiting, caching)
+            data = await brave_client.search_web(
+                query=query,
+                count=20,
+                freshness="pw",  # Past week
+                use_cache=True,  # Cache Delaware queries
+            )
 
-                        if response.status_code == 200:
-                            try:
-                                data = response.json()
-                            except ValueError as e:
-                                logger.warning(f"Delaware Brave JSON parse error: {e}")
-                                break  # No retry for parse errors
+            if data is None:
+                continue
 
-                            # FIX: Handle null results (key exists but value is None)
-                            results = data.get("web", {}).get("results") or []
-                            for result in results:
-                                entity = self._parse_search_result(result)
-                                if entity:
-                                    entities.append(entity)
-                            break  # Success - exit retry loop
+            # Handle null results (key exists but value is None)
+            results = data.get("web", {}).get("results") or []
+            for result in results:
+                entity = self._parse_search_result(result)
+                if entity:
+                    entities.append(entity)
 
-                        elif response.status_code == 429:
-                            # Rate limited - check Retry-After header
-                            # FIX: Retry-After can be int OR HTTP-date string
-                            retry_after_header = response.headers.get("Retry-After", "60")
-                            try:
-                                retry_after = int(retry_after_header)
-                            except ValueError:
-                                logger.warning(f"Non-numeric Retry-After header: {retry_after_header}")
-                                retry_after = 60
-                            logger.warning(f"Brave rate limited (429), waiting {retry_after}s")
-                            await asyncio.sleep(retry_after)
-                            # Continue to next attempt
-
-                        elif response.status_code in (401, 403):
-                            logger.error(f"Brave auth error ({response.status_code}): check API key")
-                            return entities  # Auth errors won't recover
-
-                        elif response.status_code >= 500:
-                            # Server error - retry with backoff (only if not last attempt)
-                            if attempt < MAX_RETRIES - 1:
-                                wait_time = BRAVE_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
-                                logger.warning(f"Brave server error ({response.status_code}), retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
-                                await asyncio.sleep(wait_time)
-                            else:
-                                logger.warning(f"Brave server error ({response.status_code}), max retries exhausted")
-
-                        else:
-                            logger.warning(f"Brave unexpected status {response.status_code}")
-                            break  # Unknown error - don't retry
-
-                    except httpx.TimeoutException:
-                        # FIX: Only sleep if we'll actually retry
-                        if attempt < MAX_RETRIES - 1:
-                            wait_time = BRAVE_REQUEST_DELAY * (RETRY_BACKOFF ** attempt)
-                            logger.warning(f"Delaware Brave timeout, retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s")
-                            await asyncio.sleep(wait_time)
-                        else:
-                            logger.warning(f"Delaware Brave timeout, max retries exhausted")
-
-                    except httpx.ConnectError as e:
-                        logger.error(f"Delaware Brave connection error: {e}")
-                        break  # Network issues unlikely to resolve quickly
-
-                await asyncio.sleep(BRAVE_REQUEST_DELAY)  # Rate limit between queries
+            await brave_client.delay()  # Rate limit between queries
 
         # Deduplicate by name
         seen_names = set()

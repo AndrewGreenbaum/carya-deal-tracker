@@ -331,13 +331,16 @@ class BraveClient:
             queries: List of (query, search_type, count, freshness, use_cache) tuples
                      search_type: "news" or "web"
             max_concurrent: Maximum concurrent requests (default 3)
-            delay_between: Delay between requests in seconds (default 0.3)
+            delay_between: Minimum delay between request STARTS (default 0.3)
 
         Returns:
             Dict mapping query string to result (or None on failure)
         """
         semaphore = asyncio.Semaphore(max_concurrent)
         results: Dict[str, Optional[Dict[str, Any]]] = {}
+        # Track last request time for proper rate limiting
+        last_request_time = [0.0]  # Use list to allow mutation in nested function
+        rate_lock = asyncio.Lock()
 
         async def search_with_limit(
             query: str,
@@ -347,12 +350,24 @@ class BraveClient:
             use_cache: bool,
         ) -> Tuple[str, Optional[Dict[str, Any]]]:
             async with semaphore:
-                if search_type == "news":
-                    result = await self.search_news(query, count, freshness, use_cache)
-                else:
-                    result = await self.search_web(query, count, freshness or None, use_cache)
-                await asyncio.sleep(delay_between)
-                return (query, result)
+                # Enforce minimum delay between request STARTS (not completions)
+                async with rate_lock:
+                    now = time()
+                    elapsed = now - last_request_time[0]
+                    if elapsed < delay_between:
+                        await asyncio.sleep(delay_between - elapsed)
+                    last_request_time[0] = time()
+
+                try:
+                    if search_type == "news":
+                        result = await self.search_news(query, count, freshness, use_cache)
+                    else:
+                        result = await self.search_web(query, count, freshness or None, use_cache)
+                    return (query, result)
+                except Exception as e:
+                    # Return exception with query context for better error logging
+                    logger.error(f"Batch query error for '{query[:50]}...': {e}")
+                    return (query, None)
 
         tasks = [
             search_with_limit(q, t, c, f, cache)
@@ -363,7 +378,8 @@ class BraveClient:
 
         for res in task_results:
             if isinstance(res, Exception):
-                logger.error(f"Batch query error: {res}")
+                # This shouldn't happen now since we catch in search_with_limit
+                logger.error(f"Unexpected batch error: {res}")
             else:
                 query, result = res
                 results[query] = result

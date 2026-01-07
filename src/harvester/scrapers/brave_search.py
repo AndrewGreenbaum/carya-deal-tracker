@@ -48,14 +48,15 @@ FUND_SEARCH_NAMES = {
 }
 
 # Exclusion terms to filter noise - enhanced for generic fund names
+# NOTE: Be careful not to exclude common startup terms (e.g., don't exclude "accelerate" for Accel)
 EXCLUSION_TERMS = {
     "gv": ["-NYSE", "-stock", "-ticker", "-dividend", "-\"Visionary Holdings\""],
     "thrive": ["-\"Thrive Global\"", "-\"Thrive IT\"", "-\"Thrive Market\"", "-wellness"],
     "sequoia": ["-\"Sequoia National\"", "-HongShan", "-\"Peak XV\"", "-\"Sequoia India\"", "-\"Sequoia China\""],
-    "benchmark": ["-benchmark.com", "-benchmarking", "-\"Benchmark International\"", "-\"Benchmark Electronics\""],
-    "accel": ["-accelerate", "-acceleration", "-accelerator", "-\"Accel Entertainment\""],
+    "benchmark": ["-benchmark.com", "-\"Benchmark International\"", "-\"Benchmark Electronics\""],  # Removed -benchmarking (too broad)
+    "accel": ["-\"Accel Entertainment\""],  # Removed -accelerate/-acceleration/-accelerator (common startup terms)
     "index": ["-\"index fund\"", "-\"stock index\"", "-\"S&P index\"", "-\"market index\""],
-    "insight": ["-\"market insight\"", "-\"business insight\"", "-\"consumer insight\"", "-insights"],
+    "insight": ["-\"market insight\"", "-\"business insight\"", "-\"consumer insight\""],  # Removed -insights (too broad)
     "menlo": ["-\"Menlo Park\"", "-\"Menlo College\"", "-\"Menlo School\""],
     "redpoint": ["-\"Redpoint Bio\"", "-\"Redpoint Positioning\""],
     "first_round": ["-\"first round pick\"", "-\"first round draft\"", "-NFL", "-NBA"],
@@ -230,6 +231,9 @@ class BraveSearchScraper:
 
     def __init__(self):
         self.rate_limit_delay = settings.brave_search_rate_limit_delay
+        # Validate API key at init time for early failure
+        if not settings.brave_search_key:
+            logger.warning("BRAVE_SEARCH_KEY not configured - BraveSearchScraper will return empty results")
 
     async def __aenter__(self):
         return self
@@ -394,7 +398,7 @@ class BraveSearchScraper:
 
         # Execute in parallel
         client = get_brave_client()
-        batch_results = await client.search_batch(queries, max_concurrent=3, delay_between=0.3)
+        batch_results = await client.search_batch(queries, max_concurrent=3, delay_between=self.rate_limit_delay)
 
         # Process results
         results: Dict[str, List[BraveSearchResult]] = {}
@@ -430,7 +434,7 @@ class BraveSearchScraper:
 
         # Execute in parallel with caching
         client = get_brave_client()
-        batch_results = await client.search_batch(queries, max_concurrent=3, delay_between=0.3)
+        batch_results = await client.search_batch(queries, max_concurrent=3, delay_between=self.rate_limit_delay)
 
         # Process results, deduplicating by URL per fund
         results: Dict[str, List[BraveSearchResult]] = {}
@@ -463,7 +467,7 @@ class BraveSearchScraper:
             query_to_region[query] = region
 
         client = get_brave_client()
-        batch_results = await client.search_batch(queries, max_concurrent=3, delay_between=0.3)
+        batch_results = await client.search_batch(queries, max_concurrent=3, delay_between=self.rate_limit_delay)
 
         results: Dict[str, List[BraveSearchResult]] = {}
         for query, data in batch_results.items():
@@ -484,7 +488,7 @@ class BraveSearchScraper:
         ]
 
         client = get_brave_client()
-        batch_results = await client.search_batch(queries, max_concurrent=3, delay_between=0.3)
+        batch_results = await client.search_batch(queries, max_concurrent=3, delay_between=self.rate_limit_delay)
 
         all_results: List[BraveSearchResult] = []
         seen_urls: set = set()
