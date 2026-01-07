@@ -13,7 +13,8 @@ from typing import Optional
 FUND_NAME_VARIANTS: dict[str, list[str]] = {
     "a16z": [
         "andreessen horowitz",
-        "a16z crypto",
+        # NOTE: "a16z crypto" removed - it's a SEPARATE fund with different thesis
+        # Crypto deals should NOT count toward main a16z Enterprise AI portfolio
         "a16z bio",
         "a16z games",
         "a16z",
@@ -89,6 +90,11 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
 # NOTE: Be careful not to be too aggressive - these should only exclude
 # clear false positives, not valid mentions that happen to contain similar words
 NEGATIVE_KEYWORDS: dict[str, list[str]] = {
+    "a16z": [
+        "a16z crypto",           # Separate fund - different thesis (crypto-focused)
+        "crypto fund",           # Crypto context
+        "a16z cryptocurrency",   # Crypto variant
+    ],
     "gv": [
         "nyse:gv",
         "nyse: gv",

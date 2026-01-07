@@ -4,10 +4,13 @@ Pydantic schemas for deal extraction with Instructor.
 These schemas enforce structured JSON output from the LLM.
 """
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
 from typing import List, Optional
 from enum import Enum
 from datetime import date
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class RoundType(str, Enum):
@@ -132,6 +135,15 @@ class DealExtraction(BaseModel):
         default=None,
         description="Date of the announcement"
     )
+
+    @field_validator('round_date')
+    @classmethod
+    def validate_not_future_date(cls, v: Optional[date]) -> Optional[date]:
+        """Reject future dates - likely an LLM extraction error (e.g., 2025 instead of 2024)."""
+        if v is not None and v > date.today():
+            logger.warning(f"Rejecting future date {v} - likely extraction error")
+            return None
+        return v
 
     # Investors
     lead_investors: List[InvestorMention] = Field(

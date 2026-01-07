@@ -85,8 +85,13 @@ EXCLUDE (set is_enterprise_ai=False, enterprise_category=NOT_ENTERPRISE):
 - B2C wearables, fitness AI
 - General foundational model rounds (OpenAI, Anthropic main fundraises)
 - Social media AI, dating AI, personal productivity apps
+- Crypto, blockchain, Web3, DeFi, NFT protocols (NOT Enterprise AI)
+- Token/coin launches, crypto exchanges, DAOs
+- Protocol infrastructure for blockchain (e.g., Story Protocol, Layer 2s, L2s)
+- Companies with "Protocol", "Chain", "Token", or "DAO" in their name (unless explicitly B2B SaaS)
 
 If unsure between Enterprise and Consumer, default to NOT_ENTERPRISE.
+If company is crypto/blockchain-related, default to NOT_ENTERPRISE.
 
 ═══════════════════════════════════════════════════════════════════
 LEAD INVESTOR PROTOCOL (STRICT VERIFICATION REQUIRED)
@@ -318,6 +323,56 @@ def clear_content_hash_cache() -> None:
     logger.info(f"Content hash cache cleared (had {cache_size} entries)")
 
 
+# Keywords that indicate crypto/blockchain content (not Enterprise AI)
+CRYPTO_KEYWORDS = [
+    "crypto", "blockchain", "web3", "defi", "nft", "token",
+    "protocol", "layer 2", "l2", "dao", "smart contract",
+    "ethereum", "bitcoin", "solana", "polygon", "avalanche",
+    "decentralized", "on-chain", "tokenomics", "staking",
+]
+
+# Company name patterns that indicate crypto (for stricter detection)
+CRYPTO_COMPANY_PATTERNS = ["protocol", "chain", "token", "dao", "coin", "web3"]
+
+
+def _is_crypto_deal(deal: DealExtraction, article_text: str) -> bool:
+    """
+    Detect if deal is crypto-related (should NOT be Enterprise AI).
+
+    Called as post-extraction validation to catch crypto deals that the LLM
+    might have incorrectly classified as Enterprise AI.
+
+    Returns:
+        True if deal is crypto-related, False otherwise
+    """
+    text_lower = article_text.lower()
+    name_lower = deal.startup_name.lower() if deal.startup_name else ""
+
+    # Check 1: Company name contains crypto patterns
+    if any(pattern in name_lower for pattern in CRYPTO_COMPANY_PATTERNS):
+        logger.debug(f"Crypto detected by company name: {deal.startup_name}")
+        return True
+
+    # Check 2: Article is dominated by crypto keywords (3+ = likely crypto)
+    crypto_count = sum(1 for kw in CRYPTO_KEYWORDS if kw in text_lower)
+    if crypto_count >= 3:
+        logger.debug(f"Crypto detected by keyword density ({crypto_count}): {deal.startup_name}")
+        return True
+
+    # Check 3: Lead investor has "crypto" in name (e.g., "a16z crypto")
+    if deal.tracked_fund_name and "crypto" in deal.tracked_fund_name.lower():
+        logger.debug(f"Crypto detected by investor name: {deal.tracked_fund_name}")
+        return True
+
+    # Check 4: Check lead investors in the extraction
+    for investor in deal.lead_investors:
+        if "crypto" in investor.name.lower():
+            logger.debug(f"Crypto detected by lead investor: {investor.name}")
+            return True
+
+    return False
+
+
 # Patterns that indicate text is an article title, not a company name
 # FIX #34: Made patterns more specific to avoid rejecting valid company names
 ARTICLE_TITLE_PATTERNS = [
@@ -488,6 +543,15 @@ async def extract_deal(
 
             # Post-process: verify tracked fund identification
             response = _verify_tracked_fund(response)
+
+            # Post-process: detect and reclassify crypto deals
+            if response and response.is_enterprise_ai and _is_crypto_deal(response, article_text):
+                logger.info(
+                    f"Reclassifying {response.startup_name} as NOT_ENTERPRISE: "
+                    f"crypto/blockchain detected"
+                )
+                response.is_enterprise_ai = False
+                response.enterprise_category = EnterpriseCategory.NOT_ENTERPRISE
 
             # Post-process: validate company name isn't an article title
             if response and _looks_like_article_title(response.startup_name):
