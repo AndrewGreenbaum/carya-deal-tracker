@@ -14,6 +14,7 @@ OPTIMIZED:
 import asyncio
 import hashlib
 import logging
+import re
 import instructor
 import httpx
 from anthropic import Anthropic, APITimeoutError, APIError, RateLimitError
@@ -130,6 +131,24 @@ DISAMBIGUATION RULES:
 - "GV" = Google Ventures. Exclude stock ticker GV (Visionary Holdings)
 - "Thrive" = Thrive Capital. Exclude "Thrive IT Services" or "Thrive Global"
 - "Sequoia" = Sequoia Capital US. Note if HongShan/Peak XV (formerly Sequoia China/India)
+
+═══════════════════════════════════════════════════════════════════
+COMPANY NAME VALIDATION (CRITICAL - PREVENT FALSE POSITIVES)
+═══════════════════════════════════════════════════════════════════
+
+The startup_name MUST be the actual company being funded, NOT:
+- Article titles (e.g., "America's Construction Problem", "The Future of AI")
+- Generic phrases that sound like topics or headlines
+- Titles containing "problem", "challenge", "guide", "crisis", "issue", "opportunity"
+- Phrases with 5+ words that read like a headline
+
+VALID startup names: "Acme", "BuildOps", "Glean", "Stripe", "OpenAI"
+INVALID startup names: "America's Construction Problem", "The AI Revolution", "5 Ways to Scale"
+
+If the article is about an industry topic and you can't identify a specific company:
+→ Set is_new_announcement=False
+→ Set startup_name="<UNKNOWN>"
+→ Set announcement_rejection_reason="Article discusses topic, not specific company funding"
 
 ═══════════════════════════════════════════════════════════════════
 COMPANY INFO EXTRACTION (ONLY EXTRACT IF EXPLICITLY MENTIONED)
@@ -298,6 +317,46 @@ def clear_content_hash_cache() -> None:
     logger.info(f"Content hash cache cleared (had {cache_size} entries)")
 
 
+# Patterns that indicate text is an article title, not a company name
+ARTICLE_TITLE_PATTERNS = [
+    r"'s\s+(problem|challenge|crisis|issue|opportunity|dilemma|future|guide)",
+    r"^(how|why|what|when|the|a)\s+",
+    r"(problem|challenge|crisis|issue|opportunity|future|guide|revolution)$",
+    r"^\d+\s+(ways?|tips|secrets|lessons|habits|mistakes)",
+    r"^(building|creating|scaling|growing|launching)\s+",
+]
+
+
+def _looks_like_article_title(text: str) -> bool:
+    """
+    Check if text looks like an article title, not a company name.
+
+    Used to catch false positives where LLM extracts headline as company name.
+    E.g., "America's Construction Problem" should be rejected.
+    """
+    if not text or len(text) < 3:
+        return True
+
+    text_lower = text.lower().strip()
+
+    # Check regex patterns
+    for pattern in ARTICLE_TITLE_PATTERNS:
+        if re.search(pattern, text_lower):
+            return True
+
+    # Company names are usually 1-4 words, titles are often longer
+    word_count = len(text.split())
+    if word_count > 5:
+        return True
+
+    # Check for known invalid patterns
+    invalid_substrings = ["problem", "challenge", "crisis", "issue", "'s construction", "'s future"]
+    if any(sub in text_lower for sub in invalid_substrings):
+        return True
+
+    return False
+
+
 def build_extraction_prompt(
     article_text: str,
     fund_context: Optional[FundConfig] = None,
@@ -421,6 +480,18 @@ async def extract_deal(
 
             # Post-process: verify tracked fund identification
             response = _verify_tracked_fund(response)
+
+            # Post-process: validate company name isn't an article title
+            if response and _looks_like_article_title(response.startup_name):
+                logger.warning(
+                    f"Rejecting article title as company name: '{response.startup_name}' "
+                    f"from {source_url}"
+                )
+                response.is_new_announcement = False
+                response.announcement_rejection_reason = (
+                    f"Company name looks like article title: {response.startup_name}"
+                )
+
             return response
 
         except APITimeoutError as e:

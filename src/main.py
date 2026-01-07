@@ -2516,6 +2516,47 @@ async def cleanup_old_deals(
     )
 
 
+@app.delete("/deals/{deal_id}")
+async def delete_deal(
+    deal_id: int,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Delete a specific deal by ID.
+
+    Also deletes related articles and deal_investors.
+    """
+    from sqlalchemy import delete
+
+    try:
+        async with get_session() as session:
+            # Delete related articles first
+            stmt_articles = delete(Article).where(Article.deal_id == deal_id)
+            await session.execute(stmt_articles)
+
+            # Delete related deal_investors
+            stmt_investors = delete(DealInvestor).where(DealInvestor.deal_id == deal_id)
+            await session.execute(stmt_investors)
+
+            # Delete the deal
+            stmt_deal = delete(Deal).where(Deal.id == deal_id)
+            result = await session.execute(stmt_deal)
+
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail=f"Deal {deal_id} not found")
+
+            await session.commit()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    cache.invalidate("deals")
+
+    return {"deleted": True, "deal_id": deal_id}
+
+
 class LinkedInEnrichmentResponse(BaseModel):
     deals_processed: int
     founders_enriched: int
