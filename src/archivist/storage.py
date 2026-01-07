@@ -36,7 +36,7 @@ from .models import (
 from .database import get_session
 from ..analyst.schemas import DealExtraction, LeadStatus, EnterpriseCategory
 from ..config.funds import FUND_REGISTRY
-from ..harvester.fund_matcher import match_fund_name
+# NOTE: fund_matcher import moved inside save_deal() to avoid circular import
 
 
 def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
@@ -378,6 +378,9 @@ async def save_deal(
         - LeadDealAlertInfo is provided if this is a lead deal that needs an alert
           (FIX #20: alert should be sent AFTER transaction commits)
     """
+    # Lazy import to avoid circular import (storage -> harvester -> orchestrator -> storage)
+    from ..harvester.fund_matcher import match_fund_name
+
     # Determine announced_date for duplicate check
     announced_date = extraction.round_date
     if announced_date is None and article_published_date:

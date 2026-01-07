@@ -20,6 +20,7 @@ from typing import List, Optional, Dict, Any
 from xml.etree import ElementTree as ET
 
 from ..base_scraper import NormalizedArticle
+from ..fund_matcher import match_fund_name
 from ...config.settings import settings
 from ...config.funds import FUND_REGISTRY
 
@@ -38,27 +39,7 @@ SEC_FORM_D_FEED = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&ty
 # Alternative: RSS feed for all recent filings
 SEC_RECENT_FILINGS = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=D&company=&dateb=&owner=include&count=100&output=atom"
 
-# Fund name variations for matching in SEC filings
-SEC_FUND_PATTERNS = {
-    "founders_fund": ["founders fund", "ff management"],
-    "benchmark": ["benchmark capital", "benchmark partners"],
-    "sequoia": ["sequoia capital", "sequoia operations"],
-    "khosla": ["khosla ventures"],
-    "index": ["index ventures"],
-    "a16z": ["andreessen horowitz", "a16z", "ah capital"],
-    "insight": ["insight partners", "insight venture"],
-    "bessemer": ["bessemer venture", "bvp"],
-    "redpoint": ["redpoint ventures"],
-    "greylock": ["greylock partners", "greylock management"],
-    "gv": ["google ventures", "gv management"],
-    "menlo": ["menlo ventures"],
-    "usv": ["union square ventures", "usv management"],
-    "thrive": ["thrive capital"],
-    "accel": ["accel partners", "accel management"],
-    "felicis": ["felicis ventures"],
-    "general_catalyst": ["general catalyst"],
-    "first_round": ["first round capital"],
-}
+# FIX #47: Fund patterns now consolidated in fund_matcher.py
 
 # Industries likely to be VC-backed (for stealth detection)
 VC_LIKELY_INDUSTRIES = [
@@ -410,14 +391,9 @@ class SECEdgarScraper:
         Returns fund slug if match found, None otherwise.
         """
         # Search in company name and investors
-        search_text = f"{filing.company_name} {' '.join(filing.investors)}".lower()
-
-        for slug, patterns in SEC_FUND_PATTERNS.items():
-            for pattern in patterns:
-                if pattern.lower() in search_text:
-                    return slug
-
-        return None
+        search_text = f"{filing.company_name} {' '.join(filing.investors)}"
+        # FIX #47: Use centralized fund_matcher instead of local patterns
+        return match_fund_name(search_text)
 
     def is_likely_vc_backed(self, filing: FormDFiling) -> bool:
         """

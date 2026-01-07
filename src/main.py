@@ -444,7 +444,7 @@ async def list_deals(
                             ))
                     except json.JSONDecodeError as e:
                         # FIX #18: Log JSON parsing failures with context
-                        logger.warning(f"Invalid founders_json for deal {deal.id}: {e}")
+                        logger.warning("Invalid founders_json for deal %s: %s", deal.id, e)
                         founders = None
 
                 # Get source info from articles
@@ -497,7 +497,7 @@ async def list_deals(
 
     except Exception as e:
         # FIX #13: Log error securely, don't expose details to client
-        logger.error(f"Database query failed: {e}", exc_info=True)
+        logger.error("Database query failed: %s", e, exc_info=True)
         raise HTTPException(
             status_code=503,
             detail="Service temporarily unavailable"
@@ -602,7 +602,7 @@ async def export_deals_csv(
             )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -666,7 +666,7 @@ async def list_stealth_detections(
             )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -705,7 +705,7 @@ async def extract_funding_deal(
             announcement_rejection_reason=result.announcement_rejection_reason,
         )
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -756,7 +756,7 @@ async def extract_funding_deals_batch(
         return responses
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -980,7 +980,7 @@ async def run_sec_edgar_scraper(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1049,7 +1049,7 @@ async def run_brave_search_scraper_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1107,7 +1107,7 @@ async def run_fast_scan_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1149,7 +1149,7 @@ async def run_firecrawl_scraper_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1207,7 +1207,7 @@ async def run_google_alerts_scraper(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1262,7 +1262,7 @@ async def run_twitter_monitor(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1306,7 +1306,7 @@ async def run_techcrunch_scraper_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1341,7 +1341,7 @@ async def run_fortune_scraper_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1383,7 +1383,7 @@ async def run_ycombinator_scraper_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1419,7 +1419,7 @@ async def run_github_trending_scraper_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1461,7 +1461,7 @@ async def run_hackernews_scraper_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1523,7 +1523,7 @@ async def run_linkedin_jobs_scraper_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1584,7 +1584,7 @@ async def run_portfolio_diff_scraper_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1636,7 +1636,7 @@ async def run_uspto_trademark_scraper_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1698,7 +1698,7 @@ async def run_delaware_corps_scraper_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1823,7 +1823,7 @@ async def run_sec_delaware_crossref_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1864,7 +1864,7 @@ async def run_tech_funding_news_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1903,7 +1903,7 @@ async def run_ventureburn_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1944,7 +1944,7 @@ async def run_crunchbase_news_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1985,7 +1985,7 @@ async def run_venturebeat_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -2027,7 +2027,7 @@ async def run_axios_prorata_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -2068,7 +2068,7 @@ async def run_strictlyvc_endpoint(
         )
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -2702,7 +2702,7 @@ async def backfill_deal_dates(
             await session.commit()
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
     return DateBackfillResponse(
@@ -2776,7 +2776,7 @@ async def cleanup_old_deals(
             await session.commit()
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
     cache.invalidate("deals")
@@ -2821,7 +2821,7 @@ async def delete_deal(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
     cache.invalidate("deals")
@@ -2899,7 +2899,7 @@ async def enrich_founder_linkedin(
                         linkedin_found += 1
 
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
     return LinkedInEnrichmentResponse(
@@ -2946,7 +2946,7 @@ async def get_enrichment_stats(
         stats = await get_enrichment_coverage()
         return EnrichmentCoverageResponse(**stats)
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -2983,7 +2983,7 @@ async def backfill_all_enrichment(
             total_processed=website_stats.total_processed + linkedin_stats.total_processed,
         )
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -3017,7 +3017,7 @@ async def backfill_websites_only(
             total_processed=stats.total_processed,
         )
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -3051,7 +3051,7 @@ async def backfill_linkedin_only(
             total_processed=stats.total_processed,
         )
     except Exception as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
+        logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

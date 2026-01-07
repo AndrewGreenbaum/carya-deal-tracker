@@ -18,6 +18,21 @@ from ..harvester.orchestrator import ScrapingResult
 logger = logging.getLogger(__name__)
 
 
+def _escape_slack_markdown(text: str) -> str:
+    """
+    Escape special Slack markdown characters in user-provided text.
+
+    FIX #53: Company names with *, _, ` can break Slack formatting.
+    """
+    if not text:
+        return text
+    # Escape special markdown characters
+    # Order matters: escape backtick first to avoid double-escaping
+    for char in ('`', '*', '_', '~'):
+        text = text.replace(char, f'\\{char}')
+    return text
+
+
 async def send_scrape_summary(
     job_id: str,
     results: List[ScrapingResult],
@@ -169,17 +184,22 @@ async def send_lead_deal_alert(
 
     Called from storage.py when is_lead_confirmed=True.
     """
+    # FIX #53: Escape user-provided fields to prevent Slack markdown issues
+    company_name_safe = _escape_slack_markdown(company_name)
+    lead_investor_safe = _escape_slack_markdown(lead_investor)
+    snippet_safe = _escape_slack_markdown(verification_snippet) if verification_snippet else None
+
     # Format amount for display
     amount_display = amount if amount else "Undisclosed"
     category_display = enterprise_category.replace("_", " ").title() if enterprise_category else "N/A"
-    snippet_display = f'"{verification_snippet}"' if verification_snippet else "N/A"
+    snippet_display = f'"{snippet_safe}"' if snippet_safe else "N/A"
 
     text = f"""🚀 *NEW LEAD DEAL DETECTED*
 
-*Company:* {company_name}
+*Company:* {company_name_safe}
 *Round:* {round_type.replace("_", " ").title()}
 *Amount:* {amount_display}
-*Lead:* {lead_investor}
+*Lead:* {lead_investor_safe}
 *Category:* {category_display}
 
 *Verification:* {snippet_display}"""
@@ -194,10 +214,10 @@ async def send_lead_deal_alert(
             {
                 "type": "section",
                 "fields": [
-                    {"type": "mrkdwn", "text": f"*Company:*\n{company_name}"},
+                    {"type": "mrkdwn", "text": f"*Company:*\n{company_name_safe}"},
                     {"type": "mrkdwn", "text": f"*Round:*\n{round_type.replace('_', ' ').title()}"},
                     {"type": "mrkdwn", "text": f"*Amount:*\n{amount_display}"},
-                    {"type": "mrkdwn", "text": f"*Lead:*\n{lead_investor}"},
+                    {"type": "mrkdwn", "text": f"*Lead:*\n{lead_investor_safe}"},
                 ]
             },
             {

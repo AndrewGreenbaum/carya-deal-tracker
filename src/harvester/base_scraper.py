@@ -145,6 +145,10 @@ class BaseScraper(ABC):
         for element in soup(["script", "style", "nav", "header", "footer"]):
             element.decompose()
 
+        # FIX #51: Remove HTML comments before extracting text
+        for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+            comment.extract()
+
         # Get text
         text = soup.get_text(separator="\n", strip=True)
 

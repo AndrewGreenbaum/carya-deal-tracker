@@ -22,6 +22,7 @@ from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from ..base_scraper import NormalizedArticle
+from ..fund_matcher import match_fund_name
 from ...config.settings import settings
 from ...config.funds import FUND_REGISTRY
 
@@ -33,27 +34,7 @@ TECHCRUNCH_FEEDS = {
     "fundraising": "https://techcrunch.com/tag/fundraising/feed/",
 }
 
-# Fund name patterns for matching in articles
-TC_FUND_PATTERNS = {
-    "founders_fund": ["founders fund", "peter thiel"],
-    "benchmark": ["benchmark capital", "benchmark partners", "benchmark"],
-    "sequoia": ["sequoia capital", "sequoia"],
-    "khosla": ["khosla ventures", "khosla"],
-    "index": ["index ventures"],
-    "a16z": ["andreessen horowitz", "a16z"],
-    "insight": ["insight partners"],
-    "bessemer": ["bessemer venture", "bessemer", "bvp"],
-    "redpoint": ["redpoint ventures", "redpoint"],
-    "greylock": ["greylock partners", "greylock"],
-    "gv": ["google ventures", "gv "],  # Note: space after GV to avoid false positives
-    "menlo": ["menlo ventures"],
-    "usv": ["union square ventures", "usv"],
-    "thrive": ["thrive capital"],
-    "accel": ["accel partners", "accel"],
-    "felicis": ["felicis ventures", "felicis"],
-    "general_catalyst": ["general catalyst"],
-    "first_round": ["first round capital", "first round"],
-}
+# FIX #47: Fund patterns now consolidated in fund_matcher.py
 
 
 @dataclass
@@ -175,14 +156,9 @@ class TechCrunchScraper:
 
     def match_tracked_fund(self, article: TechCrunchArticle) -> Optional[str]:
         """Check if article mentions any tracked fund."""
-        search_text = f"{article.title} {article.description}".lower()
-
-        for slug, patterns in TC_FUND_PATTERNS.items():
-            for pattern in patterns:
-                if pattern.lower() in search_text:
-                    return slug
-
-        return None
+        search_text = f"{article.title} {article.description}"
+        # FIX #47: Use centralized fund_matcher instead of local patterns
+        return match_fund_name(search_text)
 
     def is_funding_article(self, article: TechCrunchArticle) -> bool:
         """Check if article is about funding."""

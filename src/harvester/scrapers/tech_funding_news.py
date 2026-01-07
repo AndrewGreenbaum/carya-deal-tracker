@@ -30,6 +30,7 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 from ..base_scraper import NormalizedArticle
+from ..fund_matcher import match_fund_name
 from ...config.settings import settings
 
 
@@ -42,27 +43,7 @@ TECH_FUNDING_NEWS_FEEDS = {
     "cybersecurity": "https://techfundingnews.com/category/cybersecurity/feed/",
 }
 
-# Fund patterns for matching (same as other scrapers)
-FUND_PATTERNS = {
-    "founders_fund": ["founders fund", "peter thiel"],
-    "benchmark": ["benchmark capital", "benchmark"],
-    "sequoia": ["sequoia capital", "sequoia"],
-    "khosla": ["khosla ventures", "khosla"],
-    "index": ["index ventures"],
-    "a16z": ["andreessen horowitz", "a16z"],
-    "insight": ["insight partners"],
-    "bessemer": ["bessemer venture", "bessemer", "bvp"],
-    "redpoint": ["redpoint ventures", "redpoint"],
-    "greylock": ["greylock partners", "greylock"],
-    "gv": ["google ventures", "gv "],
-    "menlo": ["menlo ventures"],
-    "usv": ["union square ventures", "usv"],
-    "thrive": ["thrive capital"],
-    "accel": ["accel partners", "accel"],
-    "felicis": ["felicis ventures", "felicis"],
-    "general_catalyst": ["general catalyst"],
-    "first_round": ["first round capital", "first round"],
-}
+# FIX #47: Fund patterns now consolidated in fund_matcher.py
 
 # Funding keywords to filter relevant articles
 FUNDING_KEYWORDS = [
@@ -199,14 +180,9 @@ class TechFundingNewsScraper:
 
     def match_tracked_fund(self, article: TechFundingArticle) -> Optional[str]:
         """Check if article mentions any tracked fund."""
-        search_text = f"{article.title} {article.description}".lower()
-
-        for slug, patterns in FUND_PATTERNS.items():
-            for pattern in patterns:
-                if pattern.lower() in search_text:
-                    return slug
-
-        return None
+        search_text = f"{article.title} {article.description}"
+        # FIX #47: Use centralized fund_matcher instead of local patterns
+        return match_fund_name(search_text)
 
     def extract_funding_amount(self, text: str) -> Optional[str]:
         """Extract funding amount from text."""

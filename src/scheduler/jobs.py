@@ -138,7 +138,7 @@ async def enrich_new_deals(limit: int = 25):
             return enriched_count
 
     except Exception as e:
-        logger.error(f"Enrichment job failed: {e}", exc_info=True)
+        logger.error("Enrichment job failed: %s", e, exc_info=True)
         return 0
 
 # Global scheduler instance
@@ -308,7 +308,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             total_deals_saved += stats["deals_saved"]
 
         except Exception as e:
-            logger.error(f"Brave Search scraping failed: {e}")
+            logger.error("Brave Search scraping failed: %s", e)
             results["brave_search"] = {"error": str(e)}
 
     # 2. SEC EDGAR (free - Form D filings)
@@ -341,7 +341,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         total_deals_saved += stats["deals_saved"]
 
     except Exception as e:
-        logger.error(f"SEC EDGAR scraping failed: {e}")
+        logger.error("SEC EDGAR scraping failed: %s", e)
         results["sec_edgar"] = {"error": str(e)}
 
     # 3. GOOGLE ALERTS (free - RSS feeds)
@@ -358,7 +358,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             total_deals_saved += stats["deals_saved"]
 
         except Exception as e:
-            logger.error(f"Google Alerts scraping failed: {e}")
+            logger.error("Google Alerts scraping failed: %s", e)
             results["google_alerts"] = {"error": str(e)}
 
     # 4. TWITTER (free tier)
@@ -374,7 +374,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             total_deals_saved += stats["deals_saved"]
 
         except Exception as e:
-            logger.error(f"Twitter scraping failed: {e}")
+            logger.error("Twitter scraping failed: %s", e)
             results["twitter"] = {"error": str(e)}
 
     # 5. TECHCRUNCH RSS (free)
@@ -389,7 +389,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         total_deals_saved += stats["deals_saved"]
 
     except Exception as e:
-        logger.error(f"TechCrunch scraping failed: {e}")
+        logger.error("TechCrunch scraping failed: %s", e)
         results["techcrunch"] = {"error": str(e)}
 
     # 6. FORTUNE TERM SHEET (free)
@@ -404,7 +404,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         total_deals_saved += stats["deals_saved"]
 
     except Exception as e:
-        logger.error(f"Fortune Term Sheet scraping failed: {e}")
+        logger.error("Fortune Term Sheet scraping failed: %s", e)
         results["fortune"] = {"error": str(e)}
 
     # 7. LINKEDIN JOBS / STEALTH DETECTOR (uses Brave Search)
@@ -420,7 +420,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             total_deals_saved += stats["deals_saved"]
 
         except Exception as e:
-            logger.error(f"LinkedIn Jobs scraping failed: {e}")
+            logger.error("LinkedIn Jobs scraping failed: %s", e)
             results["linkedin_jobs"] = {"error": str(e)}
 
     # 8. CRUNCHBASE NEWS (free RSS)
@@ -435,7 +435,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         total_deals_saved += stats["deals_saved"]
 
     except Exception as e:
-        logger.error(f"Crunchbase News scraping failed: {e}")
+        logger.error("Crunchbase News scraping failed: %s", e)
         results["crunchbase_news"] = {"error": str(e)}
 
     # 9. VENTUREBEAT (free RSS)
@@ -450,7 +450,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         total_deals_saved += stats["deals_saved"]
 
     except Exception as e:
-        logger.error(f"VentureBeat scraping failed: {e}")
+        logger.error("VentureBeat scraping failed: %s", e)
         results["venturebeat"] = {"error": str(e)}
 
     # 10. AXIOS PRO RATA (free RSS - may return 0 if deprecated)
@@ -465,7 +465,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         total_deals_saved += stats["deals_saved"]
 
     except Exception as e:
-        logger.error(f"Axios Pro Rata scraping failed: {e}")
+        logger.error("Axios Pro Rata scraping failed: %s", e)
         results["axios_prorata"] = {"error": str(e)}
 
     # 11. STRICTLYVC (free RSS)
@@ -480,7 +480,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         total_deals_saved += stats["deals_saved"]
 
     except Exception as e:
-        logger.error(f"StrictlyVC scraping failed: {e}")
+        logger.error("StrictlyVC scraping failed: %s", e)
         results["strictlyvc"] = {"error": str(e)}
 
     results["total_deals_saved"] = total_deals_saved

@@ -42,27 +42,7 @@ HN_FUNDING_QUERIES = [
     "YC",
 ]
 
-# Fund patterns for matching
-HN_FUND_PATTERNS = {
-    "founders_fund": ["founders fund", "peter thiel"],
-    "benchmark": ["benchmark capital", "benchmark"],
-    "sequoia": ["sequoia capital", "sequoia"],
-    "khosla": ["khosla ventures", "khosla"],
-    "index": ["index ventures"],
-    "a16z": ["andreessen horowitz", "a16z"],
-    "insight": ["insight partners"],
-    "bessemer": ["bessemer venture", "bessemer", "bvp"],
-    "redpoint": ["redpoint ventures", "redpoint"],
-    "greylock": ["greylock partners", "greylock"],
-    "gv": ["google ventures"],
-    "menlo": ["menlo ventures"],
-    "usv": ["union square ventures", "usv"],
-    "thrive": ["thrive capital"],
-    "accel": ["accel partners", "accel"],
-    "felicis": ["felicis ventures", "felicis"],
-    "general_catalyst": ["general catalyst"],
-    "first_round": ["first round capital", "first round"],
-}
+# FIX #47: Fund patterns now consolidated in fund_matcher.py (imported above)
 
 
 @dataclass

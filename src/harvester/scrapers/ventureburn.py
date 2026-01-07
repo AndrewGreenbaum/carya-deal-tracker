@@ -25,6 +25,7 @@ from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from ..base_scraper import NormalizedArticle
+from ..fund_matcher import match_fund_name
 from ...config.settings import settings
 
 
@@ -40,27 +41,7 @@ VENTUREBURN_CATEGORIES = [
     "https://ventureburn.com/category/ai/feed/",
 ]
 
-# Fund patterns for matching
-FUND_PATTERNS = {
-    "founders_fund": ["founders fund", "peter thiel"],
-    "benchmark": ["benchmark capital", "benchmark"],
-    "sequoia": ["sequoia capital", "sequoia"],
-    "khosla": ["khosla ventures", "khosla"],
-    "index": ["index ventures"],
-    "a16z": ["andreessen horowitz", "a16z"],
-    "insight": ["insight partners"],
-    "bessemer": ["bessemer venture", "bessemer", "bvp"],
-    "redpoint": ["redpoint ventures", "redpoint"],
-    "greylock": ["greylock partners", "greylock"],
-    "gv": ["google ventures", "gv "],
-    "menlo": ["menlo ventures"],
-    "usv": ["union square ventures", "usv"],
-    "thrive": ["thrive capital"],
-    "accel": ["accel partners", "accel"],
-    "felicis": ["felicis ventures", "felicis"],
-    "general_catalyst": ["general catalyst"],
-    "first_round": ["first round capital", "first round"],
-}
+# FIX #47: Fund patterns now consolidated in fund_matcher.py
 
 # Funding keywords
 FUNDING_KEYWORDS = [
@@ -196,14 +177,9 @@ class VentureburnScraper:
 
     def match_tracked_fund(self, article: VentureburnArticle) -> Optional[str]:
         """Check if article mentions any tracked fund."""
-        search_text = f"{article.title} {article.description}".lower()
-
-        for slug, patterns in FUND_PATTERNS.items():
-            for pattern in patterns:
-                if pattern.lower() in search_text:
-                    return slug
-
-        return None
+        search_text = f"{article.title} {article.description}"
+        # FIX #47: Use centralized fund_matcher instead of local patterns
+        return match_fund_name(search_text)
 
     async def scrape_all(self, hours_back: int = 168) -> List[NormalizedArticle]:
         """
