@@ -36,11 +36,15 @@ class BraveAPIError(Exception):
 
 
 class TTLCache:
-    """Simple TTL cache for query results."""
+    """Simple TTL cache for query results with automatic cleanup."""
+
+    # Cleanup every N set operations to prevent unbounded growth
+    CLEANUP_INTERVAL = 100
 
     def __init__(self, ttl_seconds: int = 3600):
         self._cache: Dict[str, Tuple[float, Any]] = {}
         self._ttl = ttl_seconds
+        self._operations_since_cleanup = 0
 
     def _make_key(self, query: str, search_type: str, freshness: str) -> str:
         """Create cache key from query parameters."""
@@ -62,9 +66,25 @@ class TTLCache:
         key = self._make_key(query, search_type, freshness)
         self._cache[key] = (time(), value)
 
+        # Periodic cleanup to prevent unbounded memory growth
+        self._operations_since_cleanup += 1
+        if self._operations_since_cleanup >= self.CLEANUP_INTERVAL:
+            self.cleanup()
+            self._operations_since_cleanup = 0
+
     def clear(self):
         """Clear all cached entries."""
         self._cache.clear()
+
+    def cleanup(self) -> int:
+        """Remove expired entries from cache. Returns number of entries removed."""
+        now = time()
+        expired_keys = [k for k, (ts, _) in self._cache.items() if now - ts >= self._ttl]
+        for k in expired_keys:
+            del self._cache[k]
+        if expired_keys:
+            logger.debug(f"Cache cleanup: removed {len(expired_keys)} expired entries, size={len(self._cache)}")
+        return len(expired_keys)
 
     def size(self) -> int:
         """Return number of cached entries."""

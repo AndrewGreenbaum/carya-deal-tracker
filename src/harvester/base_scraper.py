@@ -9,7 +9,7 @@ Implements the PolymorphicScraper pattern with:
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import List, Optional, AsyncIterator
 import httpx
 from bs4 import BeautifulSoup
@@ -24,7 +24,7 @@ class RawArticle:
     url: str
     title: str
     html: str
-    fetched_at: datetime = field(default_factory=datetime.utcnow)
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     published_date: Optional[date] = None
     author: Optional[str] = None
     tags: List[str] = field(default_factory=list)
@@ -40,7 +40,7 @@ class NormalizedArticle:
     author: Optional[str] = None
     tags: List[str] = field(default_factory=list)
     fund_slug: str = ""  # Which fund's feed this came from
-    fetched_at: datetime = field(default_factory=datetime.utcnow)
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class BaseScraper(ABC):

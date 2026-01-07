@@ -412,6 +412,9 @@ class TwitterMonitor:
         Combines VC account monitoring and search results.
         Returns normalized articles ready for extraction.
         """
+        # Reset request counter for this run (fixes bug where counter never resets)
+        self._request_count = 0
+
         if not self.bearer_token:
             logger.warning("Twitter API: TWITTER_BEARER_TOKEN not configured")
             logger.info("Get one at: https://developer.twitter.com/")

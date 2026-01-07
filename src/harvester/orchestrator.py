@@ -18,7 +18,7 @@ import asyncio
 import logging
 import time
 from typing import List, Optional, Dict, Type, Set
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
@@ -94,11 +94,11 @@ class ScrapingResult:
         self.deals_extracted = 0
         self.deals_saved = 0
         self.errors: List[str] = []
-        self.started_at = datetime.utcnow()
+        self.started_at = datetime.now(timezone.utc)
         self.completed_at: Optional[datetime] = None
 
     def complete(self):
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
 
     @property
     def duration_seconds(self) -> float:

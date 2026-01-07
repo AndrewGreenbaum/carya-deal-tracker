@@ -5,7 +5,7 @@ Storage pipeline for persisting extracted deals to the database.
 import json
 import re
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional
 from sqlalchemy import select, nullslast
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -200,7 +200,7 @@ async def get_or_create_company(
             company.linkedin_url = linkedin_url
         if description and not company.description:
             company.description = description
-        company.updated_at = datetime.utcnow()
+        company.updated_at = datetime.now(timezone.utc)
         return company
 
     company = PortfolioCompany(

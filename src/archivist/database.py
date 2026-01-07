@@ -14,12 +14,14 @@ from ..config.settings import settings
 logger = logging.getLogger(__name__)
 
 
-# Create async engine
+# Create async engine with connection pooling optimizations
 engine = create_async_engine(
     settings.database_url,
     echo=False,
     pool_size=5,
     max_overflow=10,
+    pool_pre_ping=True,   # Detect stale connections before use
+    pool_recycle=3600,    # Recycle connections every hour
 )
 
 # Session factory
@@ -55,7 +57,11 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency for FastAPI endpoints."""
+    """FastAPI dependency for database sessions.
+
+    Use get_session() for non-FastAPI code (scheduler, orchestrator, etc).
+    Use get_db() only as a FastAPI Depends() injection.
+    """
     async with async_session_factory() as session:
         try:
             yield session

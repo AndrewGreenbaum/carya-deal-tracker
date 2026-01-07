@@ -10,7 +10,7 @@ Schema:
 - Article: Source articles with embeddings for deduplication
 """
 
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
 from pgvector.sqlalchemy import Vector
@@ -26,7 +26,7 @@ class Fund(SQLModel, table=True):
     slug: str = Field(unique=True, index=True)
     name: str
     website: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     partners: List["Partner"] = Relationship(back_populates="fund")
@@ -42,7 +42,7 @@ class Partner(SQLModel, table=True):
     fund_id: int = Field(foreign_key="funds.id")
     linkedin_url: Optional[str] = None
     twitter_handle: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     fund: Fund = Relationship(back_populates="partners")
@@ -60,8 +60,8 @@ class PortfolioCompany(SQLModel, table=True):
     sector: Optional[str] = None
     founded_year: Optional[int] = None
     hq_location: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     deals: List["Deal"] = Relationship(back_populates="company")
@@ -98,8 +98,8 @@ class Deal(SQLModel, table=True):
     thesis_drift_score: float = 0.0
 
     # Metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     company: PortfolioCompany = Relationship(back_populates="deals")

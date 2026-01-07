@@ -35,12 +35,14 @@ from .analyst.extractor import extract_deal_batch, clear_content_hash_cache
 from .archivist import (
     get_db,
     get_session,
+    close_db,
     seed_funds,
     get_deals,
     Deal,
     DealInvestor,
     PortfolioCompany,
 )
+from .common.brave_client import close_brave_client
 from .archivist.models import Fund
 from .archivist.models import Article
 from .archivist.models import StealthDetection
@@ -148,9 +150,23 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown scheduler
-    shutdown_scheduler()
+    # Graceful shutdown - close all resources
     print("Shutting down...")
+    shutdown_scheduler()
+
+    # Close database connections
+    try:
+        await close_db()
+        print("Database connections closed")
+    except Exception as e:
+        print(f"Warning: Error closing database: {e}")
+
+    # Close Brave API client
+    try:
+        await close_brave_client()
+        print("Brave client closed")
+    except Exception as e:
+        print(f"Warning: Error closing Brave client: {e}")
 
 
 app = FastAPI(
