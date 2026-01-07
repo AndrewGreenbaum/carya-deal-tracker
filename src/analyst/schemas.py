@@ -139,7 +139,7 @@ class DealExtraction(BaseModel):
     @field_validator('round_date')
     @classmethod
     def validate_not_future_date(cls, v: Optional[date]) -> Optional[date]:
-        """Reject future dates - likely an LLM extraction error (e.g., 2025 instead of 2024)."""
+        """Reject future dates - likely an LLM extraction error."""
         if v is not None and v > date.today():
             logger.warning(f"Rejecting future date {v} - likely extraction error")
             return None
