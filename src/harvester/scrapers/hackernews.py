@@ -262,7 +262,11 @@ class HackerNewsScraper:
                 num_results=30,
             )
             for hit in hits:
-                story_id = hit.get("objectID")
+                # FIX #37: Convert to int for consistent dedup (Algolia returns strings)
+                try:
+                    story_id = int(hit.get("objectID", 0))
+                except (ValueError, TypeError):
+                    continue  # Skip invalid IDs
                 if story_id not in seen_ids:
                     seen_ids.add(story_id)
                     # FIX: Handle None from parse_story

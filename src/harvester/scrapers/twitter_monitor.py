@@ -100,8 +100,8 @@ class TwitterMonitor:
     def _check_rate_limit(self) -> bool:
         """Check if we're approaching rate limits."""
         # Free tier: 1,500 tweets/month
-        # Be conservative - stop at 100 per run to spread usage
-        return self._request_count < 100
+        # FIX #48: Use configurable limit from settings
+        return self._request_count < settings.twitter_requests_per_run
 
     async def get_user_tweets(
         self,

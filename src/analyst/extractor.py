@@ -23,9 +23,7 @@ from typing import Optional, List, Set
 
 logger = logging.getLogger(__name__)
 
-# API call configuration - increased for reliability
-API_TIMEOUT_SECONDS = 90  # 90 second timeout for Claude calls (was 60)
-MAX_RETRIES = 3  # Retry up to 3 times on transient errors (was 2)
+# API call configuration - loaded from settings (see below after settings import)
 
 # Session-based content hash cache (cleared between runs)
 # Prevents duplicate Claude calls for same article content
@@ -36,12 +34,15 @@ from ..config.settings import settings
 from ..config.funds import FUND_REGISTRY, FundConfig
 # Note: match_fund_name is imported lazily in _verify_tracked_fund to avoid circular import
 
+# FIX #42: Initialize module-level constants from settings (not hardcoded)
+API_TIMEOUT_SECONDS = settings.llm_timeout
+MAX_RETRIES = settings.llm_max_retries
 
 # Initialize Instructor with Anthropic client
 # FIX: Configure timeout at client level for reliable timeout handling
 _anthropic_client = Anthropic(
     api_key=settings.anthropic_api_key,
-    timeout=httpx.Timeout(API_TIMEOUT_SECONDS, connect=30.0),  # 90s total, 30s connect
+    timeout=httpx.Timeout(settings.llm_timeout, connect=settings.llm_connect_timeout),
 )
 client = instructor.from_anthropic(_anthropic_client)
 
@@ -318,9 +319,16 @@ def clear_content_hash_cache() -> None:
 
 
 # Patterns that indicate text is an article title, not a company name
+# FIX #34: Made patterns more specific to avoid rejecting valid company names
 ARTICLE_TITLE_PATTERNS = [
     r"'s\s+(problem|challenge|crisis|issue|opportunity|dilemma|future|guide)",
-    r"^(how|why|what|when|the|a)\s+",
+    # FIX #34: Only reject question words, not "the"/"a" which appear in valid names
+    # Valid: "The Trade Desk", "A Cloud Guru" - these should NOT be rejected
+    r"^(how|why|what|when)\s+",
+    # "the" + article-specific words only (not generic "the company")
+    r"^the\s+(problem|future|guide|art|science|rise|fall|state|end|best|worst|top|only|real|truth|power|secret|key|way)\b",
+    # "a" + article-specific words only (not generic "a startup")
+    r"^a\s+(guide|look|deep|new|better|simple|complete|brief|quick|closer|comprehensive)\b",
     r"(problem|challenge|crisis|issue|opportunity|future|guide|revolution)$",
     r"^\d+\s+(ways?|tips|secrets|lessons|habits|mistakes)",
     r"^(building|creating|scaling|growing|launching)\s+",
@@ -587,14 +595,26 @@ async def extract_deal_batch(
 
     # Handle any exceptions - log errors and skip failed extractions
     processed_results = []
+    error_count = 0
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             # Log the error and skip this extraction (return None)
             source_url = articles[i].get("source_url", "unknown")
             logger.error(f"Extraction failed for article {i} ({source_url}): {result}")
             processed_results.append(None)  # Caller should filter out None values
+            error_count += 1
         else:
             processed_results.append(result)
+
+    # FIX #22: Warn when failure rate exceeds 50% threshold
+    total = len(articles)
+    if total > 0 and error_count > 0:
+        failure_rate = error_count / total
+        if failure_rate > 0.5:
+            logger.warning(
+                f"High extraction failure rate: {error_count}/{total} ({failure_rate:.0%}) "
+                f"articles failed - check Claude API status or rate limits"
+            )
 
     return processed_results
 
@@ -746,7 +766,8 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
     # Check ALL lead investors against our fund registry
     for investor in deal.lead_investors:
         matched_fund = match_fund_name(investor.name)
-        if matched_fund:
+        # FIX: Validate matched_fund exists in FUND_REGISTRY before using
+        if matched_fund and matched_fund in FUND_REGISTRY:
             investor.is_tracked_fund = True
             matched_leads.append((matched_fund, investor))
 
@@ -775,16 +796,24 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
                         deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
                         deal.tracked_fund_role = LeadStatus.PARTICIPANT
                         deal.tracked_fund_partner = investor.partner_name
+        elif matched_fund:
+            # Fund matched but not in registry - log warning
+            logger.warning(f"Matched fund '{matched_fund}' not in FUND_REGISTRY")
 
     # Log if multiple tracked funds co-led
     if len(matched_leads) > 1:
-        fund_names = [FUND_REGISTRY[f].name for f, _ in matched_leads]
+        # FIX: Validate each fund in FUND_REGISTRY before accessing
+        fund_names = [
+            FUND_REGISTRY[f].name for f, _ in matched_leads
+            if f in FUND_REGISTRY
+        ]
         logger.info(f"Multiple tracked funds co-led deal for {deal.startup_name}: {fund_names}")
 
     # Also check ALL participating investors
     for investor in deal.participating_investors:
         matched_fund = match_fund_name(investor.name)
-        if matched_fund:
+        # FIX: Validate matched_fund exists in FUND_REGISTRY before using
+        if matched_fund and matched_fund in FUND_REGISTRY:
             investor.is_tracked_fund = True
             matched_participants.append((matched_fund, investor))
             # Only set deal-level fields if no lead was found
@@ -792,6 +821,9 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
                 deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
                 deal.tracked_fund_role = LeadStatus.PARTICIPANT
                 deal.tracked_fund_partner = investor.partner_name
+        elif matched_fund:
+            # Fund matched but not in registry - log warning
+            logger.warning(f"Matched fund '{matched_fund}' not in FUND_REGISTRY")
 
     return deal
 

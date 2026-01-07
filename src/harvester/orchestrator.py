@@ -17,8 +17,20 @@ OPTIMIZED:
 import asyncio
 import logging
 import time
-from typing import List, Optional, Dict, Type, Set
+from enum import Enum
+from typing import List, Optional, Dict, Type, Set, Tuple
 from datetime import datetime, timezone
+
+
+# FIX #24: Define consistent status values for extraction results
+class ExtractionStatus(str, Enum):
+    """Status codes for article extraction results."""
+    SAVED = "saved"
+    DUPLICATE = "duplicate"
+    LOW_CONFIDENCE = "low_confidence"
+    NOT_NEW_ANNOUNCEMENT = "not_new_announcement"
+    EXTRACTION_FAILED = "extraction_failed"
+    ERROR = "error"  # Generic error
 
 from sqlalchemy import select
 
@@ -140,13 +152,13 @@ async def check_url_exists(url: str) -> bool:
 async def process_article(
     article: NormalizedArticle,
     fund_config: FundConfig,
-) -> tuple[bool, str]:
+) -> Tuple[bool, str]:
     """
     Process a single article through extraction and storage.
 
     Returns:
-        Tuple of (success: bool, status: str)
-        Status can be: "saved", "low_confidence", "not_new_announcement", "error:{message}"
+        Tuple of (success: bool, status: ExtractionStatus)
+        Status values are defined in ExtractionStatus enum
     """
     try:
         # Extract deal information using Claude
@@ -159,31 +171,34 @@ async def process_article(
         # FIX 1: Handle None return (API failures, timeouts, etc.)
         if extraction is None:
             logger.warning(f"Extraction failed (API error) for {article.url}")
-            return False, "error:extraction_failed"
+            return False, ExtractionStatus.EXTRACTION_FAILED.value
 
         # NEW: Reject non-announcements (false positive prevention)
         # This catches articles that mention funding as background context
         if not extraction.is_new_announcement:
             rejection_reason = extraction.announcement_rejection_reason or "not a new funding announcement"
-            logger.info(
+            # FIX #50: DEBUG level for per-article messages (reduces log noise)
+            logger.debug(
                 f"Rejecting non-announcement: {extraction.startup_name} - "
                 f"Reason: {rejection_reason} - "
                 f"URL: {article.url}"
             )
-            return False, "not_new_announcement"
+            return False, ExtractionStatus.NOT_NEW_ANNOUNCEMENT.value
 
         # Skip low-confidence extractions (threshold from settings)
         if extraction.confidence_score < settings.extraction_confidence_threshold:
-            logger.info(
+            # FIX #50: DEBUG level for per-article messages (reduces log noise)
+            logger.debug(
                 f"Skipping low-confidence extraction: {extraction.startup_name} - "
                 f"Score: {extraction.confidence_score:.2f} < {settings.extraction_confidence_threshold} - "
                 f"URL: {article.url}"
             )
-            return False, "low_confidence"
+            return False, ExtractionStatus.LOW_CONFIDENCE.value
 
         # Save to database
+        alert_info = None
         async with get_session() as session:
-            deal = await save_deal(
+            deal, alert_info = await save_deal(
                 session=session,
                 extraction=extraction,
                 article_url=article.url,
@@ -195,23 +210,37 @@ async def process_article(
 
             # Check if this was a duplicate (save_deal returns None for duplicates)
             if deal is None:
-                logger.info(
+                # FIX #50: DEBUG level for per-article messages (reduces log noise)
+                logger.debug(
                     f"Duplicate deal detected: {extraction.startup_name} - "
                     f"{extraction.round_label.value} - article linked to existing deal"
                 )
-                return False, "duplicate"
+                return False, ExtractionStatus.DUPLICATE.value
 
             logger.info(
                 f"Saved deal: {extraction.startup_name} - "
                 f"{extraction.round_label.value} - "
                 f"Lead: {extraction.tracked_fund_is_lead}"
             )
-            return True, "saved"
+
+        # FIX #20: Send alert AFTER transaction commits (session context exited)
+        if alert_info:
+            from ..scheduler.notifications import send_lead_deal_alert
+            await send_lead_deal_alert(
+                company_name=alert_info.company_name,
+                amount=alert_info.amount,
+                round_type=alert_info.round_type,
+                lead_investor=alert_info.lead_investor,
+                enterprise_category=alert_info.enterprise_category,
+                verification_snippet=alert_info.verification_snippet,
+            )
+
+        return True, ExtractionStatus.SAVED.value
 
     except Exception as e:
         error_msg = f"Error processing article {article.url}: {e}"
         logger.error(error_msg)
-        return False, f"error:{str(e)}"
+        return False, ExtractionStatus.ERROR.value
 
 
 async def scrape_fund(fund_slug: str) -> ScrapingResult:

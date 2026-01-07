@@ -5,7 +5,6 @@ Application settings loaded from environment variables.
 import os
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
-from functools import lru_cache
 
 
 class Settings(BaseSettings):
@@ -50,6 +49,9 @@ class Settings(BaseSettings):
     llm_model: str = "claude-3-5-haiku-20241022"
     llm_temperature: float = 0.0
     llm_max_tokens: int = 4096
+    llm_timeout: int = 90  # Total timeout for Claude API calls (seconds)
+    llm_connect_timeout: int = 30  # Connection timeout for Claude API (seconds)
+    llm_max_retries: int = 3  # Max retries on transient errors
     extraction_confidence_threshold: float = 0.5  # Minimum confidence to keep extraction
 
     # Embedding Settings
@@ -61,6 +63,9 @@ class Settings(BaseSettings):
     rate_limit_delay: float = 1.0
     max_retries: int = 3
 
+    # Twitter Settings
+    twitter_requests_per_run: int = 100  # Max API calls per scrape run (free tier: 1500/month)
+
     # Brave Search Settings
     brave_search_timeout: int = 30
     brave_search_max_retries: int = 3
@@ -70,6 +75,12 @@ class Settings(BaseSettings):
     # Deduplication
     similarity_threshold: float = 0.95
     dedup_window_days: int = 7
+
+    # Concurrency Limits (configurable instead of hardcoded)
+    max_concurrent_extractions: int = 5  # Claude API calls in parallel
+    max_parallel_funds: int = 3  # Fund scrapers in parallel
+    max_concurrent_brave_searches: int = 3  # Brave API calls in parallel
+    enrichment_timeout: float = 30.0  # Timeout for enrichment API calls
 
     # Webhooks (optional)
     slack_webhook_url: str = ""
@@ -82,10 +93,6 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 
-def get_settings() -> Settings:
-    """Get settings instance (no caching to pick up env vars)."""
-    return Settings()
-
-
-# Create settings instance at import time
+# Create settings instance at import time (singleton pattern)
+# All code should import: from ..config.settings import settings
 settings = Settings()

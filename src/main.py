@@ -16,7 +16,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 import time
 
@@ -291,7 +291,7 @@ async def health_check():
 
     response = HealthResponse(
         status="healthy",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         tracked_funds=len(FUND_REGISTRY),
         implemented_scrapers=len(get_implemented_scrapers())
     )
@@ -442,7 +442,9 @@ async def list_deals(
                                 title=f.get("title"),
                                 linkedin_url=linkedin_url,
                             ))
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as e:
+                        # FIX #18: Log JSON parsing failures with context
+                        logger.warning(f"Invalid founders_json for deal {deal.id}: {e}")
                         founders = None
 
                 # Get source info from articles
@@ -494,11 +496,11 @@ async def list_deals(
             )
 
     except Exception as e:
-        # Log the error but return empty results instead of sample data
-        print(f"Database query failed: {e}")
+        # FIX #13: Log error securely, don't expose details to client
+        logger.error(f"Database query failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=503,
-            detail=f"Database unavailable: {str(e)}"
+            detail="Service temporarily unavailable"
         )
 
 
@@ -595,12 +597,13 @@ async def export_deals_csv(
                 iter([output.getvalue()]),
                 media_type="text/csv",
                 headers={
-                    "Content-Disposition": f"attachment; filename=bud-tracker-deals-{datetime.utcnow().strftime('%Y%m%d')}.csv"
+                    "Content-Disposition": f"attachment; filename=bud-tracker-deals-{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
                 }
             )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class StealthDetectionResponse(BaseModel):
@@ -663,7 +666,8 @@ async def list_stealth_detections(
             )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/extract", response_model=ExtractionResponse)
@@ -701,7 +705,8 @@ async def extract_funding_deal(
             announcement_rejection_reason=result.announcement_rejection_reason,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/extract/batch", response_model=List[ExtractionResponse])
@@ -751,7 +756,8 @@ async def extract_funding_deals_batch(
         return responses
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- Scraping Endpoints -----
@@ -818,10 +824,10 @@ async def run_scraper(
     # FIX: Clear content hash cache before scraping to prevent false duplicates
     clear_content_hash_cache()
 
-    result = await scrape_fund(fund_slug)
-
-    # Invalidate deals cache after scraping
+    # FIX #39: Invalidate cache BEFORE scraping to prevent stale data during operation
     cache.invalidate("deals")
+
+    result = await scrape_fund(fund_slug)
 
     return ScrapeResponse(
         fund_slug=result.fund_slug,
@@ -974,7 +980,8 @@ async def run_sec_edgar_scraper(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class BraveSearchResponse(BaseModel):
@@ -1042,7 +1049,8 @@ async def run_brave_search_scraper_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class FastScanResponse(BaseModel):
@@ -1099,7 +1107,8 @@ async def run_fast_scan_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class FirecrawlRequest(BaseModel):
@@ -1140,7 +1149,8 @@ async def run_firecrawl_scraper_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- Google Alerts Endpoints -----
@@ -1197,7 +1207,8 @@ async def run_google_alerts_scraper(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/scrapers/google-alerts/setup")
@@ -1251,7 +1262,8 @@ async def run_twitter_monitor(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/scrapers/twitter/setup")
@@ -1294,7 +1306,8 @@ async def run_techcrunch_scraper_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class FortuneResponse(BaseModel):
@@ -1328,7 +1341,8 @@ async def run_fortune_scraper_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- Community/Early Signal Scrapers -----
@@ -1369,7 +1383,8 @@ async def run_ycombinator_scraper_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class GitHubTrendingResponse(BaseModel):
@@ -1404,7 +1419,8 @@ async def run_github_trending_scraper_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class HackerNewsResponse(BaseModel):
@@ -1445,7 +1461,8 @@ async def run_hackernews_scraper_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- LinkedIn Jobs (Stealth Detection) -----
@@ -1506,7 +1523,8 @@ async def run_linkedin_jobs_scraper_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- Tier 1 Stealth Detection Scrapers -----
@@ -1566,7 +1584,8 @@ async def run_portfolio_diff_scraper_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class USPTOTrademarkResponse(BaseModel):
@@ -1617,7 +1636,8 @@ async def run_uspto_trademark_scraper_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class DelawareCorpsResponse(BaseModel):
@@ -1678,7 +1698,8 @@ async def run_delaware_corps_scraper_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- SEC + Delaware Cross-Reference -----
@@ -1802,7 +1823,8 @@ async def run_sec_delaware_crossref_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- Tech Funding News -----
@@ -1842,7 +1864,8 @@ async def run_tech_funding_news_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- Ventureburn -----
@@ -1880,7 +1903,8 @@ async def run_ventureburn_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- Crunchbase News -----
@@ -1920,7 +1944,8 @@ async def run_crunchbase_news_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- VentureBeat -----
@@ -1960,7 +1985,8 @@ async def run_venturebeat_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- Axios Pro Rata -----
@@ -2001,7 +2027,8 @@ async def run_axios_prorata_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- StrictlyVC -----
@@ -2041,7 +2068,8 @@ async def run_strictlyvc_endpoint(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- All Sources Combined -----
@@ -2674,7 +2702,8 @@ async def backfill_deal_dates(
             await session.commit()
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     return DateBackfillResponse(
         deals_processed=processed,
@@ -2747,7 +2776,8 @@ async def cleanup_old_deals(
             await session.commit()
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     cache.invalidate("deals")
 
@@ -2791,7 +2821,8 @@ async def delete_deal(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     cache.invalidate("deals")
 
@@ -2868,7 +2899,8 @@ async def enrich_founder_linkedin(
                         linkedin_found += 1
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     return LinkedInEnrichmentResponse(
         deals_processed=processed,
@@ -2914,7 +2946,8 @@ async def get_enrichment_stats(
         stats = await get_enrichment_coverage()
         return EnrichmentCoverageResponse(**stats)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/enrichment/backfill-all", response_model=BackfillResponse)
@@ -2950,7 +2983,8 @@ async def backfill_all_enrichment(
             total_processed=website_stats.total_processed + linkedin_stats.total_processed,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/enrichment/backfill-websites", response_model=BackfillResponse)
@@ -2983,7 +3017,8 @@ async def backfill_websites_only(
             total_processed=stats.total_processed,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/enrichment/backfill-linkedin", response_model=BackfillResponse)
@@ -3016,7 +3051,8 @@ async def backfill_linkedin_only(
             total_processed=stats.total_processed,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ----- CLI Runner -----

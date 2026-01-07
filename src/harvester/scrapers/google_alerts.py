@@ -22,6 +22,7 @@ import httpx
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 from datetime import datetime, date, timezone
+from urllib.parse import urlparse
 from typing import List, Optional, Tuple
 from bs4 import BeautifulSoup
 
@@ -134,11 +135,12 @@ class GoogleAlertsScraper:
             for f in feeds_str.split(','):
                 url = f.strip()
                 if url:
-                    # Validate URL starts with http
-                    if url.startswith('http://') or url.startswith('https://'):
+                    # FIX #16: Use urlparse to validate URL has scheme and netloc (domain)
+                    parsed = urlparse(url)
+                    if parsed.scheme in ('http', 'https') and parsed.netloc:
                         feeds.append(url)
                     else:
-                        logger.warning(f"Invalid Google Alerts feed URL (must start with http): {url}")
+                        logger.warning(f"Invalid Google Alerts feed URL (missing scheme or domain): {url}")
             return feeds
         return []
 
@@ -165,11 +167,12 @@ class GoogleAlertsScraper:
                         continue
 
                     # Parse publication date with fallbacks
+                    # FIX #14: Use timezone-aware datetime to prevent comparison issues
                     pub_date = None
                     for date_field in ['published_parsed', 'updated_parsed', 'created_parsed']:
                         date_tuple = getattr(entry, date_field, None)
                         if date_tuple and len(date_tuple) >= 6:
-                            pub_date = datetime(*date_tuple[:6])
+                            pub_date = datetime(*date_tuple[:6], tzinfo=timezone.utc)
                             break
 
                     # Clean up description (remove HTML)
@@ -223,9 +226,9 @@ class GoogleAlertsScraper:
         async def fetch_with_limit(feed_url: str) -> List[GoogleAlertItem]:
             async with semaphore:
                 items = await self.fetch_feed(feed_url)
-                # Small delay between feeds for rate limiting
-                await asyncio.sleep(0.3)
-                return items
+            # Rate limit delay OUTSIDE semaphore to allow parallel fetching
+            await asyncio.sleep(0.3)
+            return items
 
         # Fetch all feeds in parallel
         tasks = [fetch_with_limit(url) for url in self.feed_urls]

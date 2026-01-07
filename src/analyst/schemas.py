@@ -209,8 +209,28 @@ class DealExtraction(BaseModel):
     # FIX 3: Validate announcement fields match is_new_announcement state
     @model_validator(mode='after')
     def validate_announcement_fields(self) -> 'DealExtraction':
-        """Ensure evidence/reason fields are populated appropriately."""
-        if not self.is_new_announcement:
+        """
+        Ensure evidence/reason fields are populated appropriately.
+
+        CRITICAL: Prevents false positives where LLM claims new announcement
+        without providing proof.
+        """
+        if self.is_new_announcement:
+            # New announcements MUST have evidence - downgrade if missing
+            if not self.announcement_evidence:
+                # FIX: Don't accept is_new_announcement=True without proof
+                # Downgrade to False instead of crashing extraction
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"Downgrading {self.startup_name}: is_new_announcement=True "
+                    f"but no announcement_evidence provided"
+                )
+                self.is_new_announcement = False
+                self.announcement_rejection_reason = (
+                    "LLM claimed new announcement but provided no evidence"
+                )
+        else:
             # Non-announcements must have a rejection reason
             if not self.announcement_rejection_reason:
                 self.announcement_rejection_reason = "Not a new funding announcement"

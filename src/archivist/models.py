@@ -82,13 +82,14 @@ class Deal(SQLModel, table=True):
     announced_date: Optional[date] = None
 
     # Lead investor tracking
-    is_lead_confirmed: bool = False  # True if we confirmed a tracked fund led
+    # FIX #43: Add index=True for frequently filtered fields
+    is_lead_confirmed: bool = Field(default=False, index=True)  # True if we confirmed a tracked fund led
     lead_partner_name: Optional[str] = None  # Partner who led the deal
     verification_snippet: Optional[str] = None  # Exact quote proving lead status
 
     # Enterprise AI classification
     enterprise_category: Optional[str] = None  # infrastructure, security, vertical_saas, agentic, data_intelligence
-    is_enterprise_ai: bool = False  # True if B2B Enterprise AI (not consumer)
+    is_enterprise_ai: bool = Field(default=False, index=True)  # True if B2B Enterprise AI (not consumer)
 
     # Founders (stored as JSON list)
     founders_json: Optional[str] = None  # JSON: [{"name": "...", "title": "...", "linkedin_url": "..."}]
@@ -98,13 +99,20 @@ class Deal(SQLModel, table=True):
     thesis_drift_score: float = 0.0
 
     # Metadata
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # FIX #43: Add index=True for date range queries
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     company: PortfolioCompany = Relationship(back_populates="deals")
-    investors: List["DealInvestor"] = Relationship(back_populates="deal")
-    articles: List["Article"] = Relationship(back_populates="deal")
+    investors: List["DealInvestor"] = Relationship(
+        back_populates="deal",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    articles: List["Article"] = Relationship(
+        back_populates="deal",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
 
 
 class DealInvestor(SQLModel, table=True):
@@ -139,7 +147,7 @@ class Article(SQLModel, table=True):
     title: str
     source_fund_slug: Optional[str] = None  # Which fund's feed we found it on
     published_date: Optional[date] = None
-    fetched_at: datetime = Field(default_factory=datetime.utcnow)
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Content
     raw_html: Optional[str] = None
@@ -172,7 +180,7 @@ class StealthDetection(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     fund_slug: str = Field(index=True)
     detected_url: str
-    detected_at: datetime = Field(default_factory=datetime.utcnow)
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     company_name: Optional[str] = None
     is_confirmed: bool = False
     notes: Optional[str] = None
@@ -190,4 +198,4 @@ class ThesisDrift(SQLModel, table=True):
         default=None,
         sa_column=Column(Vector(1536))
     )
-    calculated_at: datetime = Field(default_factory=datetime.utcnow)
+    calculated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

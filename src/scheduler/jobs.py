@@ -127,7 +127,11 @@ async def enrich_new_deals(limit: int = 25):
                     await asyncio.sleep(0.5)  # Rate limit
 
                 except Exception as e:
-                    logger.warning(f"Error enriching {company_name}: {e}")
+                    # FIX #40: Include deal ID and stack trace for debugging
+                    logger.warning(
+                        f"Error enriching {company_name} (deal_id={deal.id}): {e}",
+                        exc_info=True,
+                    )
 
             await db.commit()
             logger.info(f"Enriched {enriched_count} companies with website/LinkedIn data")
@@ -209,8 +213,9 @@ async def process_external_articles(
             stats["deals_extracted"] += 1
 
             # Save to database
+            alert_info = None
             async with get_session() as session:
-                await save_deal(
+                deal, alert_info = await save_deal(
                     session=session,
                     extraction=extraction,
                     article_url=article.url,
@@ -219,10 +224,23 @@ async def process_external_articles(
                     source_fund_slug=article.fund_slug,
                     article_published_date=article.published_date,
                 )
-                stats["deals_saved"] += 1
-                logger.info(
-                    f"[{source_name}] Saved deal: {extraction.startup_name} "
-                    f"(fund: {article.fund_slug or 'unknown'})"
+                if deal:
+                    stats["deals_saved"] += 1
+                    logger.info(
+                        f"[{source_name}] Saved deal: {extraction.startup_name} "
+                        f"(fund: {article.fund_slug or 'unknown'})"
+                    )
+
+            # FIX #20: Send alert AFTER transaction commits (session context exited)
+            if alert_info:
+                from .notifications import send_lead_deal_alert
+                await send_lead_deal_alert(
+                    company_name=alert_info.company_name,
+                    amount=alert_info.amount,
+                    round_type=alert_info.round_type,
+                    lead_investor=alert_info.lead_investor,
+                    enterprise_category=alert_info.enterprise_category,
+                    verification_snippet=alert_info.verification_snippet,
                 )
 
             # Rate limit between extractions

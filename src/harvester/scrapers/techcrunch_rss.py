@@ -111,8 +111,9 @@ class TechCrunchScraper:
                 pub_date = None
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
                     # FIX: Check tuple length before unpacking (crash prevention)
+                    # FIX #14: Use timezone-aware datetime to prevent comparison issues
                     if len(entry.published_parsed) >= 6:
-                        pub_date = datetime(*entry.published_parsed[:6])
+                        pub_date = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
 
                 # Clean description
                 description = entry.get('summary', '')

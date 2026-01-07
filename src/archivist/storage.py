@@ -5,12 +5,25 @@ Storage pipeline for persisting extracted deals to the database.
 import json
 import re
 import logging
+from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
-from typing import Optional
+from typing import Optional, Tuple
 from sqlalchemy import select, nullslast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+
+# FIX #20: Alert info returned from save_deal for post-commit sending
+@dataclass
+class LeadDealAlertInfo:
+    """Info needed to send a lead deal alert after transaction commits."""
+    company_name: str
+    amount: Optional[str]
+    round_type: str
+    lead_investor: str
+    enterprise_category: Optional[str]
+    verification_snippet: Optional[str]
 
 from .models import (
     Fund,
@@ -23,7 +36,7 @@ from .models import (
 from .database import get_session
 from ..analyst.schemas import DealExtraction, LeadStatus, EnterpriseCategory
 from ..config.funds import FUND_REGISTRY
-# NOTE: match_fund_name is imported lazily inside save_deal() to avoid circular import
+from ..harvester.fund_matcher import match_fund_name
 
 
 def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
@@ -349,7 +362,7 @@ async def save_deal(
     article_text: Optional[str] = None,
     source_fund_slug: Optional[str] = None,
     article_published_date: Optional[date] = None,
-) -> Optional[Deal]:
+) -> Tuple[Optional[Deal], Optional[LeadDealAlertInfo]]:
     """
     Save an extracted deal to the database.
 
@@ -359,12 +372,12 @@ async def save_deal(
     - DealInvestor records for all investors
     - Article record linked to the deal
 
-    Returns None if deal is a duplicate (article is still linked to existing deal).
+    Returns:
+        Tuple of (Deal, LeadDealAlertInfo) where:
+        - Deal is None if duplicate (article still linked to existing deal)
+        - LeadDealAlertInfo is provided if this is a lead deal that needs an alert
+          (FIX #20: alert should be sent AFTER transaction commits)
     """
-    # Lazy import to avoid circular dependency
-    # (storage.py -> harvester -> orchestrator.py -> storage.py)
-    from ..harvester.fund_matcher import match_fund_name
-
     # Determine announced_date for duplicate check
     announced_date = extraction.round_date
     if announced_date is None and article_published_date:
@@ -400,7 +413,7 @@ async def save_deal(
             logger.debug(f"Linked new article to existing deal #{existing_deal.id}")
         else:
             logger.debug(f"Article URL already exists, skipping: {article_url}")
-        return None  # Signal that this was a duplicate
+        return None, None  # Signal that this was a duplicate
 
     # Get or create company with website and LinkedIn
     company = await get_or_create_company(
@@ -496,11 +509,10 @@ async def save_deal(
 
     await session.flush()
 
-    # Send Slack/Discord alert for lead deals
+    # FIX #20: Return alert info for lead deals instead of sending directly
+    # Caller should send alert AFTER transaction commits to avoid alerting for rolled-back deals
+    alert_info = None
     if extraction.tracked_fund_is_lead:
-        # Lazy import to avoid circular dependency
-        from ..scheduler.notifications import send_lead_deal_alert
-
         # Find the lead investor name from extraction
         lead_investor_name = "Unknown"
         for inv in extraction.lead_investors:
@@ -508,7 +520,7 @@ async def save_deal(
                 lead_investor_name = inv.name
                 break
 
-        await send_lead_deal_alert(
+        alert_info = LeadDealAlertInfo(
             company_name=extraction.startup_name,
             amount=extraction.amount,
             round_type=extraction.round_label.value,
@@ -517,7 +529,7 @@ async def save_deal(
             verification_snippet=extraction.verification_snippet,
         )
 
-    return deal
+    return deal, alert_info
 
 
 async def get_deals(

@@ -74,7 +74,8 @@ class PlaywrightScraper:
             try:
                 page = self._page_pool.get_nowait()
                 await page.close()
-            except:
+            except Exception:
+                # FIX #15: Use Exception instead of bare except
                 pass
         if self._context:
             await self._context.close()
@@ -137,7 +138,8 @@ class PlaywrightScraper:
             # Page may be in bad state, close it
             try:
                 await page.close()
-            except:
+            except Exception:
+                # FIX #15: Use Exception instead of bare except
                 pass
 
     async def new_page(self) -> Page:

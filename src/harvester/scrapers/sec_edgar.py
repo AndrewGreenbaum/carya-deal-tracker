@@ -257,8 +257,11 @@ class SECEdgarScraper:
             filing_url = entry.get("link", "")
 
             # Extract accession number from URL
-            accession_match = re.search(r"/(\d+-\d+-\d+)", filing_url)
+            # FIX #21: Validate format with proper regex (10 digits-2 digits-6 digits)
+            accession_match = re.search(r"/(\d{10}-\d{2}-\d{6})", filing_url)
             accession_number = accession_match.group(1) if accession_match else ""
+            if not accession_number and filing_url:
+                logger.warning(f"Invalid accession number format in URL: {filing_url}")
 
             return FormDFiling(
                 company_name=company_name.strip(),
@@ -302,12 +305,13 @@ class SECEdgarScraper:
             response = await self.client.get(xml_url)
 
             if response.status_code != 200:
-                # FIX: Log HTTP failures instead of silent return
+                # FIX #32: Return None on XML failure (consistent with missing accession)
+                # Partial data causes downstream issues with lead scoring and filtering
                 logger.warning(
                     f"SEC EDGAR XML fetch failed for {filing.company_name}: "
                     f"HTTP {response.status_code} from {xml_url}"
                 )
-                return filing  # Return filing without details (partial data)
+                return None  # Don't proceed with incomplete data
 
             # Parse XML - SEC Form D may use namespace prefixes
             root = ET.fromstring(response.text)
@@ -369,9 +373,10 @@ class SECEdgarScraper:
                     # Use mapping to convert full name to 2-letter code
                     filing.state_of_incorporation = STATE_CODES[state_text]
                 else:
-                    # Unknown format, store as-is but log warning
-                    logger.warning(f"Unknown state format: {state_text}")
-                    filing.state_of_incorporation = state_text
+                    # FIX: Unknown format - store None instead of malformed data
+                    # This prevents downstream filtering issues with invalid state codes
+                    logger.warning(f"Unknown state format (ignoring): {state_text}")
+                    filing.state_of_incorporation = None
 
             return filing
 

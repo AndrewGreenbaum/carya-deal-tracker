@@ -133,22 +133,39 @@ class BraveEnrichmentClient:
             return False
 
     def _extract_linkedin_url(self, text: str) -> Optional[str]:
-        """Extract LinkedIn profile URL from text."""
+        """Extract LinkedIn profile URL from text.
+
+        FIX #35: Validates URL is a profile page, not /jobs/, /posts/, etc.
+        """
         match = re.search(LINKEDIN_PROFILE_PATTERN, text)
         if match:
             url = match.group(0)
-            if "/search" not in url and "/company/" not in url:
+            # FIX #35: Reject non-profile LinkedIn URLs
+            invalid_paths = ["/search", "/company/", "/jobs", "/posts", "/activity", "/pulse", "/learning"]
+            if not any(path in url for path in invalid_paths):
                 return url
         return None
 
     async def _search(self, query: str, count: int = 5) -> List[Dict]:
-        """Execute Brave Search query using shared client."""
+        """Execute Brave Search query using shared client.
+
+        FIX #36: Wrapped with timeout to prevent hanging.
+        """
         client = get_brave_client()
         if not client.validate_api_key():
             logger.warning("BRAVE_SEARCH_KEY not configured for enrichment")
             return []
 
-        data = await client.search_web(query, count)
+        try:
+            # FIX #36: Add timeout to prevent indefinite hangs
+            data = await asyncio.wait_for(
+                client.search_web(query, count),
+                timeout=settings.enrichment_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Brave search timeout for query: {query[:50]}...")
+            return []
+
         if data is None:
             return []
 
@@ -371,20 +388,37 @@ async def enrich_company_with_context(context: DealContext) -> BraveEnrichmentRe
 async def enrich_companies_batch(
     company_names: List[str],
     delay_seconds: float = 0.5,
+    max_concurrent: int = 5,
 ) -> Dict[str, BraveEnrichmentResult]:
-    """Enrich multiple companies with rate limiting."""
-    results = {}
+    """Enrich multiple companies with rate limiting.
 
-    async with BraveEnrichmentClient() as client:
-        for name in company_names:
+    FIX #33: Use semaphore + burst pattern for parallel enrichment.
+    """
+    results: Dict[str, BraveEnrichmentResult] = {}
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def enrich_with_limit(name: str) -> tuple[str, BraveEnrichmentResult]:
+        async with semaphore:
             try:
-                result = await client.enrich(name)
-                results[name] = result
+                async with BraveEnrichmentClient() as client:
+                    result = await client.enrich(name)
             except Exception as e:
                 logger.error(f"Error enriching {name}: {e}")
-                results[name] = BraveEnrichmentResult(company_name=name)
+                result = BraveEnrichmentResult(company_name=name)
+        # Rate limit delay OUTSIDE semaphore to allow parallel fetching
+        await asyncio.sleep(delay_seconds)
+        return (name, result)
 
-            await asyncio.sleep(delay_seconds)
+    # Run all enrichments in parallel (limited by semaphore)
+    tasks = [enrich_with_limit(name) for name in company_names]
+    completed = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for item in completed:
+        if isinstance(item, Exception):
+            logger.error(f"Batch enrichment error: {item}")
+            continue
+        name, result = item
+        results[name] = result
 
     return results
 

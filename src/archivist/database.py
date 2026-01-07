@@ -22,6 +22,13 @@ engine = create_async_engine(
     max_overflow=10,
     pool_pre_ping=True,   # Detect stale connections before use
     pool_recycle=3600,    # Recycle connections every hour
+    pool_timeout=30,      # Wait max 30s for connection from pool
+    connect_args={
+        "command_timeout": 30,  # Timeout for individual queries (asyncpg)
+        "server_settings": {
+            "statement_timeout": "30000",  # PostgreSQL statement timeout (ms)
+        },
+    },
 )
 
 # Session factory

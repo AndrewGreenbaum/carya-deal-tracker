@@ -117,8 +117,8 @@ Please check logs for details."""
     return {"text": text.strip()}
 
 
-async def _send_slack(message: dict):
-    """Send message to Slack webhook."""
+async def _send_slack(message: dict) -> bool:
+    """Send message to Slack webhook. Returns True on success."""
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -128,12 +128,15 @@ async def _send_slack(message: dict):
             )
             response.raise_for_status()
             logger.info("Slack notification sent")
+            return True
     except Exception as e:
+        # FIX #19: Log error but return False to track failure
         logger.error(f"Failed to send Slack notification: {e}")
+        return False
 
 
-async def _send_discord(message: dict):
-    """Send message to Discord webhook."""
+async def _send_discord(message: dict) -> bool:
+    """Send message to Discord webhook. Returns True on success."""
     try:
         # Discord uses 'content' instead of 'text'
         discord_payload = {"content": message["text"]}
@@ -146,8 +149,11 @@ async def _send_discord(message: dict):
             )
             response.raise_for_status()
             logger.info("Discord notification sent")
+            return True
     except Exception as e:
+        # FIX #19: Log error but return False to track failure
         logger.error(f"Failed to send Discord notification: {e}")
+        return False
 
 
 async def send_lead_deal_alert(
@@ -212,10 +218,22 @@ async def send_lead_deal_alert(
     # Log the alert
     logger.info(f"Lead deal alert: {company_name} - {round_type} led by {lead_investor}")
 
+    # FIX #19: Track notification success across channels
+    channels_configured = 0
+    channels_succeeded = 0
+
     # Send to Slack
     if settings.slack_webhook_url:
-        await _send_slack(message)
+        channels_configured += 1
+        if await _send_slack(message):
+            channels_succeeded += 1
 
     # Send to Discord
     if settings.discord_webhook_url:
-        await _send_discord(message)
+        channels_configured += 1
+        if await _send_discord(message):
+            channels_succeeded += 1
+
+    # FIX #19: Log critical error if all configured channels failed
+    if channels_configured > 0 and channels_succeeded == 0:
+        logger.critical(f"Lead deal alert FAILED: All {channels_configured} notification channels failed for {company_name}")

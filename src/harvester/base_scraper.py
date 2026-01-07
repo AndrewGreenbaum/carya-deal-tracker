@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, date, timezone
 from typing import List, Optional, AsyncIterator
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 
 from ..config.funds import FundConfig
 from ..config.settings import settings

@@ -108,8 +108,12 @@ class YCombinatorScraper:
     async def fetch_companies_algolia(self, batch: str, hits_per_page: int = 100) -> List[YCCompany]:
         """Fetch companies from Algolia API for a specific batch."""
         try:
-            app_id = settings.yc_algolia_app_id
-            api_key = settings.yc_algolia_api_key
+            # FIX #17: Validate Algolia config before using
+            app_id = getattr(settings, 'yc_algolia_app_id', None)
+            api_key = getattr(settings, 'yc_algolia_api_key', None)
+            if not app_id or not api_key:
+                logger.warning("YC Algolia config not set (yc_algolia_app_id/yc_algolia_api_key)")
+                return []
             url = f"https://{app_id}-dsn.algolia.net/1/indexes/{ALGOLIA_INDEX}/query"
 
             headers = {
