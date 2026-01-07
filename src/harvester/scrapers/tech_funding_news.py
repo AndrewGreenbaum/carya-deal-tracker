@@ -19,12 +19,15 @@ RSS Feeds:
 """
 
 import asyncio
+import logging
 import feedparser
 import httpx
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
@@ -157,7 +160,7 @@ class TechFundingNewsScraper:
             return articles
 
         except Exception as e:
-            print(f"Error fetching Tech Funding News feed {category}: {e}")
+            logger.error(f"Error fetching Tech Funding News feed {category}: {e}")
             return []
 
     async def fetch_all_feeds(self, hours_back: int = 168) -> List[TechFundingArticle]:
@@ -258,7 +261,7 @@ class TechFundingNewsScraper:
                 author=article.author or "Tech Funding News",
                 tags=tags,
                 fund_slug=fund_slug or "",
-                fetched_at=datetime.utcnow(),
+                fetched_at=datetime.now(timezone.utc),
             ))
 
         return normalized

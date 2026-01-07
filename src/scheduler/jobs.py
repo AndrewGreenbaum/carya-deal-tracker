@@ -405,6 +405,66 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             logger.error(f"LinkedIn Jobs scraping failed: {e}")
             results["linkedin_jobs"] = {"error": str(e)}
 
+    # 8. CRUNCHBASE NEWS (free RSS)
+    try:
+        from ..harvester.scrapers.crunchbase_news import CrunchbaseNewsScraper
+
+        async with CrunchbaseNewsScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+
+        stats = await process_external_articles(articles, "crunchbase_news")
+        results["crunchbase_news"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error(f"Crunchbase News scraping failed: {e}")
+        results["crunchbase_news"] = {"error": str(e)}
+
+    # 9. VENTUREBEAT (free RSS)
+    try:
+        from ..harvester.scrapers.venturebeat import VentureBeatScraper
+
+        async with VentureBeatScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+
+        stats = await process_external_articles(articles, "venturebeat")
+        results["venturebeat"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error(f"VentureBeat scraping failed: {e}")
+        results["venturebeat"] = {"error": str(e)}
+
+    # 10. AXIOS PRO RATA (free RSS - may return 0 if deprecated)
+    try:
+        from ..harvester.scrapers.axios_prorata import AxiosProRataScraper
+
+        async with AxiosProRataScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+
+        stats = await process_external_articles(articles, "axios_prorata")
+        results["axios_prorata"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error(f"Axios Pro Rata scraping failed: {e}")
+        results["axios_prorata"] = {"error": str(e)}
+
+    # 11. STRICTLYVC (free RSS)
+    try:
+        from ..harvester.scrapers.strictlyvc import StrictlyVCScraper
+
+        async with StrictlyVCScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+
+        stats = await process_external_articles(articles, "strictlyvc")
+        results["strictlyvc"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error(f"StrictlyVC scraping failed: {e}")
+        results["strictlyvc"] = {"error": str(e)}
+
     results["total_deals_saved"] = total_deals_saved
     logger.info(f"External sources complete: {total_deals_saved} total deals saved")
 

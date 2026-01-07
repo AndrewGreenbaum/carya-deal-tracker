@@ -1867,6 +1867,167 @@ async def run_ventureburn_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ----- Crunchbase News -----
+
+class CrunchbaseNewsResponse(BaseModel):
+    feeds_scraped: int
+    articles_found: int
+    funding_articles: int
+    fund_matches: int
+
+
+@app.post("/scrapers/crunchbase-news", response_model=CrunchbaseNewsResponse)
+async def run_crunchbase_news_endpoint(
+    hours_back: int = Query(168, ge=1, le=720, description="Hours to look back (default 7 days)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run Crunchbase News scraper.
+
+    High-quality funding news from Crunchbase's editorial team.
+    Excellent for detailed deal information and lead investor mentions.
+    FREE - uses public RSS feeds.
+    """
+    from .harvester.scrapers.crunchbase_news import CrunchbaseNewsScraper
+
+    try:
+        async with CrunchbaseNewsScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=hours_back)
+
+        fund_matches = len([a for a in articles if a.fund_slug])
+
+        return CrunchbaseNewsResponse(
+            feeds_scraped=3,  # main + venture + startups
+            articles_found=len(articles),
+            funding_articles=len(articles),
+            fund_matches=fund_matches,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----- VentureBeat -----
+
+class VentureBeatResponse(BaseModel):
+    feeds_scraped: int
+    articles_found: int
+    funding_articles: int
+    fund_matches: int
+
+
+@app.post("/scrapers/venturebeat", response_model=VentureBeatResponse)
+async def run_venturebeat_endpoint(
+    hours_back: int = Query(168, ge=1, le=720, description="Hours to look back (default 7 days)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run VentureBeat scraper.
+
+    Leading tech publication with strong AI and enterprise coverage.
+    Excellent for AI/ML startup funding news.
+    FREE - uses public RSS feeds.
+    """
+    from .harvester.scrapers.venturebeat import VentureBeatScraper
+
+    try:
+        async with VentureBeatScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=hours_back)
+
+        fund_matches = len([a for a in articles if a.fund_slug])
+
+        return VentureBeatResponse(
+            feeds_scraped=4,  # ai + business + funding + games
+            articles_found=len(articles),
+            funding_articles=len(articles),
+            fund_matches=fund_matches,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----- Axios Pro Rata -----
+
+class AxiosProRataResponse(BaseModel):
+    feeds_scraped: int
+    articles_found: int
+    funding_articles: int
+    fund_matches: int
+
+
+@app.post("/scrapers/axios-prorata", response_model=AxiosProRataResponse)
+async def run_axios_prorata_endpoint(
+    hours_back: int = Query(168, ge=1, le=720, description="Hours to look back (default 7 days)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run Axios Pro Rata scraper.
+
+    Dan Primack's legendary VC newsletter.
+    One of the most respected sources for VC/PE deal news.
+    FREE - uses public RSS feeds (if available).
+    NOTE: Axios RSS may be deprecated - deals captured via Brave Search fallback.
+    """
+    from .harvester.scrapers.axios_prorata import AxiosProRataScraper
+
+    try:
+        async with AxiosProRataScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=hours_back)
+
+        fund_matches = len([a for a in articles if a.fund_slug])
+
+        return AxiosProRataResponse(
+            feeds_scraped=3,  # prorata + technology + deals
+            articles_found=len(articles),
+            funding_articles=len(articles),
+            fund_matches=fund_matches,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----- StrictlyVC -----
+
+class StrictlyVCResponse(BaseModel):
+    feeds_scraped: int
+    articles_found: int
+    funding_articles: int
+    fund_matches: int
+
+
+@app.post("/scrapers/strictlyvc", response_model=StrictlyVCResponse)
+async def run_strictlyvc_endpoint(
+    hours_back: int = Query(168, ge=1, le=720, description="Hours to look back (default 7 days)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run StrictlyVC scraper.
+
+    Connie Loizos' highly respected VC newsletter.
+    One of the best sources for VC funding news.
+    FREE - uses public RSS feed.
+    """
+    from .harvester.scrapers.strictlyvc import StrictlyVCScraper
+
+    try:
+        async with StrictlyVCScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=hours_back)
+
+        fund_matches = len([a for a in articles if a.fund_slug])
+
+        return StrictlyVCResponse(
+            feeds_scraped=1,  # main feed
+            articles_found=len(articles),
+            funding_articles=len(articles),
+            fund_matches=fund_matches,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ----- All Sources Combined -----
 
 class AllSourcesResponse(BaseModel):
@@ -1882,6 +2043,10 @@ class AllSourcesResponse(BaseModel):
     linkedin_jobs: Optional[LinkedInJobsResponse] = None
     tech_funding_news: Optional[TechFundingNewsResponse] = None
     ventureburn: Optional[VentureburnResponse] = None
+    crunchbase_news: Optional[CrunchbaseNewsResponse] = None
+    venturebeat: Optional[VentureBeatResponse] = None
+    axios_prorata: Optional[AxiosProRataResponse] = None
+    strictlyvc: Optional[StrictlyVCResponse] = None
     # Tier 1 Stealth Detection
     portfolio_diff: Optional[PortfolioDiffResponse] = None
     uspto_trademarks: Optional[USPTOTrademarkResponse] = None
@@ -2097,6 +2262,66 @@ async def run_all_sources(
         )
     except Exception:
         results["ventureburn"] = None
+
+    # Crunchbase News (always runs - free RSS)
+    try:
+        from .harvester.scrapers.crunchbase_news import CrunchbaseNewsScraper
+        async with CrunchbaseNewsScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+        fund_matches = len([a for a in articles if a.fund_slug])
+        results["crunchbase_news"] = CrunchbaseNewsResponse(
+            feeds_scraped=3,
+            articles_found=len(articles),
+            funding_articles=len(articles),
+            fund_matches=fund_matches,
+        )
+    except Exception:
+        results["crunchbase_news"] = None
+
+    # VentureBeat (always runs - free RSS)
+    try:
+        from .harvester.scrapers.venturebeat import VentureBeatScraper
+        async with VentureBeatScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+        fund_matches = len([a for a in articles if a.fund_slug])
+        results["venturebeat"] = VentureBeatResponse(
+            feeds_scraped=4,
+            articles_found=len(articles),
+            funding_articles=len(articles),
+            fund_matches=fund_matches,
+        )
+    except Exception:
+        results["venturebeat"] = None
+
+    # Axios Pro Rata (always runs - free RSS, may return 0 if deprecated)
+    try:
+        from .harvester.scrapers.axios_prorata import AxiosProRataScraper
+        async with AxiosProRataScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+        fund_matches = len([a for a in articles if a.fund_slug])
+        results["axios_prorata"] = AxiosProRataResponse(
+            feeds_scraped=3,
+            articles_found=len(articles),
+            funding_articles=len(articles),
+            fund_matches=fund_matches,
+        )
+    except Exception:
+        results["axios_prorata"] = None
+
+    # StrictlyVC (always runs - free RSS)
+    try:
+        from .harvester.scrapers.strictlyvc import StrictlyVCScraper
+        async with StrictlyVCScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+        fund_matches = len([a for a in articles if a.fund_slug])
+        results["strictlyvc"] = StrictlyVCResponse(
+            feeds_scraped=1,
+            articles_found=len(articles),
+            funding_articles=len(articles),
+            fund_matches=fund_matches,
+        )
+    except Exception:
+        results["strictlyvc"] = None
 
     # ----- Tier 1 Stealth Detection -----
 

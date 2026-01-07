@@ -57,6 +57,10 @@ from .sec_delaware_crossref import (
 # Additional News Sources
 from .tech_funding_news import TechFundingNewsScraper, run_tech_funding_news_scraper
 from .ventureburn import VentureburnScraper, run_ventureburn_scraper
+from .crunchbase_news import CrunchbaseNewsScraper, run_crunchbase_news_scraper
+from .venturebeat import VentureBeatScraper, run_venturebeat_scraper
+from .axios_prorata import AxiosProRataScraper, run_axios_prorata_scraper
+from .strictlyvc import StrictlyVCScraper, run_strictlyvc_scraper
 
 __all__ = [
     # Original 5
@@ -127,4 +131,12 @@ __all__ = [
     "run_tech_funding_news_scraper",
     "VentureburnScraper",
     "run_ventureburn_scraper",
+    "CrunchbaseNewsScraper",
+    "run_crunchbase_news_scraper",
+    "VentureBeatScraper",
+    "run_venturebeat_scraper",
+    "AxiosProRataScraper",
+    "run_axios_prorata_scraper",
+    "StrictlyVCScraper",
+    "run_strictlyvc_scraper",
 ]
