@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { Home, ChevronDown, ChevronUp } from 'lucide-react';
+import { Home, ChevronDown, ChevronUp, Search, X } from 'lucide-react';
 import type { FilterState, EnterpriseCategory, Fund, ViewType, CostTracker } from '../types';
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
@@ -33,7 +33,7 @@ export function CommandSidebar({
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
   const toggleFilter = (key: keyof FilterState) => {
-    if (key === 'selectedFund' || key === 'selectedCategory') return;
+    if (key === 'selectedFund' || key === 'selectedCategory' || key === 'searchQuery' || key === 'sortDirection') return;
     onFiltersChange({
       ...filters,
       [key]: !filters[key],
@@ -78,6 +78,31 @@ export function CommandSidebar({
           />
         </div>
       </nav>
+
+      {/* Search */}
+      <div className="p-4 border-b border-slate-800">
+        <div className="text-[10px] uppercase text-slate-500 font-bold mb-2 tracking-widest">
+          Search
+        </div>
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+          <input
+            type="text"
+            placeholder="Search companies..."
+            value={filters.searchQuery || ''}
+            onChange={(e) => onFiltersChange({ ...filters, searchQuery: e.target.value })}
+            className="w-full bg-slate-900 border border-slate-800 rounded pl-8 pr-8 py-1.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/50"
+          />
+          {filters.searchQuery && (
+            <button
+              onClick={() => onFiltersChange({ ...filters, searchQuery: '' })}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Filters */}
       <div className="p-4 border-b border-slate-800">

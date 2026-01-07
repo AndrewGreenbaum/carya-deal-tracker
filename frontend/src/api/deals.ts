@@ -286,8 +286,10 @@ export async function fetchDeals(filters: DealFilters = {}): Promise<PaginatedDe
   if (filters.fund_slug) params.set('fund_slug', filters.fund_slug);
   if (filters.is_enterprise_ai !== undefined) params.set('is_enterprise_ai', filters.is_enterprise_ai.toString());
   if (filters.enterprise_category) params.set('enterprise_category', filters.enterprise_category);
+  if (filters.search) params.set('search', filters.search);
+  if (filters.sort_direction) params.set('sort_direction', filters.sort_direction);
 
-  const data = await apiGet<PaginatedDealsApiResponse>(`/deals?${params.toString()}`);
+  const data = await apiGet<PaginatedDealsApiResponse>(`/deals?${params.toString()}`, false); // Don't cache when searching
 
   return {
     deals: data.deals.map(mapDeal),

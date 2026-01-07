@@ -79,6 +79,8 @@ export interface DealFilters {
   is_lead?: boolean;
   is_enterprise_ai?: boolean;
   enterprise_category?: EnterpriseCategory;
+  search?: string;
+  sort_direction?: SortDirection;
   limit?: number;
   offset?: number;
 }
@@ -258,6 +260,8 @@ export interface FilterState {
   showRejected: boolean;
   selectedFund?: string;
   selectedCategory?: EnterpriseCategory;
+  searchQuery?: string;
+  sortDirection: SortDirection;
 }
 
 export interface AppState {

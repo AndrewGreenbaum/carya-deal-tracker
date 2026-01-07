@@ -123,6 +123,14 @@ If the article only says "invested in", "backed by", "participated in", or "anno
 → This is NOT proof of lead status
 → Set tracked_fund_is_lead=False
 → Set verification_snippet=null
+→ Put investor in participating_investors list with role=participant (NOT in lead_investors)
+
+CRITICAL ROLE ASSIGNMENT RULES:
+- You may ONLY put an investor in lead_investors with role=confirmed_lead if you can provide a verification_snippet containing ACTUAL lead language ("led by", "led the", "leads", "spearheaded", etc.)
+- If no lead language exists in the article for that investor → Put them in participating_investors with role=participant
+- NEVER put an investor in lead_investors just because they are mentioned in a funding article
+- The snippet "announced a $16M Series A funding round" is NOT lead language - this would be role=participant
+- The snippet "funding from Index Ventures" is NOT lead language - this would be role=participant
 
 Only set tracked_fund_is_lead=True if you find EXPLICIT lead language.
 
@@ -818,14 +826,29 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
     matched_leads = []
     matched_participants = []
 
-    # Validate verification snippet FIRST
+    # Validate verification snippet FIRST - STRICT CHECK
     has_valid_snippet = _has_lead_language(deal.verification_snippet)
 
+    # CRITICAL FIX: If snippet exists but lacks lead language, REJECT lead claim immediately
+    # This prevents false positives where LLM says "confirmed_lead" without proof
     if deal.verification_snippet and not has_valid_snippet:
         logger.warning(
-            f"Invalid verification snippet for {deal.startup_name}: "
-            f"'{deal.verification_snippet[:60]}...' - missing lead language"
+            f"REJECTING lead claim for {deal.startup_name}: "
+            f"snippet '{deal.verification_snippet[:80]}...' lacks lead language"
         )
+        # Override LLM's incorrect assignment - NOT a lead
+        deal.tracked_fund_is_lead = False
+        deal.tracked_fund_role = LeadStatus.PARTICIPANT
+        # Continue processing to identify which fund is involved, but as participant
+
+    # Also reject if NO snippet provided but deal claims lead status
+    if deal.tracked_fund_is_lead and not deal.verification_snippet:
+        logger.warning(
+            f"REJECTING lead claim for {deal.startup_name}: "
+            f"no verification_snippet provided"
+        )
+        deal.tracked_fund_is_lead = False
+        deal.tracked_fund_role = LeadStatus.PARTICIPANT
 
     # Check ALL lead investors against our fund registry
     for investor in deal.lead_investors:

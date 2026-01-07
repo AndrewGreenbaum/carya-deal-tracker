@@ -26,7 +26,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, nullslast
+from sqlalchemy import select, func, nullslast, nullsfirst
 from sqlalchemy.orm import selectinload
 
 from .config import settings, FUND_REGISTRY, get_all_funds
@@ -347,6 +347,8 @@ async def list_deals(
     is_lead: Optional[bool] = Query(None, description="Filter by lead status (True = tracked fund led)"),
     is_enterprise_ai: Optional[bool] = Query(None, description="Filter for Enterprise AI only (True = B2B AI)"),
     enterprise_category: Optional[str] = Query(None, description="Filter by category (infrastructure, security, vertical_saas, agentic, data_intelligence)"),
+    search: Optional[str] = Query(None, description="Search by company name"),
+    sort_direction: str = Query("desc", description="Sort by announced date: 'asc' or 'desc'"),
     limit: int = Query(50, ge=1, le=200, description="Max results to return"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
 ):
@@ -381,23 +383,31 @@ async def list_deals(
                     Fund, DealInvestor.fund_id == Fund.id
                 ).where(Fund.slug == fund_slug).distinct()
 
+            # Search by company name (case-insensitive)
+            if search:
+                base_stmt = base_stmt.join(PortfolioCompany, Deal.company_id == PortfolioCompany.id).where(
+                    PortfolioCompany.name.ilike(f"%{search}%")
+                )
+
             # Get total count for pagination
             count_stmt = select(func.count()).select_from(base_stmt.subquery())
             total_result = await session.execute(count_stmt)
             total = total_result.scalar() or 0
 
             # Query deals with eager loading
-            stmt = (
-                base_stmt
-                .options(
-                    selectinload(Deal.company),
-                    selectinload(Deal.investors),
-                    selectinload(Deal.articles),
-                )
-                .order_by(nullslast(Deal.announced_date.desc()), Deal.created_at.desc())
-                .offset(offset)
-                .limit(limit)
+            stmt = base_stmt.options(
+                selectinload(Deal.company),
+                selectinload(Deal.investors),
+                selectinload(Deal.articles),
             )
+
+            # Apply sort direction
+            if sort_direction == "asc":
+                stmt = stmt.order_by(nullsfirst(Deal.announced_date.asc()), Deal.created_at.asc())
+            else:
+                stmt = stmt.order_by(nullslast(Deal.announced_date.desc()), Deal.created_at.desc())
+
+            stmt = stmt.offset(offset).limit(limit)
 
             result = await session.execute(stmt)
             deals = result.scalars().all()

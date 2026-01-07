@@ -115,7 +115,12 @@ function App() {
     showRejected: false,
     selectedFund: undefined,
     selectedCategory: undefined,
+    searchQuery: undefined,
+    sortDirection: 'desc',
   });
+
+  // Debounced search query (to avoid API calls on every keystroke)
+  const [debouncedSearch, setDebouncedSearch] = useState<string | undefined>(undefined);
 
   // System status
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({
@@ -145,8 +150,13 @@ function App() {
   // Modal state
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
 
-  // Sort state
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(filters.searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [filters.searchQuery]);
 
   // Load system status
   const loadSystemStatus = useCallback(async () => {
@@ -198,6 +208,8 @@ function App() {
           is_enterprise_ai: filters.showRejected ? undefined : (filters.enterpriseAiOnly ? true : undefined),
           enterprise_category: filters.selectedCategory,
           fund_slug: filters.selectedFund,
+          search: debouncedSearch || undefined,
+          sort_direction: filters.sortDirection,
         });
 
         // Use API results directly - no client-side filtering needed
@@ -255,7 +267,7 @@ function App() {
         setLoading(false);
       }
     },
-    [filters]
+    [filters.enterpriseAiOnly, filters.leadOnly, filters.showRejected, filters.selectedCategory, filters.selectedFund, filters.sortDirection, debouncedSearch]
   );
 
   // Initial load and reload on filter change
@@ -296,16 +308,8 @@ function App() {
   };
 
   const handleSortChange = useCallback((direction: SortDirection) => {
-    setSortDirection(direction);
-    // Sort deals client-side (API already sorts by announced_date desc)
-    setPagination((prev) => {
-      const sorted = [...prev.deals].sort((a, b) => {
-        const dateA = new Date(a.date || '1970-01-01').getTime();
-        const dateB = new Date(b.date || '1970-01-01').getTime();
-        return direction === 'desc' ? dateB - dateA : dateA - dateB;
-      });
-      return { ...prev, deals: sorted };
-    });
+    // Update sort direction in filters - this triggers API refetch via useEffect
+    setFilters((prev) => ({ ...prev, sortDirection: direction }));
   }, []);
 
   return (
@@ -361,7 +365,7 @@ function App() {
                     onRefresh={handleRefresh}
                     onPageChange={handlePageChange}
                     isLoading={loading}
-                    sortDirection={sortDirection}
+                    sortDirection={filters.sortDirection}
                     onSortChange={handleSortChange}
                   />
                 </ErrorBoundary>

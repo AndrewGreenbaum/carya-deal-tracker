@@ -7,7 +7,7 @@ These schemas enforce structured JSON output from the LLM.
 from pydantic import BaseModel, Field, model_validator, field_validator
 from typing import List, Optional
 from enum import Enum
-from datetime import date
+from datetime import date, timedelta
 import logging
 
 logger = logging.getLogger(__name__)
@@ -138,11 +138,32 @@ class DealExtraction(BaseModel):
 
     @field_validator('round_date')
     @classmethod
-    def validate_not_future_date(cls, v: Optional[date]) -> Optional[date]:
-        """Reject future dates - likely an LLM extraction error."""
-        if v is not None and v > date.today():
+    def validate_date_recency(cls, v: Optional[date]) -> Optional[date]:
+        """
+        Reject invalid dates - likely LLM extraction errors.
+
+        Rejects:
+        - Future dates (LLM error)
+        - Dates older than 90 days (likely historical VC blog post being scraped)
+
+        Returns None to fallback to article.published_date.
+        """
+        if v is None:
+            return v
+
+        today = date.today()
+
+        # Reject future dates
+        if v > today:
             logger.warning(f"Rejecting future date {v} - likely extraction error")
             return None
+
+        # Reject dates older than 90 days (likely historical mention)
+        cutoff = today - timedelta(days=90)
+        if v < cutoff:
+            logger.warning(f"Rejecting old date {v} - likely historical VC blog post")
+            return None
+
         return v
 
     # Investors
