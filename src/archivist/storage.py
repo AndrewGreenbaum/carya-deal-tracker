@@ -41,7 +41,7 @@ from ..config.funds import FUND_REGISTRY
 
 def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
     """
-    Normalize amount string to integer (in dollars).
+    Normalize amount string to integer (in USD equivalent).
 
     Examples:
         "$30M" → 30000000
@@ -50,16 +50,23 @@ def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
         "$2.5B" → 2500000000
         "$500K" → 500000
         "$25-30 million" → 25000000 (takes first number)
+        "€100 million" → 100000000 (treats as equivalent USD)
+        "₹97 crore" → 11640000 (converts to USD equivalent)
+        "INR 100 Cr" → 12000000 (converts to USD equivalent)
         None → None
     """
     if not amount_str:
         return None
 
-    # Remove $ and whitespace, lowercase
-    clean = amount_str.replace("$", "").replace(",", "").strip().lower()
+    # Remove currency symbols and whitespace, lowercase
+    clean = amount_str.replace("$", "").replace("€", "").replace("£", "").replace("₹", "")
+    clean = clean.replace(",", "").strip().lower()
+
+    # Remove currency prefixes
+    clean = re.sub(r'^(usd|eur|gbp|inr)\s*', '', clean)
 
     # Handle "undisclosed" or similar
-    if "undisclosed" in clean or "unknown" in clean:
+    if "undisclosed" in clean or "unknown" in clean or "<unknown>" in clean:
         return None
 
     # Handle ranges like "25-30 million" - take the first number
@@ -68,7 +75,8 @@ def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
 
     # Extract number and multiplier
     # Added "mn" as alternative for million (common in some sources)
-    match = re.match(r'([\d.]+)\s*(million|mn|mm|m|billion|bn|b|thousand|k)?', clean)
+    # Added "cr" and "crore" for Indian currency (1 crore ≈ $120K USD)
+    match = re.match(r'([\d.]+)\s*(million|mn|mm|m|billion|bn|b|thousand|k|crore|cr|lakh|lac)?', clean)
     if not match:
         return None
 
@@ -85,6 +93,12 @@ def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
         return int(num * 1_000_000_000)
     elif multiplier in ("thousand", "k"):
         return int(num * 1_000)
+    elif multiplier in ("crore", "cr"):
+        # 1 crore = 10 million INR ≈ $120K USD (rough conversion)
+        return int(num * 120_000)
+    elif multiplier in ("lakh", "lac"):
+        # 1 lakh = 100K INR ≈ $1.2K USD
+        return int(num * 1_200)
     else:
         # If no multiplier and number is small, assume it might be in millions
         # e.g., "raised 30" often means $30M
@@ -261,11 +275,19 @@ async def find_duplicate_deal(
     """
     Check if a similar deal already exists.
 
-    Match criteria:
+    Match criteria (TWO-TIER approach):
+
+    TIER 1 - Strict Match (same company + same round + similar amount):
     - Company names match (using smart fuzzy matching)
     - Same round type
-    - Same normalized amount (within 10% tolerance) OR one/both amounts missing
-    - Date within 14 days OR deals from last 60 days if no date
+    - Same normalized amount (within 20% tolerance) OR one/both amounts missing
+    - Date within 30 days OR deals from last 90 days if no date
+
+    TIER 2 - Same-Day Match (catches same-day duplicates from multiple sources):
+    - Company names match exactly (case-insensitive)
+    - Same round type
+    - Same announced date (exact match)
+    - Any amount (news sources often report different numbers)
 
     Returns existing Deal if found, None otherwise.
 
@@ -274,10 +296,11 @@ async def find_duplicate_deal(
     - LIMIT clause to prevent scanning thousands of rows
     - Date fallback for deals without announced_date
     """
-    from sqlalchemy import or_
+    from sqlalchemy import or_, func
 
     # Normalize inputs for comparison
     normalized_amount = normalize_amount(amount)
+    normalized_company = normalize_company_name(company_name)
 
     # Build query with JOIN to get company name in one query (fixes N+1)
     stmt = (
@@ -286,13 +309,13 @@ async def find_duplicate_deal(
         .where(Deal.round_type == round_type)
     )
 
-    # Date filter with fallback for missing dates
+    # Date filter with fallback for missing dates - EXPANDED to 30 days
     if announced_date:
-        # Look within 14 days of the announced date
-        date_start = announced_date - timedelta(days=14)
-        date_end = announced_date + timedelta(days=14)
+        # Look within 30 days of the announced date (increased from 14)
+        date_start = announced_date - timedelta(days=30)
+        date_end = announced_date + timedelta(days=30)
         # Include deals with matching date OR deals with NULL date (recent ones)
-        recent_cutoff = date.today() - timedelta(days=60)
+        recent_cutoff = date.today() - timedelta(days=90)  # Increased from 60
         stmt = stmt.where(
             or_(
                 Deal.announced_date.between(date_start, date_end),
@@ -301,9 +324,9 @@ async def find_duplicate_deal(
             )
         )
     else:
-        # No date provided: only look at recent deals (last 60 days)
+        # No date provided: only look at recent deals (last 90 days)
         # This prevents matching against ancient deals
-        recent_cutoff = date.today() - timedelta(days=60)
+        recent_cutoff = date.today() - timedelta(days=90)
         stmt = stmt.where(
             or_(
                 Deal.announced_date >= recent_cutoff,
@@ -313,23 +336,34 @@ async def find_duplicate_deal(
         )
 
     # LIMIT to prevent scanning too many rows
-    stmt = stmt.limit(200)
+    stmt = stmt.limit(300)
 
     result = await session.execute(stmt)
     candidates = result.all()  # Returns list of (Deal, PortfolioCompany) tuples
 
     for deal, company in candidates:
-        # Use the improved company_names_match function
+        existing_normalized = normalize_company_name(company.name)
+
+        # TIER 2: Exact same-day match (catches duplicates from multiple sources)
+        if announced_date and deal.announced_date == announced_date:
+            if normalized_company == existing_normalized:
+                logger.info(
+                    f"Found same-day duplicate: '{company_name}' matches '{company.name}' "
+                    f"(deal #{deal.id}, {deal.round_type}, {deal.amount}, date={deal.announced_date})"
+                )
+                return deal
+
+        # TIER 1: Fuzzy company name match with amount tolerance
         if not company_names_match(company_name, company.name):
             continue
 
-        # Amount match: within 10% tolerance
+        # Amount match: within 20% tolerance (increased from 10%)
         # If either amount is missing, we still consider it a potential match
         # (articles sometimes don't mention the amount)
         if normalized_amount and deal.amount:
             existing_amount = normalize_amount(deal.amount)
             if existing_amount:
-                tolerance = max(normalized_amount, existing_amount) * 0.1
+                tolerance = max(normalized_amount, existing_amount) * 0.2  # 20% tolerance
                 if abs(normalized_amount - existing_amount) > tolerance:
                     continue
 
