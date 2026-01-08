@@ -12,3 +12,9 @@ export { StealthTracker } from './StealthTracker';
 export { ScraperControl } from './ScraperControl';
 export { SettingsPanel } from './SettingsPanel';
 export { ErrorBoundary } from './ErrorBoundary';
+
+// Tracker CRM components
+export { Tracker } from './Tracker';
+export { TrackerColumn } from './TrackerColumn';
+export { TrackerCard } from './TrackerCard';
+export { TrackerModal } from './TrackerModal';

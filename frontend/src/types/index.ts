@@ -25,7 +25,7 @@ export type EnterpriseCategory =
 
 export type ScraperType = 'html' | 'rss' | 'playwright' | 'external' | 'dom_diff';
 
-export type ViewType = 'dashboard' | 'stealth' | 'settings' | 'scrapers';
+export type ViewType = 'dashboard' | 'stealth' | 'settings' | 'scrapers' | 'tracker';
 
 export type ServiceStatus = 'live' | 'idle' | 'error' | 'processing';
 
@@ -341,6 +341,57 @@ export const STAGE_LABELS: Record<InvestmentStage, string> = {
   growth: 'Growth',
   exit: 'Exit',
   unknown: 'Unknown',
+};
+
+// ============================================
+// Tracker CRM Types
+// ============================================
+
+export type TrackerStatus = 'watching' | 'reached_out' | 'in_conversation' | 'closing_spv';
+
+export interface TrackerItem {
+  id: number;
+  companyName: string;
+  roundType?: string;
+  amount?: string;
+  leadInvestor?: string;
+  website?: string;
+  status: TrackerStatus;
+  notes?: string;
+  lastContactDate?: string;
+  nextStep?: string;
+  position: number;
+  dealId?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TrackerStats {
+  total: number;
+  watching: number;
+  reached_out: number;
+  in_conversation: number;
+  closing_spv: number;
+}
+
+export interface TrackerItemsResponse {
+  items: TrackerItem[];
+  total: number;
+  stats: TrackerStats;
+}
+
+export const TRACKER_STATUS_LABELS: Record<TrackerStatus, string> = {
+  watching: 'Watching',
+  reached_out: 'Reached Out',
+  in_conversation: 'In Conversation',
+  closing_spv: 'Closing SPV',
+};
+
+export const TRACKER_STATUS_COLORS: Record<TrackerStatus, string> = {
+  watching: 'slate',
+  reached_out: 'blue',
+  in_conversation: 'amber',
+  closing_spv: 'emerald',
 };
 
 // The 18 tracked funds (from backend registry)

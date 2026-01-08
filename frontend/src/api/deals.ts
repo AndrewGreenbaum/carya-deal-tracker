@@ -114,6 +114,38 @@ async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return response.json();
 }
 
+async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': API_KEY,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(error.detail || `API Error: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function apiDelete(path: string): Promise<void> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+    headers: {
+      'X-API-Key': API_KEY,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(error.detail || `API Error: ${response.status}`);
+  }
+}
+
 // ============================================
 // Response Mappers (snake_case -> camelCase)
 // ============================================
@@ -648,6 +680,164 @@ export async function runBackfill(months = 12, dryRun = false): Promise<NewsAggr
     skippedParticipant: data.skipped_participant,
     errors: data.errors,
   };
+}
+
+// ============================================
+// Tracker CRM Endpoints
+// ============================================
+
+import type {
+  TrackerItem,
+  TrackerItemsResponse,
+  TrackerStatus,
+} from '../types';
+
+interface TrackerItemApiResponse {
+  id: number;
+  company_name: string;
+  round_type?: string;
+  amount?: string;
+  lead_investor?: string;
+  website?: string;
+  status: string;
+  notes?: string;
+  last_contact_date?: string;
+  next_step?: string;
+  position: number;
+  deal_id?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface TrackerItemsApiResponse {
+  items: TrackerItemApiResponse[];
+  total: number;
+  stats: {
+    total: number;
+    watching: number;
+    reached_out: number;
+    in_conversation: number;
+    closing_spv: number;
+  };
+}
+
+function mapTrackerItem(api: TrackerItemApiResponse): TrackerItem {
+  return {
+    id: api.id,
+    companyName: api.company_name,
+    roundType: api.round_type,
+    amount: api.amount,
+    leadInvestor: api.lead_investor,
+    website: api.website,
+    status: api.status as TrackerStatus,
+    notes: api.notes,
+    lastContactDate: api.last_contact_date,
+    nextStep: api.next_step,
+    position: api.position,
+    dealId: api.deal_id,
+    createdAt: api.created_at,
+    updatedAt: api.updated_at,
+  };
+}
+
+export async function fetchTrackerItems(status?: TrackerStatus): Promise<TrackerItemsResponse> {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+
+  const data = await apiGet<TrackerItemsApiResponse>(
+    `/tracker${params.toString() ? '?' + params.toString() : ''}`,
+    false // Don't cache tracker items
+  );
+
+  return {
+    items: data.items.map(mapTrackerItem),
+    total: data.total,
+    stats: data.stats,
+  };
+}
+
+export async function fetchTrackerItem(itemId: number): Promise<TrackerItem> {
+  const data = await apiGet<TrackerItemApiResponse>(`/tracker/${itemId}`, false);
+  return mapTrackerItem(data);
+}
+
+export async function createTrackerItem(item: {
+  companyName: string;
+  roundType?: string;
+  amount?: string;
+  leadInvestor?: string;
+  website?: string;
+  notes?: string;
+  status?: TrackerStatus;
+}): Promise<TrackerItem> {
+  const data = await apiPost<TrackerItemApiResponse>('/tracker', {
+    company_name: item.companyName,
+    round_type: item.roundType,
+    amount: item.amount,
+    lead_investor: item.leadInvestor,
+    website: item.website,
+    notes: item.notes,
+    status: item.status || 'watching',
+  });
+  invalidateCache('GET:/tracker');
+  return mapTrackerItem(data);
+}
+
+export async function updateTrackerItem(
+  itemId: number,
+  updates: Partial<{
+    companyName: string;
+    roundType: string;
+    amount: string;
+    leadInvestor: string;
+    website: string;
+    notes: string;
+    lastContactDate: string;
+    nextStep: string;
+  }>
+): Promise<TrackerItem> {
+  const data = await apiPut<TrackerItemApiResponse>(`/tracker/${itemId}`, {
+    company_name: updates.companyName,
+    round_type: updates.roundType,
+    amount: updates.amount,
+    lead_investor: updates.leadInvestor,
+    website: updates.website,
+    notes: updates.notes,
+    last_contact_date: updates.lastContactDate,
+    next_step: updates.nextStep,
+  });
+  invalidateCache('GET:/tracker');
+  return mapTrackerItem(data);
+}
+
+export async function moveTrackerItem(
+  itemId: number,
+  status: TrackerStatus,
+  position: number
+): Promise<TrackerItem> {
+  const data = await apiPost<TrackerItemApiResponse>(`/tracker/${itemId}/move`, {
+    status,
+    position,
+  });
+  invalidateCache('GET:/tracker');
+  return mapTrackerItem(data);
+}
+
+export async function deleteTrackerItem(itemId: number): Promise<void> {
+  await apiDelete(`/tracker/${itemId}`);
+  invalidateCache('GET:/tracker');
+}
+
+export async function addDealToTracker(
+  dealId: number,
+  status: TrackerStatus = 'watching'
+): Promise<TrackerItem> {
+  const data = await apiPost<TrackerItemApiResponse>('/tracker/from-deal', {
+    deal_id: dealId,
+    status,
+  });
+  invalidateCache('GET:/tracker');
+  return mapTrackerItem(data);
 }
 
 // ============================================

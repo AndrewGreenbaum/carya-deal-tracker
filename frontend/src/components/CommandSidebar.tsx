@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { Home, ChevronDown, ChevronUp, Search, X } from 'lucide-react';
+import { Home, ChevronDown, ChevronUp, Search, X, Kanban } from 'lucide-react';
 import type { FilterState, EnterpriseCategory, Fund, ViewType, CostTracker } from '../types';
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
@@ -75,6 +75,12 @@ export function CommandSidebar({
             label="Dashboard"
             active={currentView === 'dashboard'}
             onClick={() => onViewChange('dashboard')}
+          />
+          <NavItem
+            icon={<Kanban className="w-4 h-4" />}
+            label="Tracker"
+            active={currentView === 'tracker'}
+            onClick={() => onViewChange('tracker')}
           />
         </div>
       </nav>

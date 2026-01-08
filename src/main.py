@@ -42,6 +42,17 @@ from .archivist import (
     DealInvestor,
     PortfolioCompany,
 )
+from .archivist.tracker_storage import (
+    get_tracker_items,
+    get_tracker_item,
+    create_tracker_item,
+    update_tracker_item,
+    move_tracker_item,
+    delete_tracker_item,
+    create_tracker_from_deal,
+    get_tracker_stats,
+    VALID_STATUSES,
+)
 from .common.brave_client import close_brave_client
 from .archivist.models import Fund
 from .archivist.models import Article
@@ -3062,6 +3073,287 @@ async def backfill_linkedin_only(
         )
     except Exception as e:
         logger.error("Request failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ----- Tracker CRM Response Models -----
+
+class TrackerItemResponse(BaseModel):
+    """Response model for a single tracker item."""
+    id: int
+    company_name: str
+    round_type: Optional[str] = None
+    amount: Optional[str] = None
+    lead_investor: Optional[str] = None
+    website: Optional[str] = None
+    status: str
+    notes: Optional[str] = None
+    last_contact_date: Optional[str] = None
+    next_step: Optional[str] = None
+    position: int
+    deal_id: Optional[int] = None
+    created_at: str
+    updated_at: str
+
+
+class TrackerItemsResponse(BaseModel):
+    """Response model for list of tracker items."""
+    items: List[TrackerItemResponse]
+    total: int
+    stats: Dict[str, int]
+
+
+class CreateTrackerItemRequest(BaseModel):
+    """Request model for creating a tracker item."""
+    company_name: str
+    round_type: Optional[str] = None
+    amount: Optional[str] = None
+    lead_investor: Optional[str] = None
+    website: Optional[str] = None
+    notes: Optional[str] = None
+    status: str = "watching"
+
+
+class UpdateTrackerItemRequest(BaseModel):
+    """Request model for updating a tracker item."""
+    company_name: Optional[str] = None
+    round_type: Optional[str] = None
+    amount: Optional[str] = None
+    lead_investor: Optional[str] = None
+    website: Optional[str] = None
+    notes: Optional[str] = None
+    last_contact_date: Optional[str] = None
+    next_step: Optional[str] = None
+
+
+class MoveTrackerItemRequest(BaseModel):
+    """Request model for moving a tracker item (drag-drop)."""
+    status: str
+    position: int
+
+
+class AddDealToTrackerRequest(BaseModel):
+    """Request model for adding an existing deal to tracker."""
+    deal_id: int
+    status: str = "watching"
+
+
+def _map_tracker_item(item) -> TrackerItemResponse:
+    """Map TrackerItem model to response."""
+    return TrackerItemResponse(
+        id=item.id,
+        company_name=item.company_name,
+        round_type=item.round_type,
+        amount=item.amount,
+        lead_investor=item.lead_investor,
+        website=item.website,
+        status=item.status,
+        notes=item.notes,
+        last_contact_date=item.last_contact_date.isoformat() if item.last_contact_date else None,
+        next_step=item.next_step,
+        position=item.position,
+        deal_id=item.deal_id,
+        created_at=item.created_at.isoformat(),
+        updated_at=item.updated_at.isoformat(),
+    )
+
+
+# ----- Tracker CRM Endpoints -----
+
+@app.get("/tracker", response_model=TrackerItemsResponse)
+async def list_tracker_items(
+    status: Optional[str] = Query(None, description="Filter by status (watching, reached_out, in_conversation, closing_spv)"),
+):
+    """
+    List all tracker items for the CRM Kanban board.
+
+    Returns items grouped by status column with position ordering.
+    """
+    try:
+        async with get_session() as session:
+            items = await get_tracker_items(session, status=status)
+            stats = await get_tracker_stats(session)
+
+            return TrackerItemsResponse(
+                items=[_map_tracker_item(item) for item in items],
+                total=len(items),
+                stats=stats,
+            )
+    except Exception as e:
+        logger.error("Failed to list tracker items: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/tracker/{item_id}", response_model=TrackerItemResponse)
+async def get_single_tracker_item(item_id: int):
+    """Get a single tracker item by ID."""
+    try:
+        async with get_session() as session:
+            item = await get_tracker_item(session, item_id)
+            if not item:
+                raise HTTPException(status_code=404, detail="Tracker item not found")
+            return _map_tracker_item(item)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get tracker item: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/tracker", response_model=TrackerItemResponse)
+async def create_new_tracker_item(
+    request: CreateTrackerItemRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Create a new tracker item (manual entry).
+
+    Used when adding a company that wasn't found by the scraper.
+    """
+    try:
+        async with get_session() as session:
+            item = await create_tracker_item(
+                session,
+                company_name=request.company_name,
+                status=request.status,
+                round_type=request.round_type,
+                amount=request.amount,
+                lead_investor=request.lead_investor,
+                website=request.website,
+                notes=request.notes,
+            )
+            return _map_tracker_item(item)
+    except Exception as e:
+        logger.error("Failed to create tracker item: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.put("/tracker/{item_id}", response_model=TrackerItemResponse)
+async def update_existing_tracker_item(
+    item_id: int,
+    request: UpdateTrackerItemRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Update a tracker item's fields.
+
+    Use this for editing notes, next_step, last_contact_date, etc.
+    For changing status/position, use POST /tracker/{item_id}/move instead.
+    """
+    try:
+        async with get_session() as session:
+            # Build updates dict, excluding None values
+            updates = {}
+            if request.company_name is not None:
+                updates["company_name"] = request.company_name
+            if request.round_type is not None:
+                updates["round_type"] = request.round_type
+            if request.amount is not None:
+                updates["amount"] = request.amount
+            if request.lead_investor is not None:
+                updates["lead_investor"] = request.lead_investor
+            if request.website is not None:
+                updates["website"] = request.website
+            if request.notes is not None:
+                updates["notes"] = request.notes
+            if request.next_step is not None:
+                updates["next_step"] = request.next_step
+            if request.last_contact_date is not None:
+                from datetime import date as date_type
+                updates["last_contact_date"] = date_type.fromisoformat(request.last_contact_date)
+
+            item = await update_tracker_item(session, item_id, **updates)
+            if not item:
+                raise HTTPException(status_code=404, detail="Tracker item not found")
+            return _map_tracker_item(item)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {e}")
+    except Exception as e:
+        logger.error("Failed to update tracker item: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/tracker/{item_id}/move", response_model=TrackerItemResponse)
+async def move_tracker_item_position(
+    item_id: int,
+    request: MoveTrackerItemRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Move a tracker item to a new status/position (drag-drop).
+
+    Called when user drags a card to a different column or reorders within a column.
+    """
+    if request.status not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: {', '.join(VALID_STATUSES)}"
+        )
+
+    try:
+        async with get_session() as session:
+            item = await move_tracker_item(session, item_id, request.status, request.position)
+            if not item:
+                raise HTTPException(status_code=404, detail="Tracker item not found")
+            return _map_tracker_item(item)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to move tracker item: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.delete("/tracker/{item_id}")
+async def delete_existing_tracker_item(
+    item_id: int,
+    api_key: str = Depends(verify_api_key),
+):
+    """Delete a tracker item from the pipeline."""
+    try:
+        async with get_session() as session:
+            success = await delete_tracker_item(session, item_id)
+            if not success:
+                raise HTTPException(status_code=404, detail="Tracker item not found")
+            return {"success": True, "message": f"Tracker item {item_id} deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete tracker item: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/tracker/from-deal", response_model=TrackerItemResponse)
+async def add_deal_to_tracker(
+    request: AddDealToTrackerRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Add an existing deal from the Dashboard to the Tracker.
+
+    Copies deal info (company, round, amount, lead investor) and links to the deal.
+    Returns error if deal not found or already tracked.
+    """
+    if request.status not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: {', '.join(VALID_STATUSES)}"
+        )
+
+    try:
+        async with get_session() as session:
+            item = await create_tracker_from_deal(session, request.deal_id, request.status)
+            if not item:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Deal not found or already tracked"
+                )
+            return _map_tracker_item(item)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to add deal to tracker: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

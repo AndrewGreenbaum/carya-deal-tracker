@@ -21,6 +21,7 @@ import { StealthTracker } from './components/StealthTracker';
 import { ScraperControl } from './components/ScraperControl';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { Tracker } from './components/Tracker';
 import {
   fetchDeals,
   fetchFunds,
@@ -384,6 +385,13 @@ function App() {
           {currentView === 'scrapers' && (
             <ErrorBoundary>
               <ScraperControl />
+            </ErrorBoundary>
+          )}
+
+          {/* Tracker View */}
+          {currentView === 'tracker' && (
+            <ErrorBoundary>
+              <Tracker />
             </ErrorBoundary>
           )}
         </main>

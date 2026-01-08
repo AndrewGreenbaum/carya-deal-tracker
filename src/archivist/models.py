@@ -199,3 +199,41 @@ class ThesisDrift(SQLModel, table=True):
         sa_column=Column(Vector(1536))
     )
     calculated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class TrackerItem(SQLModel, table=True):
+    """CRM tracker item for managing deal pipeline.
+
+    Represents a company being tracked through the investment pipeline.
+    Can be linked to an existing Deal or created manually.
+
+    Status columns (Kanban):
+    - watching: Monitoring, not yet reached out
+    - reached_out: Initial contact made
+    - in_conversation: Active dialogue ongoing
+    - closing_spv: Finalizing SPV/investment
+    """
+    __tablename__ = "tracker_items"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # Company info
+    company_name: str = Field(max_length=255)
+    round_type: Optional[str] = Field(default=None, max_length=50)  # seed, series_a, etc.
+    amount: Optional[str] = Field(default=None, max_length=100)  # "$50M"
+    lead_investor: Optional[str] = Field(default=None, max_length=255)
+    website: Optional[str] = Field(default=None, max_length=500)
+
+    # CRM/Pipeline fields
+    status: str = Field(default="watching", max_length=50, index=True)
+    notes: Optional[str] = None
+    last_contact_date: Optional[date] = None
+    next_step: Optional[str] = None
+    position: int = Field(default=0)  # Order within column for drag-drop
+
+    # Optional link to existing deal (for deals added from Dashboard)
+    deal_id: Optional[int] = Field(default=None, foreign_key="deals.id")
+
+    # Metadata
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
