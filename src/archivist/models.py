@@ -14,7 +14,7 @@ from datetime import datetime, date, timezone
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column
+from sqlalchemy import Column, DateTime
 import uuid
 
 
@@ -234,6 +234,12 @@ class TrackerItem(SQLModel, table=True):
     # Optional link to existing deal (for deals added from Dashboard)
     deal_id: Optional[int] = Field(default=None, foreign_key="deals.id")
 
-    # Metadata
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # Metadata - use sa_column for proper PostgreSQL TIMESTAMPTZ type
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    )
