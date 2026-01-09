@@ -221,20 +221,29 @@ class GitHubTrendingScraper:
         return any(kw in text for kw in ENTERPRISE_KEYWORDS)
 
     async def fetch_repo_readme(self, repo: TrendingRepo) -> Optional[str]:
-        """Fetch README content for a repository."""
-        try:
-            # Try common README paths
-            for readme_path in ['README.md', 'readme.md', 'README.rst', 'README']:
-                raw_url = f"https://raw.githubusercontent.com/{repo.name}/main/{readme_path}"
-                response = await self.client.get(raw_url)
-                if response.status_code == 200:
-                    return response.text[:5000]  # Truncate
+        """Fetch README content for a repository.
 
-                # Try master branch
-                raw_url = f"https://raw.githubusercontent.com/{repo.name}/master/{readme_path}"
-                response = await self.client.get(raw_url)
-                if response.status_code == 200:
-                    return response.text[:5000]
+        Optimized: Try only the most common patterns (README.md on main/master)
+        instead of 8 HTTP requests per repo. Most repos use README.md.
+        """
+        try:
+            # Try README.md on main branch first (most common)
+            raw_url = f"https://raw.githubusercontent.com/{repo.name}/main/README.md"
+            response = await self.client.get(raw_url)
+            if response.status_code == 200:
+                return response.text[:5000]  # Truncate
+
+            # Try README.md on master branch (older repos)
+            raw_url = f"https://raw.githubusercontent.com/{repo.name}/master/README.md"
+            response = await self.client.get(raw_url)
+            if response.status_code == 200:
+                return response.text[:5000]
+
+            # Fallback: try lowercase readme.md on main (rare but exists)
+            raw_url = f"https://raw.githubusercontent.com/{repo.name}/main/readme.md"
+            response = await self.client.get(raw_url)
+            if response.status_code == 200:
+                return response.text[:5000]
 
             return None
         except httpx.HTTPError as e:
