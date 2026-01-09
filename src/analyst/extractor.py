@@ -187,7 +187,8 @@ CRYPTO_KEYWORDS = [
 ]
 
 # Company name patterns that indicate crypto (for stricter detection)
-CRYPTO_COMPANY_PATTERNS = ["protocol", "chain", "token", "dao", "coin", "web3"]
+# "0x" prefix is common in crypto (0xMiden, 0xSplits, 0x Protocol)
+CRYPTO_COMPANY_PATTERNS = ["protocol", "chain", "token", "dao", "coin", "web3", "0x"]
 
 
 def is_likely_crypto_article(text: str) -> bool:

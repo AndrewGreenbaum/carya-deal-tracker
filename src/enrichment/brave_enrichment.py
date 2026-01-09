@@ -68,6 +68,9 @@ KNOWN_FALSE_POSITIVES = {
     "leona": ["leonalewis", "music", "leonalewismusic"],
     "ranger": ["rangers.co.uk", "rangerfc", "football", "soccer"],
     "unknown": ["weareunknown"],
+    # Miden name collision: 0xMiden (blockchain) vs Miden (YC fintech) vs Miden.ai (solar)
+    "miden": ["miden.co"],  # Skip African fintech when enriching blockchain Miden
+    "0xmiden": ["miden.co"],  # Same - prefer miden.xyz
 }
 
 # Valid TLDs for startup websites
