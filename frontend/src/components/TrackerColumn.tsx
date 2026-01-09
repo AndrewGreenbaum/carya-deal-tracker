@@ -55,6 +55,8 @@ export function TrackerColumn({
       {/* Column Body */}
       <div
         ref={setNodeRef}
+        role="region"
+        aria-label={`${title} column, ${count} items`}
         className={`flex-1 rounded-lg p-2 transition-colors min-h-[200px] ${
           isOver ? 'bg-slate-800/50 ring-2 ring-emerald-500/30' : 'bg-slate-900/30'
         }`}
@@ -76,8 +78,16 @@ export function TrackerColumn({
 
         {/* Empty State */}
         {items.length === 0 && (
-          <div className="flex items-center justify-center h-24 text-slate-600 text-sm">
-            Drop items here
+          <div className="flex flex-col items-center justify-center h-24 text-center px-4">
+            <span className="text-slate-500 text-sm">
+              {id === 'watching' && 'No companies watching'}
+              {id === 'reached_out' && 'No outreach yet'}
+              {id === 'in_conversation' && 'No active conversations'}
+              {id === 'closing_spv' && 'No deals closing'}
+            </span>
+            <span className="text-slate-600 text-xs mt-1">
+              {id === 'watching' ? 'Add a company or drag deals here' : 'Drag items here'}
+            </span>
           </div>
         )}
       </div>

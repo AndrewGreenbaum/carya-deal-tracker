@@ -763,6 +763,9 @@ async def extract_funding_deals_batch(
 
         responses = []
         for result in results:
+            # Skip None results (failed extractions or duplicates)
+            if result is None:
+                continue
             responses.append(ExtractionResponse(
                 startup_name=result.startup_name,
                 round_label=result.round_label.value,

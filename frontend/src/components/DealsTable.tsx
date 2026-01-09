@@ -185,11 +185,11 @@ interface DealRowProps {
 
 const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
   const isRejected = !deal.isEnterpriseAi || !deal.investorRoles.includes('lead');
-  const [trackingStatus, setTrackingStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [trackingStatus, setTrackingStatus] = useState<'idle' | 'loading' | 'success' | 'already' | 'error'>('idle');
 
   const handleTrack = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (trackingStatus === 'loading' || trackingStatus === 'success') return;
+    if (trackingStatus === 'loading' || trackingStatus === 'success' || trackingStatus === 'already') return;
 
     setTrackingStatus('loading');
     try {
@@ -197,10 +197,18 @@ const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
       setTrackingStatus('success');
       // Reset after 3 seconds
       setTimeout(() => setTrackingStatus('idle'), 3000);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to add to tracker:', err);
-      setTrackingStatus('error');
-      setTimeout(() => setTrackingStatus('idle'), 3000);
+      // Check if it's a 400 error (already tracked)
+      const error = err as { status?: number };
+      if (error.status === 400) {
+        setTrackingStatus('already');
+        // Keep showing "already" for 3s then reset
+        setTimeout(() => setTrackingStatus('idle'), 3000);
+      } else {
+        setTrackingStatus('error');
+        setTimeout(() => setTrackingStatus('idle'), 3000);
+      }
     }
   }, [deal.id, trackingStatus]);
 
@@ -329,7 +337,7 @@ function CompanyLinks({
   website?: string;
   ceoLinkedin?: string;
   isRejected: boolean;
-  trackingStatus: 'idle' | 'loading' | 'success' | 'error';
+  trackingStatus: 'idle' | 'loading' | 'success' | 'already' | 'error';
   onTrack: (e: React.MouseEvent) => void;
 }) {
   const hasWebsite = !!website;
@@ -375,7 +383,7 @@ function CompanyLinks({
         onClick={onTrack}
         disabled={trackingStatus === 'loading'}
         className={`p-1.5 rounded transition-all ${
-          trackingStatus === 'success'
+          trackingStatus === 'success' || trackingStatus === 'already'
             ? 'text-emerald-400 bg-emerald-400/10'
             : trackingStatus === 'error'
             ? 'text-red-400 bg-red-400/10'
@@ -386,6 +394,8 @@ function CompanyLinks({
         title={
           trackingStatus === 'success'
             ? 'Added to Tracker!'
+            : trackingStatus === 'already'
+            ? 'Already in Tracker'
             : trackingStatus === 'error'
             ? 'Failed to add'
             : 'Add to Tracker'
@@ -393,7 +403,7 @@ function CompanyLinks({
       >
         {trackingStatus === 'loading' ? (
           <Loader2 className="w-4 h-4 animate-spin" />
-        ) : trackingStatus === 'success' ? (
+        ) : trackingStatus === 'success' || trackingStatus === 'already' ? (
           <Check className="w-4 h-4" />
         ) : (
           <Target className="w-4 h-4" />

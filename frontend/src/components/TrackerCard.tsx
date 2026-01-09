@@ -6,7 +6,7 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, ExternalLink, Calendar } from 'lucide-react';
+import { GripVertical, ExternalLink, Calendar, Link } from 'lucide-react';
 import type { TrackerItem } from '../types';
 
 interface TrackerCardProps {
@@ -36,6 +36,8 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
     <div
       ref={setNodeRef}
       style={style}
+      role="article"
+      aria-label={`${item.companyName}${item.leadInvestor ? `, led by ${item.leadInvestor}` : ''}`}
       className={`
         bg-slate-800 border border-slate-700 rounded-lg p-3 cursor-pointer
         hover:border-slate-600 hover:bg-slate-750 transition-all
@@ -48,10 +50,11 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
         <button
           {...attributes}
           {...listeners}
+          aria-label={`Drag ${item.companyName}`}
           className="p-0.5 text-slate-500 hover:text-slate-300 cursor-grab active:cursor-grabbing shrink-0"
           onClick={(e) => e.stopPropagation()}
         >
-          <GripVertical className="w-4 h-4" />
+          <GripVertical className="w-4 h-4" aria-hidden="true" />
         </button>
         <div className="flex-1 min-w-0">
           <h4 className="text-sm font-medium text-white truncate">
@@ -85,19 +88,34 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
           <span className="text-slate-600">No contact yet</span>
         )}
 
-        {/* Website Link */}
-        {item.website && (
-          <a
-            href={item.website}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="text-slate-400 hover:text-emerald-400 transition-colors"
-            title={item.website}
-          >
-            <ExternalLink className="w-3 h-3" />
-          </a>
-        )}
+        {/* Icons */}
+        <div className="flex items-center gap-2">
+          {/* Deal Link Indicator */}
+          {item.dealId && (
+            <span
+              className="text-blue-400"
+              title="Linked to Dashboard deal"
+              aria-label="Linked to Dashboard deal"
+            >
+              <Link className="w-3 h-3" aria-hidden="true" />
+            </span>
+          )}
+
+          {/* Website Link */}
+          {item.website && (
+            <a
+              href={item.website}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="text-slate-400 hover:text-emerald-400 transition-colors"
+              title={item.website}
+              aria-label={`Visit ${item.companyName} website`}
+            >
+              <ExternalLink className="w-3 h-3" aria-hidden="true" />
+            </a>
+          )}
+        </div>
       </div>
 
       {/* Next Step indicator */}

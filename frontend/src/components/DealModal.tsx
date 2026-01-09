@@ -42,19 +42,26 @@ interface DealModalProps {
 export const DealModal = memo(function DealModal({ deal, onClose }: DealModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const [trackingStatus, setTrackingStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [trackingStatus, setTrackingStatus] = useState<'idle' | 'loading' | 'success' | 'already' | 'error'>('idle');
 
   const handleAddToTracker = useCallback(async () => {
-    if (trackingStatus === 'loading' || trackingStatus === 'success') return;
+    if (trackingStatus === 'loading' || trackingStatus === 'success' || trackingStatus === 'already') return;
 
     setTrackingStatus('loading');
     try {
       await addDealToTracker(parseInt(deal.id), 'watching');
       setTrackingStatus('success');
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to add to tracker:', err);
-      setTrackingStatus('error');
-      setTimeout(() => setTrackingStatus('idle'), 3000);
+      // Check if it's a 400 error (already tracked or not found)
+      const error = err as { status?: number };
+      if (error.status === 400) {
+        // Treat as "already tracked" - this is not an error
+        setTrackingStatus('already');
+      } else {
+        setTrackingStatus('error');
+        setTimeout(() => setTrackingStatus('idle'), 3000);
+      }
     }
   }, [deal.id, trackingStatus]);
 
@@ -314,9 +321,9 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
           </button>
           <button
             onClick={handleAddToTracker}
-            disabled={trackingStatus === 'loading' || trackingStatus === 'success'}
+            disabled={trackingStatus === 'loading' || trackingStatus === 'success' || trackingStatus === 'already'}
             className={`flex items-center gap-2 px-4 py-2 rounded font-medium transition-colors ${
-              trackingStatus === 'success'
+              trackingStatus === 'success' || trackingStatus === 'already'
                 ? 'bg-emerald-600 text-white cursor-default'
                 : trackingStatus === 'error'
                 ? 'bg-red-600 hover:bg-red-500 text-white'
@@ -327,13 +334,15 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
           >
             {trackingStatus === 'loading' ? (
               <Loader2 className="w-4 h-4 animate-spin" />
-            ) : trackingStatus === 'success' ? (
+            ) : trackingStatus === 'success' || trackingStatus === 'already' ? (
               <Check className="w-4 h-4" />
             ) : (
               <Target className="w-4 h-4" />
             )}
             {trackingStatus === 'success'
               ? 'Added to Tracker'
+              : trackingStatus === 'already'
+              ? 'Already in Tracker'
               : trackingStatus === 'error'
               ? 'Retry'
               : 'Add to Tracker'}

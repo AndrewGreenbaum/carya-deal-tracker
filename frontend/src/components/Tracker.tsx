@@ -238,8 +238,9 @@ export function Tracker() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex flex-col items-center justify-center h-full gap-3">
         <RefreshCw className="w-6 h-6 text-slate-400 animate-spin" />
+        <span className="text-slate-500 text-sm">Loading your pipeline...</span>
       </div>
     );
   }
