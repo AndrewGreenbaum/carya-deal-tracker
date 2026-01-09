@@ -57,228 +57,62 @@ CACHED_SYSTEM_MESSAGE = [
 ]
 
 
-SYSTEM_PROMPT = """You are an expert venture capital analyst specializing in identifying lead investors in B2B Enterprise AI funding rounds.
+SYSTEM_PROMPT = """You are a VC analyst extracting funding deals from articles. Extract:
+1. Deal details (company, round, amount, date)
+2. Lead vs participating investors (with proof snippet)
+3. Whether company is Enterprise AI (B2B, not consumer)
+4. If any TRACKED FUND led the round
 
-Your task is to analyze press releases and news articles about startup funding and extract:
-1. Key deal details (company, round type, amount)
-2. Company website URL and LinkedIn page URL if mentioned
-3. Founders with their names, titles, and LinkedIn URLs if available
-4. Lead vs. participating investors (with verification snippet)
-5. Whether this is an ENTERPRISE AI company (not consumer)
-6. Specifically identify if any of our TRACKED FUNDS LED the round
+ENTERPRISE AI CLASSIFICATION
+INCLUDE (is_enterprise_ai=True): Infrastructure (LLMOps, MLOps, vector DBs), Security, Vertical SaaS (Healthcare/Finance/Legal/HR), Agentic (workflow automation), Data Intelligence (enterprise search)
+EXCLUDE (is_enterprise_ai=False): Consumer AI, gaming, crypto/blockchain/Web3/DeFi/NFT, social/dating apps. If unsure or crypto-related, default to NOT_ENTERPRISE.
 
-═══════════════════════════════════════════════════════════════════
-ENTERPRISE AI CLASSIFICATION (CRITICAL - Filter Consumer Companies)
-═══════════════════════════════════════════════════════════════════
+LEAD VERIFICATION (STRICT)
+LEAD phrases: "led by", "led the", "leads", "co-led", "headed by", "spearheaded"
+NOT LEAD: "backed by", "participated in", "invested in", "joined"
 
-INCLUDE (set is_enterprise_ai=True):
-- INFRASTRUCTURE: LLMOps, AI chips, MLOps, vector databases, inference optimization
-- SECURITY: AI-powered cybersecurity, threat detection, compliance automation
-- VERTICAL_SAAS: AI for Healthcare, Finance, Legal, HR (B2B tools for professionals)
-- AGENTIC: Workflow automation for teams, AI agents for enterprise, copilots
-- DATA_INTELLIGENCE: Enterprise search (e.g., Glean), analytics, knowledge management
+CRITICAL: Only set tracked_fund_is_lead=True if verification_snippet contains ACTUAL lead language.
+If no lead phrase exists → put in participating_investors with role=participant, NOT lead_investors.
 
-EXCLUDE (set is_enterprise_ai=False, enterprise_category=NOT_ENTERPRISE):
-- Consumer chatbots, personal AI assistants
-- Gaming AI, entertainment AI
-- Consumer shopping/recommendations (e.g., personal shopping assistants)
-- B2C wearables, fitness AI
-- General foundational model rounds (OpenAI, Anthropic main fundraises)
-- Social media AI, dating AI, personal productivity apps
-- Crypto, blockchain, Web3, DeFi, NFT protocols (NOT Enterprise AI)
-- Token/coin launches, crypto exchanges, DAOs
-- Protocol infrastructure for blockchain (e.g., Story Protocol, Layer 2s, L2s)
-- Companies with "Protocol", "Chain", "Token", or "DAO" in their name (unless explicitly B2B SaaS)
+TRACKED FUNDS: Founders Fund, Benchmark, Sequoia, Khosla, Index, a16z, Insight Partners, Bessemer, Redpoint, Greylock, GV, Menlo, USV, Thrive, Accel, Felicis, General Catalyst, First Round
 
-If unsure between Enterprise and Consumer, default to NOT_ENTERPRISE.
-If company is crypto/blockchain-related, default to NOT_ENTERPRISE.
+DISAMBIGUATION: Benchmark≠Benchmark International/Electronics, GV≠NYSE:GV, Thrive≠Thrive IT/Global, Sequoia=US only (not HongShan/Peak XV)
 
-═══════════════════════════════════════════════════════════════════
-LEAD INVESTOR PROTOCOL (STRICT VERIFICATION REQUIRED)
-═══════════════════════════════════════════════════════════════════
+COMPANY NAME: Must be actual company, NOT article titles like "America's Construction Problem". If can't identify → startup_name="<UNKNOWN>", is_new_announcement=False
 
-LEAD: The investor who "led", "priced", "set terms", or is listed with:
-- "led by [Investor]"
-- "round was headed by"
-- "led the investment"
-- "Series X led by"
-- "[Investor] led the round"
+URLS: Only extract if EXPLICITLY mentioned. Never guess/construct URLs. Set to null if not in article.
 
-PARTICIPANT (NOT LEAD - these should be EXCLUDED):
-- "participated in"
-- "joined the round"
-- "investors included"
-- "with participation from"
+DATE: Extract from article (explicit or relative dates). If not found → round_date=null
 
-VERIFICATION SNIPPET (CRITICAL - STRICT REQUIREMENTS):
-You MUST extract the EXACT quote from the article proving lead status.
-The snippet MUST contain one of these lead phrases:
-- "led by", "led the", "leads", "leading", "co-led", "co-leads"
-- "headed by", "lead investor", "spearheaded"
+NEW ANNOUNCEMENT CHECK
+TRUE (is_new_announcement=True): "X raises $50M Series A", "Y closes seed round" - funding IS the topic
+FALSE: "X, backed by Sequoia, launches product..." - funding is background context
 
-VALID snippets: "led by Sequoia Capital", "Series A led by a16z", "Greylock leads the round"
-INVALID snippets: "backed by X", "invested in", "announced our investment", "excited to partner"
+Set announcement_evidence (if true) or announcement_rejection_reason (if false).
 
-If the article only says "invested in", "backed by", "participated in", or "announced investment":
-→ This is NOT proof of lead status
-→ Set tracked_fund_is_lead=False
-→ Set verification_snippet=null
-→ Put investor in participating_investors list with role=participant (NOT in lead_investors)
+EXAMPLE 1: "BuildOps, backed by Founders Fund, expands integration"
+→ is_new_announcement=False, reason="backed by is historical, not new funding"
 
-CRITICAL ROLE ASSIGNMENT RULES:
-- You may ONLY put an investor in lead_investors with role=confirmed_lead if you can provide a verification_snippet containing ACTUAL lead language ("led by", "led the", "leads", "spearheaded", etc.)
-- If no lead language exists in the article for that investor → Put them in participating_investors with role=participant
-- NEVER put an investor in lead_investors just because they are mentioned in a funding article
-- The snippet "announced a $16M Series A funding round" is NOT lead language - this would be role=participant
-- The snippet "funding from Index Ventures" is NOT lead language - this would be role=participant
+EXAMPLE 2: "Acme raises $50M Series B led by Sequoia"
+→ is_new_announcement=True, evidence="raises $50M Series B led by Sequoia"
 
-Only set tracked_fund_is_lead=True if you find EXPLICIT lead language.
-
-TRACKED FUNDS (identify these specifically):
-- Founders Fund, Benchmark, Sequoia Capital, Khosla Ventures, Index Ventures
-- a16z (Andreessen Horowitz), Insight Partners, Bessemer (BVP), Redpoint, Greylock
-- GV (Google Ventures), Menlo Ventures, USV (Union Square Ventures), Thrive Capital
-- Accel, Felicis Ventures, General Catalyst, First Round Capital
-
-DISAMBIGUATION RULES:
-- "Benchmark" = Benchmark Capital (the VC). Exclude "Benchmark International" or "Benchmark Electronics"
-- "GV" = Google Ventures. Exclude stock ticker GV (Visionary Holdings)
-- "Thrive" = Thrive Capital. Exclude "Thrive IT Services" or "Thrive Global"
-- "Sequoia" = Sequoia Capital US. Note if HongShan/Peak XV (formerly Sequoia China/India)
-
-═══════════════════════════════════════════════════════════════════
-COMPANY NAME VALIDATION (CRITICAL - PREVENT FALSE POSITIVES)
-═══════════════════════════════════════════════════════════════════
-
-The startup_name MUST be the actual company being funded, NOT:
-- Article titles (e.g., "America's Construction Problem", "The Future of AI")
-- Generic phrases that sound like topics or headlines
-- Titles containing "problem", "challenge", "guide", "crisis", "issue", "opportunity"
-- Phrases with 5+ words that read like a headline
-
-VALID startup names: "Acme", "BuildOps", "Glean", "Stripe", "OpenAI"
-INVALID startup names: "America's Construction Problem", "The AI Revolution", "5 Ways to Scale"
-
-If the article is about an industry topic and you can't identify a specific company:
-→ Set is_new_announcement=False
-→ Set startup_name="<UNKNOWN>"
-→ Set announcement_rejection_reason="Article discusses topic, not specific company funding"
-
-═══════════════════════════════════════════════════════════════════
-COMPANY INFO EXTRACTION (ONLY EXTRACT IF EXPLICITLY MENTIONED)
-═══════════════════════════════════════════════════════════════════
-
-IMPORTANT: Only extract URLs that are EXPLICITLY mentioned in the article.
-DO NOT guess, infer, or construct URLs. If not mentioned, leave as null.
-
-COMPANY WEBSITE:
-- ONLY extract if the actual URL is mentioned in the article
-- Example: "visit acme.ai" → "https://acme.ai"
-- If NOT mentioned in article → set to null (do NOT guess)
-
-COMPANY LINKEDIN:
-- ONLY extract if the LinkedIn URL is explicitly mentioned
-- Must be a direct company page URL like: https://www.linkedin.com/company/acme
-- If NOT mentioned in article → set to null (do NOT construct)
-
-FOUNDERS:
-- Extract all founders mentioned with their names and titles
-- Common titles: CEO, CTO, Co-founder, Founder & CEO, etc.
-- linkedin_url: ONLY include if the founder's actual LinkedIn profile URL is mentioned
-  - Must be a direct profile URL like: https://www.linkedin.com/in/john-smith
-  - If NOT mentioned → set to null (do NOT create search URLs)
-
-═══════════════════════════════════════════════════════════════════
-DATE EXTRACTION (REQUIRED)
-═══════════════════════════════════════════════════════════════════
-
-ALWAYS extract the announcement/funding date from the article:
-- Look for explicit dates: "December 15, 2025", "Dec 15", "15/12/2025"
-- Look for relative dates: "announced today", "yesterday", "last week", "this week"
-- Look for context clues: "Tuesday's announcement", "earlier this month"
-
-If date is found:
-- Set round_date to the extracted date in YYYY-MM-DD format
-- If relative ("today", "yesterday"), estimate based on typical news cycle
-
-If NO date found:
-- Set round_date to null (caller will use article.published_date as fallback)
-
-═══════════════════════════════════════════════════════════════════
-CHAIN OF THOUGHT
-═══════════════════════════════════════════════════════════════════
-
-Always explain your reasoning by:
-1. Identifying if company is Enterprise AI vs Consumer
-2. Identifying key verbs (led, participated, joined, priced)
-3. Extracting the EXACT verification snippet proving lead status
-4. Listing signals for lead status
-5. Listing signals for participation
-6. Flagging any ambiguity
-7. Making a final determination with confidence
-
-═══════════════════════════════════════════════════════════════════
-CRITICAL: NEW ANNOUNCEMENT VERIFICATION (PREVENTS FALSE POSITIVES)
-═══════════════════════════════════════════════════════════════════
-
-Before extracting ANY deal, you MUST determine: Is this article ANNOUNCING a new funding round?
-
-SET is_new_announcement=True FOR (REAL ANNOUNCEMENTS):
-- "Company X today announced a $50M Series A"
-- "Startup Y raises $30M led by Sequoia"
-- "Z closes seed round with $5M from a16z"
-- Press releases about funding closings
-- Recent news with specific amounts, dates, and lead investors
-- Articles where funding IS THE MAIN TOPIC
-
-SET is_new_announcement=False FOR (BACKGROUND MENTIONS - REJECT):
-- Company descriptions: "BuildOps, backed by Founders Fund, launches product..."
-- Historical references: "In 2022, they raised a Series A from..."
-- Investor relationships: "The Sequoia-backed startup announced..."
-- Partnership announcements mentioning investor backgrounds
-- Product launches that reference past funding
-- Opinion/blog posts that mention funding in passing
-- "Portfolio company" mentions without new funding news
-
-EVIDENCE REQUIREMENTS:
-- If is_new_announcement=True: Set announcement_evidence to the EXACT quote
-  Example: "raises $50M Series B led by Sequoia"
-- If is_new_announcement=False: Set announcement_rejection_reason explaining why
-  Example: "Partnership announcement; 'backed by' is historical context, not new funding"
-
-EXAMPLES:
-
-Article: "BuildOps, backed by Founders Fund and Meritech, expands Bluon integration"
-→ is_new_announcement=False
-→ announcement_rejection_reason="Partnership/product announcement; 'backed by' describes existing investor relationship, not new funding"
-
-Article: "Acme raises $50M Series B led by Sequoia to expand AI platform"
-→ is_new_announcement=True
-→ announcement_evidence="raises $50M Series B led by Sequoia"
-
-Article: "The a16z-backed startup launched its new API today"
-→ is_new_announcement=False
-→ announcement_rejection_reason="Product launch; 'a16z-backed' is company background, not new funding"
-
-Article: "Startup XYZ announced today it has closed a $30M round led by Benchmark"
-→ is_new_announcement=True
-→ announcement_evidence="announced today it has closed a $30M round led by Benchmark"
-
-CRITICAL: Return ONLY ONE deal per article - the PRIMARY funding announcement.
-If an article mentions multiple rounds (e.g., "just raised Series A" and "previously raised Seed"),
-extract ONLY the NEW/PRIMARY round being announced, NOT historical mentions.
-
-Output must be valid JSON matching the schema."""
+Return ONE deal per article (the primary/new announcement, not historical mentions).
+Output valid JSON matching the schema."""
 
 # Initialize the cached system message with the prompt text
 CACHED_SYSTEM_MESSAGE[0]["text"] = SYSTEM_PROMPT
 
 
 # Keywords that indicate funding content (for early exit optimization)
-FUNDING_KEYWORDS = [
-    "funding", "raised", "series", "seed", "investment", "round",
-    "million", "billion", "venture", "capital", "investor", "led by",
-    "announces", "secures", "closes", "valuation"
+# Split into strong (must have) and supporting (help confirm) keywords
+STRONG_FUNDING_KEYWORDS = [
+    "raised", "funding", "series", "seed round", "led by", "investment round",
+    "secures", "closes round", "announces funding"
+]
+AMOUNT_KEYWORDS = ["million", "billion", "$"]
+SUPPORTING_KEYWORDS = [
+    "investment", "round", "venture", "capital", "investor",
+    "announces", "valuation", "pre-seed", "series a", "series b", "series c"
 ]
 
 
@@ -288,10 +122,23 @@ def is_likely_funding_content(text: str) -> bool:
 
     Used for early exit optimization - skip Claude call if text
     doesn't contain funding-related keywords.
+
+    TIGHTENED: Requires either:
+    - 1 strong keyword + 1 amount keyword (e.g., "raised $50 million")
+    - 3+ total keywords (broader coverage)
     """
     text_lower = text.lower()
-    matches = sum(1 for kw in FUNDING_KEYWORDS if kw in text_lower)
-    return matches >= 2  # Require at least 2 funding keywords
+
+    # Check for strong keyword + amount (most reliable signal)
+    has_strong = any(kw in text_lower for kw in STRONG_FUNDING_KEYWORDS)
+    has_amount = any(kw in text_lower for kw in AMOUNT_KEYWORDS)
+    if has_strong and has_amount:
+        return True
+
+    # Fallback: require 3+ keywords total
+    all_keywords = STRONG_FUNDING_KEYWORDS + AMOUNT_KEYWORDS + SUPPORTING_KEYWORDS
+    matches = sum(1 for kw in all_keywords if kw in text_lower)
+    return matches >= 3
 
 
 def _compute_content_hash(text: str) -> str:
@@ -341,6 +188,24 @@ CRYPTO_KEYWORDS = [
 
 # Company name patterns that indicate crypto (for stricter detection)
 CRYPTO_COMPANY_PATTERNS = ["protocol", "chain", "token", "dao", "coin", "web3"]
+
+
+def is_likely_crypto_article(text: str) -> bool:
+    """
+    PRE-CHECK: Detect if article is crypto-focused BEFORE calling Claude.
+
+    Saves tokens by skipping crypto articles that would be rejected anyway.
+    Only triggers on HIGH crypto signal (4+ keywords) to avoid false positives.
+    """
+    text_lower = text.lower()
+    crypto_count = sum(1 for kw in CRYPTO_KEYWORDS if kw in text_lower)
+
+    # High threshold to avoid rejecting enterprise blockchain companies
+    if crypto_count >= 4:
+        logger.debug(f"Pre-check: Skipping crypto article ({crypto_count} keywords)")
+        return True
+
+    return False
 
 
 def _is_crypto_deal(deal: DealExtraction, article_text: str) -> bool:
@@ -527,6 +392,39 @@ async def extract_deal(
                 participation_signals=[],
                 ambiguity_flags=["Text does not appear to be about funding"],
                 final_reasoning="Skipped extraction - no funding content detected"
+            )
+        )
+
+    # PRE-CHECK: Skip crypto-heavy articles before calling Claude (saves tokens)
+    if not skip_funding_check and is_likely_crypto_article(article_text):
+        from .schemas import ChainOfThought
+        return DealExtraction(
+            startup_name="Unknown",
+            startup_description=None,
+            round_label=RoundType.UNKNOWN,
+            amount=None,
+            valuation=None,
+            round_date=None,
+            lead_investors=[],
+            participating_investors=[],
+            tracked_fund_is_lead=False,
+            tracked_fund_name=None,
+            tracked_fund_role=None,
+            tracked_fund_partner=None,
+            enterprise_category=EnterpriseCategory.NOT_ENTERPRISE,
+            is_enterprise_ai=False,
+            verification_snippet=None,
+            confidence_score=0.1,
+            thesis_drift_score=0.0,
+            is_new_announcement=False,
+            announcement_evidence=None,
+            announcement_rejection_reason="Crypto/blockchain article - not Enterprise AI",
+            reasoning=ChainOfThought(
+                verb_analysis="Crypto keywords detected",
+                lead_signals=[],
+                participation_signals=[],
+                ambiguity_flags=["Article appears to be about crypto/blockchain"],
+                final_reasoning="Skipped extraction - crypto article detected"
             )
         )
 

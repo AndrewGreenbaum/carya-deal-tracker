@@ -181,74 +181,96 @@ async def process_external_articles(
 
     logger.info(f"[{source_name}] Processing {len(articles)} articles through extraction pipeline")
 
-    for article in articles:
-        try:
-            # Check for duplicate URL
-            async with get_session() as session:
-                stmt = select(Article).where(Article.url == article.url).limit(1)
-                result = await session.execute(stmt)
-                if result.scalar_one_or_none():
-                    stats["articles_skipped_duplicate"] += 1
-                    continue
+    # OPTIMIZATION: Batch check for duplicate URLs in single query (avoids N sessions)
+    article_urls = [a.url for a in articles]
+    existing_urls: set[str] = set()
+    async with get_session() as session:
+        stmt = select(Article.url).where(Article.url.in_(article_urls))
+        result = await session.execute(stmt)
+        existing_urls = {row[0] for row in result.fetchall()}
 
-            # Get fund config for context (may be empty for general articles)
-            fund_config = FUND_REGISTRY.get(article.fund_slug) if article.fund_slug else None
+    # Filter out duplicates
+    new_articles = [a for a in articles if a.url not in existing_urls]
+    stats["articles_skipped_duplicate"] = len(articles) - len(new_articles)
 
-            # Extract deal using Claude
-            extraction = await extract_deal(
-                article_text=article.text,
-                source_url=article.url,
-                fund_context=fund_config,
-            )
+    if not new_articles:
+        logger.info(f"[{source_name}] All {len(articles)} articles already processed")
+        return stats
 
-            # FIX: Handle None returns (duplicate content or extraction failure)
-            if extraction is None:
-                logger.debug(f"[{source_name}] Extraction returned None for {article.url}")
-                continue
+    logger.info(f"[{source_name}] {len(new_articles)} new articles to process (skipped {stats['articles_skipped_duplicate']} duplicates)")
 
-            # Skip low-confidence extractions
-            if extraction.confidence_score < settings.extraction_confidence_threshold:
-                continue
+    # OPTIMIZATION: Concurrent processing with semaphore (vs serial 0.5s per article)
+    MAX_CONCURRENT = 5
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+    results_lock = asyncio.Lock()
 
-            stats["deals_extracted"] += 1
+    async def process_article(article):
+        async with semaphore:
+            try:
+                # Get fund config for context
+                fund_config = FUND_REGISTRY.get(article.fund_slug) if article.fund_slug else None
 
-            # Save to database
-            alert_info = None
-            async with get_session() as session:
-                deal, alert_info = await save_deal(
-                    session=session,
-                    extraction=extraction,
-                    article_url=article.url,
-                    article_title=article.title,
+                # Extract deal using Claude
+                extraction = await extract_deal(
                     article_text=article.text,
-                    source_fund_slug=article.fund_slug,
-                    article_published_date=article.published_date,
+                    source_url=article.url,
+                    fund_context=fund_config,
                 )
-                if deal:
-                    stats["deals_saved"] += 1
-                    logger.info(
-                        f"[{source_name}] Saved deal: {extraction.startup_name} "
-                        f"(fund: {article.fund_slug or 'unknown'})"
+
+                # Handle None returns
+                if extraction is None:
+                    logger.debug(f"[{source_name}] Extraction returned None for {article.url}")
+                    return None
+
+                # Skip low-confidence extractions
+                if extraction.confidence_score < settings.extraction_confidence_threshold:
+                    return None
+
+                # Save to database
+                alert_info = None
+                async with get_session() as session:
+                    deal, alert_info = await save_deal(
+                        session=session,
+                        extraction=extraction,
+                        article_url=article.url,
+                        article_title=article.title,
+                        article_text=article.text,
+                        source_fund_slug=article.fund_slug,
+                        article_published_date=article.published_date,
                     )
 
-            # FIX #20: Send alert AFTER transaction commits (session context exited)
-            if alert_info:
-                from .notifications import send_lead_deal_alert
-                await send_lead_deal_alert(
-                    company_name=alert_info.company_name,
-                    amount=alert_info.amount,
-                    round_type=alert_info.round_type,
-                    lead_investor=alert_info.lead_investor,
-                    enterprise_category=alert_info.enterprise_category,
-                    verification_snippet=alert_info.verification_snippet,
-                )
+                # Update stats thread-safely
+                async with results_lock:
+                    if deal:
+                        stats["deals_saved"] += 1
+                        stats["deals_extracted"] += 1
+                        logger.info(
+                            f"[{source_name}] Saved deal: {extraction.startup_name} "
+                            f"(fund: {article.fund_slug or 'unknown'})"
+                        )
 
-            # Rate limit between extractions
-            await asyncio.sleep(0.5)
+                # Send alert AFTER transaction commits
+                if alert_info:
+                    from .notifications import send_lead_deal_alert
+                    await send_lead_deal_alert(
+                        company_name=alert_info.company_name,
+                        amount=alert_info.amount,
+                        round_type=alert_info.round_type,
+                        lead_investor=alert_info.lead_investor,
+                        enterprise_category=alert_info.enterprise_category,
+                        verification_snippet=alert_info.verification_snippet,
+                    )
 
-        except Exception as e:
-            stats["errors"] += 1
-            logger.warning(f"[{source_name}] Error processing article {article.url}: {e}")
+                return extraction
+
+            except Exception as e:
+                async with results_lock:
+                    stats["errors"] += 1
+                logger.warning(f"[{source_name}] Error processing article {article.url}: {e}")
+                return None
+
+    # Process all articles concurrently (limited by semaphore)
+    await asyncio.gather(*[process_article(a) for a in new_articles], return_exceptions=True)
 
     logger.info(
         f"[{source_name}] Extraction complete: "

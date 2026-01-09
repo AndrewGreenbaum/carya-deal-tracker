@@ -47,6 +47,7 @@ class PlaywrightScraper:
         self._context: Optional[BrowserContext] = None
         self._page_pool: asyncio.Queue[Page] = asyncio.Queue(maxsize=self.POOL_SIZE)
         self._pool_initialized = False
+        self._all_pages: set = set()  # Track ALL pages for cleanup (prevents memory leaks)
 
     async def __aenter__(self):
         self._playwright = await async_playwright().start()
@@ -69,13 +70,19 @@ class PlaywrightScraper:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        # Clean up page pool
-        while not self._page_pool.empty():
+        # Clean up ALL pages (including overflow pages not in pool)
+        for page in list(self._all_pages):
             try:
-                page = self._page_pool.get_nowait()
                 await page.close()
             except Exception:
-                # FIX #15: Use Exception instead of bare except
+                pass  # Page may already be closed
+        self._all_pages.clear()
+
+        # Also drain the pool queue (pages already closed above)
+        while not self._page_pool.empty():
+            try:
+                self._page_pool.get_nowait()
+            except Exception:
                 pass
         if self._context:
             await self._context.close()
@@ -105,6 +112,8 @@ class PlaywrightScraper:
             Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
         """)
 
+        # Track page for cleanup (prevents memory leaks from overflow pages)
+        self._all_pages.add(page)
         return page
 
     async def acquire_page(self) -> Page:
@@ -132,14 +141,15 @@ class PlaywrightScraper:
             await page.goto('about:blank')
             self._page_pool.put_nowait(page)
         except asyncio.QueueFull:
-            # Pool full, close overflow page
+            # Pool full, close overflow page and remove from tracking
             await page.close()
+            self._all_pages.discard(page)
         except Exception:
-            # Page may be in bad state, close it
+            # Page may be in bad state, close it and remove from tracking
             try:
                 await page.close()
+                self._all_pages.discard(page)
             except Exception:
-                # FIX #15: Use Exception instead of bare except
                 pass
 
     async def new_page(self) -> Page:
