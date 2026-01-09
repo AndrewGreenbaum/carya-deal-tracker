@@ -10,7 +10,7 @@
  * - Focus restoration on close
  */
 
-import { memo, useEffect, useRef, useCallback } from 'react';
+import { memo, useState, useEffect, useRef, useCallback } from 'react';
 import {
   X,
   ExternalLink,
@@ -26,9 +26,13 @@ import {
   Globe,
   Linkedin,
   User,
+  Target,
+  Check,
+  Loader2,
 } from 'lucide-react';
 import type { Deal, EnterpriseCategory } from '../types';
 import { STAGE_LABELS, CATEGORY_LABELS } from '../types';
+import { addDealToTracker } from '../api/deals';
 
 interface DealModalProps {
   deal: Deal;
@@ -38,6 +42,21 @@ interface DealModalProps {
 export const DealModal = memo(function DealModal({ deal, onClose }: DealModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const [trackingStatus, setTrackingStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  const handleAddToTracker = useCallback(async () => {
+    if (trackingStatus === 'loading' || trackingStatus === 'success') return;
+
+    setTrackingStatus('loading');
+    try {
+      await addDealToTracker(parseInt(deal.id), 'watching');
+      setTrackingStatus('success');
+    } catch (err) {
+      console.error('Failed to add to tracker:', err);
+      setTrackingStatus('error');
+      setTimeout(() => setTrackingStatus('idle'), 3000);
+    }
+  }, [deal.id, trackingStatus]);
 
   // Focus the close button when modal opens
   useEffect(() => {
@@ -289,9 +308,35 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-800 flex justify-end">
+        <div className="px-6 py-4 border-t border-slate-800 flex justify-end gap-3">
           <button onClick={onClose} className="btn-secondary">
             Close
+          </button>
+          <button
+            onClick={handleAddToTracker}
+            disabled={trackingStatus === 'loading' || trackingStatus === 'success'}
+            className={`flex items-center gap-2 px-4 py-2 rounded font-medium transition-colors ${
+              trackingStatus === 'success'
+                ? 'bg-emerald-600 text-white cursor-default'
+                : trackingStatus === 'error'
+                ? 'bg-red-600 hover:bg-red-500 text-white'
+                : trackingStatus === 'loading'
+                ? 'bg-amber-600/50 text-white cursor-wait'
+                : 'bg-amber-600 hover:bg-amber-500 text-white'
+            }`}
+          >
+            {trackingStatus === 'loading' ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : trackingStatus === 'success' ? (
+              <Check className="w-4 h-4" />
+            ) : (
+              <Target className="w-4 h-4" />
+            )}
+            {trackingStatus === 'success'
+              ? 'Added to Tracker'
+              : trackingStatus === 'error'
+              ? 'Retry'
+              : 'Add to Tracker'}
           </button>
         </div>
       </div>

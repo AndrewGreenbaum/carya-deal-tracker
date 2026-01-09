@@ -10,7 +10,7 @@
  * - Click to open modal
  */
 
-import React, { memo } from 'react';
+import React, { memo, useState, useCallback } from 'react';
 import {
   Link,
   FileText,
@@ -29,8 +29,12 @@ import {
   ArrowUp,
   ArrowDown,
   Linkedin,
+  Target,
+  Check,
+  Loader2,
 } from 'lucide-react';
 import type { Deal, EnterpriseCategory, InvestmentStage, PaginatedDeals, SortDirection } from '../types';
+import { addDealToTracker } from '../api/deals';
 import { STAGE_LABELS } from '../types';
 
 interface DealsTableProps {
@@ -181,6 +185,24 @@ interface DealRowProps {
 
 const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
   const isRejected = !deal.isEnterpriseAi || !deal.investorRoles.includes('lead');
+  const [trackingStatus, setTrackingStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  const handleTrack = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (trackingStatus === 'loading' || trackingStatus === 'success') return;
+
+    setTrackingStatus('loading');
+    try {
+      await addDealToTracker(parseInt(deal.id), 'watching');
+      setTrackingStatus('success');
+      // Reset after 3 seconds
+      setTimeout(() => setTrackingStatus('idle'), 3000);
+    } catch (err) {
+      console.error('Failed to add to tracker:', err);
+      setTrackingStatus('error');
+      setTimeout(() => setTrackingStatus('idle'), 3000);
+    }
+  }, [deal.id, trackingStatus]);
 
   return (
     <tr
@@ -225,6 +247,8 @@ const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
           website={deal.companyWebsite}
           ceoLinkedin={deal.founders?.[0]?.linkedinUrl}
           isRejected={isRejected}
+          trackingStatus={trackingStatus}
+          onTrack={handleTrack}
         />
       </td>
 
@@ -299,10 +323,14 @@ function CompanyLinks({
   website,
   ceoLinkedin,
   isRejected,
+  trackingStatus,
+  onTrack,
 }: {
   website?: string;
   ceoLinkedin?: string;
   isRejected: boolean;
+  trackingStatus: 'idle' | 'loading' | 'success' | 'error';
+  onTrack: (e: React.MouseEvent) => void;
 }) {
   const hasWebsite = !!website;
   const hasLinkedin = !!ceoLinkedin;
@@ -340,6 +368,36 @@ function CompanyLinks({
         title={hasLinkedin ? 'CEO LinkedIn' : 'No LinkedIn'}
       >
         <Linkedin className="w-4 h-4" />
+      </button>
+
+      {/* Track Button */}
+      <button
+        onClick={onTrack}
+        disabled={trackingStatus === 'loading'}
+        className={`p-1.5 rounded transition-all ${
+          trackingStatus === 'success'
+            ? 'text-emerald-400 bg-emerald-400/10'
+            : trackingStatus === 'error'
+            ? 'text-red-400 bg-red-400/10'
+            : trackingStatus === 'loading'
+            ? 'text-slate-400 cursor-wait'
+            : 'hover:bg-slate-700 text-slate-400 hover:text-amber-400 cursor-pointer'
+        } ${isRejected ? 'opacity-50' : ''}`}
+        title={
+          trackingStatus === 'success'
+            ? 'Added to Tracker!'
+            : trackingStatus === 'error'
+            ? 'Failed to add'
+            : 'Add to Tracker'
+        }
+      >
+        {trackingStatus === 'loading' ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : trackingStatus === 'success' ? (
+          <Check className="w-4 h-4" />
+        ) : (
+          <Target className="w-4 h-4" />
+        )}
       </button>
     </div>
   );

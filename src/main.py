@@ -14,11 +14,14 @@ OPTIMIZED:
 
 import asyncio
 import json
+import logging
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 import time
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, HTTPException, Depends, Security, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
