@@ -3358,7 +3358,11 @@ async def update_existing_tracker_item(
                 updates["next_step"] = request.next_step
             if request.last_contact_date is not None:
                 from datetime import date as date_type
-                updates["last_contact_date"] = date_type.fromisoformat(request.last_contact_date)
+                # Handle empty string as null
+                if request.last_contact_date.strip():
+                    updates["last_contact_date"] = date_type.fromisoformat(request.last_contact_date)
+                else:
+                    updates["last_contact_date"] = None
 
             item = await update_tracker_item(session, item_id, **updates)
             if not item:
