@@ -8,8 +8,9 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Trash2, Globe, Calendar, Building2 } from 'lucide-react';
-import type { TrackerItem } from '../types';
+import { X, Trash2, Globe, Calendar, Building2, Target } from 'lucide-react';
+import type { TrackerItem, TrackerStatus } from '../types';
+import { TRACKER_STATUS_LABELS } from '../types';
 
 interface TrackerModalProps {
   item: TrackerItem | null;
@@ -33,6 +34,7 @@ export function TrackerModal({
     leadInvestor: '',
     website: '',
     notes: '',
+    status: 'watching' as TrackerStatus,
     lastContactDate: '',
     nextStep: '',
   });
@@ -51,6 +53,7 @@ export function TrackerModal({
         leadInvestor: item.leadInvestor || '',
         website: item.website || '',
         notes: item.notes || '',
+        status: item.status || 'watching',
         lastContactDate: item.lastContactDate || '',
         nextStep: item.nextStep || '',
       });
@@ -62,6 +65,7 @@ export function TrackerModal({
         leadInvestor: '',
         website: '',
         notes: '',
+        status: 'watching',
         lastContactDate: '',
         nextStep: '',
       });
@@ -261,15 +265,41 @@ export function TrackerModal({
               />
             </div>
 
-            {/* Pipeline Fields (only for editing) */}
+            {/* Pipeline Tracking Section */}
+            <div className="pt-3 border-t border-slate-800">
+              <h3 className="text-xs font-medium text-slate-500 uppercase mb-3">
+                Pipeline Status
+              </h3>
+            </div>
+
+            {/* Pipeline Status - visible for both create and edit */}
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">
+                Status
+              </label>
+              <div className="relative">
+                <Target className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <select
+                  value={formData.status}
+                  onChange={(e) =>
+                    setFormData({ ...formData, status: e.target.value as TrackerStatus })
+                  }
+                  className="w-full bg-slate-900 border border-slate-700 rounded pl-10 pr-3 py-2 text-white focus:outline-none focus:border-emerald-500/50 appearance-none cursor-pointer"
+                >
+                  {(Object.entries(TRACKER_STATUS_LABELS) as [TrackerStatus, string][]).map(
+                    ([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
+            </div>
+
+            {/* Additional Pipeline Fields (only for editing) */}
             {!isCreating && (
               <>
-                <div className="pt-3 border-t border-slate-800">
-                  <h3 className="text-xs font-medium text-slate-500 uppercase mb-3">
-                    Pipeline Tracking
-                  </h3>
-                </div>
-
                 {/* Last Contact Date */}
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1">

@@ -203,7 +203,7 @@ export function Tracker() {
           leadInvestor: data.leadInvestor,
           website: data.website,
           notes: data.notes,
-          status: 'watching',
+          status: data.status || 'watching',
         });
       } else if (modalItem) {
         await updateTrackerItem(modalItem.id, {
@@ -213,6 +213,7 @@ export function Tracker() {
           leadInvestor: data.leadInvestor,
           website: data.website,
           notes: data.notes,
+          status: data.status,
           lastContactDate: data.lastContactDate,
           nextStep: data.nextStep,
         });
@@ -296,16 +297,19 @@ export function Tracker() {
           onDragEnd={handleDragEnd}
         >
           <div className="flex gap-4 min-h-full">
-            {COLUMNS.map((status) => (
-              <TrackerColumn
-                key={status}
-                id={status}
-                title={TRACKER_STATUS_LABELS[status]}
-                items={getItemsByStatus(status)}
-                count={stats?.[status] || 0}
-                onEditItem={handleEditItem}
-              />
-            ))}
+            {COLUMNS.map((status) => {
+              const columnItems = getItemsByStatus(status);
+              return (
+                <TrackerColumn
+                  key={status}
+                  id={status}
+                  title={TRACKER_STATUS_LABELS[status]}
+                  items={columnItems}
+                  count={columnItems.length}
+                  onEditItem={handleEditItem}
+                />
+              );
+            })}
           </div>
 
           <DragOverlay>

@@ -124,10 +124,13 @@ class IndexVenturesScraper(SimpleHTMLScraper):
             "additional investment",
             "continued support",
             "expanding our investment",
-            "series b" if "led by" not in combined else None,
-            "series c" if "led by" not in combined else None,
+            # Series B/C are always potential follow-on signals
+            # (the extractor will verify lead status separately)
+            "series b",
+            "series c",
+            "series d",
         ]
-        return any(signal and signal in combined for signal in follow_on_signals)
+        return any(signal in combined for signal in follow_on_signals)
 
 
 def create_scraper() -> IndexVenturesScraper:

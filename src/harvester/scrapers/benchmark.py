@@ -8,6 +8,7 @@ Benchmark doesn't have a public news feed - we search news aggregators.
 Must include Partner names in article. Filter NOT 'International', NOT 'Electronics'.
 """
 
+import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 import feedparser
@@ -15,6 +16,8 @@ from bs4 import BeautifulSoup
 
 from ..base_scraper import BaseScraper, RawArticle, NormalizedArticle
 from ...config.funds import FUND_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 
 class BenchmarkScraper(BaseScraper):
@@ -68,9 +71,12 @@ class BenchmarkScraper(BaseScraper):
                 )
                 if response.status_code == 200:
                     feed = feedparser.parse(response.text)
+                    # Check for malformed feed
+                    if feed.bozo and feed.bozo_exception:
+                        logger.warning(f"Malformed RSS feed {feed_url}: {feed.bozo_exception}")
                     all_items.extend(feed.entries)
             except Exception as e:
-                print(f"Error fetching {feed_url}: {e}")
+                logger.warning(f"Error fetching {feed_url}: {e}")
                 continue
 
         # Convert to a pseudo-HTML format for parsing

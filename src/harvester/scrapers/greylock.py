@@ -100,9 +100,10 @@ class GreylockScraper(PlaywrightScraper):
             company_name = self._extract_company_name(title)
 
             # Create a unique URL for this inline content
-            # Use hash of title since there's no real URL
-            title_hash = hashlib.md5(title.encode()).hexdigest()[:8]
-            virtual_url = f"{self.base_url}/portfolio-news/#{title_hash}"
+            # Use hash of company_name + title to prevent collision
+            unique_key = f"{company_name}#{title}"
+            content_hash = hashlib.md5(unique_key.encode()).hexdigest()[:8]
+            virtual_url = f"{self.base_url}/portfolio-news/#{content_hash}"
 
             # Try to extract author/partner
             author = None

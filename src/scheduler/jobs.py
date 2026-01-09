@@ -98,7 +98,14 @@ async def enrich_new_deals(limit: int = 25):
                         enterprise_category=deal.enterprise_category,
                     )
 
-                    enrichment = await enrich_company_with_context(context)
+                    try:
+                        enrichment = await asyncio.wait_for(
+                            enrich_company_with_context(context),
+                            timeout=15.0  # 15 second timeout per enrichment
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Enrichment timeout for {company_name}")
+                        continue
 
                     if deal.company and enrichment.website:
                         deal.company.website = enrichment.website
@@ -270,7 +277,14 @@ async def process_external_articles(
                 return None
 
     # Process all articles concurrently (limited by semaphore)
-    await asyncio.gather(*[process_article(a) for a in new_articles], return_exceptions=True)
+    results = await asyncio.gather(*[process_article(a) for a in new_articles], return_exceptions=True)
+
+    # Check for unhandled exceptions in results
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(f"[{source_name}] Unhandled exception processing article {i}: {result}")
+            async with results_lock:
+                stats["errors"] += 1
 
     logger.info(
         f"[{source_name}] Extraction complete: "
@@ -619,9 +633,9 @@ def setup_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(
         timezone="UTC",
         job_defaults={
-            "coalesce": True,  # Combine missed runs
+            "coalesce": False,  # Queue missed runs instead of dropping them
             "max_instances": 1,  # Only one instance at a time
-            "misfire_grace_time": 300,  # 5 min grace for misfires
+            "misfire_grace_time": 600,  # 10 min grace for misfires (allows long runs)
         }
     )
 

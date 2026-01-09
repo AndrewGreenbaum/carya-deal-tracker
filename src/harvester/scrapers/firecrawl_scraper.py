@@ -18,14 +18,17 @@ Advantages:
 """
 
 import asyncio
+import logging
 import httpx
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional, List, Dict, Any
 from bs4 import BeautifulSoup
 
 from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 # Firecrawl API endpoints
@@ -99,7 +102,8 @@ class FirecrawlScraper:
             FirecrawlResult or None if failed
         """
         if not self.api_key:
-            raise ValueError("FIRECRAWL_API_KEY not configured")
+            logger.warning("FIRECRAWL_API_KEY not configured - skipping scrape")
+            return None
 
         payload = {
             "url": url,
@@ -116,7 +120,7 @@ class FirecrawlScraper:
             data = response.json()
 
             if not data.get("success"):
-                print(f"Firecrawl error: {data.get('error', 'Unknown error')}")
+                logger.error(f"Firecrawl error: {data.get('error', 'Unknown error')}")
                 return None
 
             result_data = data.get("data", {})
@@ -131,10 +135,10 @@ class FirecrawlScraper:
             )
 
         except httpx.HTTPStatusError as e:
-            print(f"Firecrawl HTTP error for {url}: {e.response.status_code}")
+            logger.error(f"Firecrawl HTTP error for {url}: {e.response.status_code}")
             return None
         except Exception as e:
-            print(f"Firecrawl error for {url}: {e}")
+            logger.error(f"Firecrawl error for {url}: {e}")
             return None
 
     async def scrape_batch(
@@ -168,7 +172,7 @@ class FirecrawlScraper:
             if isinstance(result, FirecrawlResult):
                 results.append(result)
             elif isinstance(result, Exception):
-                print(f"Batch scrape exception: {result}")
+                logger.error(f"Batch scrape exception: {result}")
 
         return results
 
@@ -217,7 +221,7 @@ class FirecrawlScraper:
             author=source or "Firecrawl",
             tags=["firecrawl", source.lower()] if source else ["firecrawl"],
             fund_slug=fund_slug,
-            fetched_at=datetime.utcnow(),
+            fetched_at=datetime.now(timezone.utc),
         )
 
     async def scrape_pr_urls(

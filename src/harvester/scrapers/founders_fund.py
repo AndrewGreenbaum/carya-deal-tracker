@@ -71,9 +71,9 @@ class FoundersFundScraper(PlaywrightScraper):
             if "foundersfund.com" not in url:
                 continue
 
-            # Check for year/month pattern in URL
+            # Check for year/month pattern in URL (stricter: months 01-12 only)
             import re
-            if not re.search(r'/20\d{2}/\d{2}/', url):
+            if not re.search(r'/(20[0-2][0-9])/(0[1-9]|1[0-2])/', url):
                 continue
 
             if url in seen_urls:

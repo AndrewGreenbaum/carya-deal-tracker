@@ -792,6 +792,7 @@ export async function updateTrackerItem(
     leadInvestor: string;
     website: string;
     notes: string;
+    status: TrackerStatus;
     lastContactDate: string;
     nextStep: string;
   }>
@@ -803,6 +804,7 @@ export async function updateTrackerItem(
     lead_investor: updates.leadInvestor,
     website: updates.website,
     notes: updates.notes,
+    status: updates.status,
     last_contact_date: updates.lastContactDate,
     next_step: updates.nextStep,
   });

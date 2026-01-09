@@ -521,8 +521,7 @@ class SECEdgarScraper:
                     logger.debug(f"Skipping filing due to missing details: {filing.company_name}")
                     continue
                 filing = result
-                # FIX: SEC-compliant rate limiting (1 second instead of 0.2s)
-                await asyncio.sleep(SEC_REQUEST_DELAY)
+                # Note: Rate limiting is already applied in fetch_filing_details()
 
             # Check for tracked fund match
             fund_slug = self.match_tracked_fund(filing)

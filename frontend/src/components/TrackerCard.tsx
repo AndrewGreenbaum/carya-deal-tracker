@@ -36,26 +36,25 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
     <div
       ref={setNodeRef}
       style={style}
+      {...attributes}
+      {...listeners}
       role="article"
       aria-label={`${item.companyName}${item.leadInvestor ? `, led by ${item.leadInvestor}` : ''}`}
       className={`
-        bg-slate-800 border border-slate-700 rounded-lg p-3 cursor-pointer
+        bg-slate-800 border border-slate-700 rounded-lg p-3 cursor-grab
         hover:border-slate-600 hover:bg-slate-750 transition-all
-        ${isCurrentlyDragging ? 'opacity-50 shadow-lg ring-2 ring-emerald-500/30' : ''}
+        ${isCurrentlyDragging ? 'opacity-50 shadow-lg ring-2 ring-emerald-500/30 cursor-grabbing' : ''}
       `}
       onClick={onClick}
     >
-      {/* Header with drag handle */}
+      {/* Header with drag handle indicator */}
       <div className="flex items-start gap-2">
-        <button
-          {...attributes}
-          {...listeners}
-          aria-label={`Drag ${item.companyName}`}
-          className="p-0.5 text-slate-500 hover:text-slate-300 cursor-grab active:cursor-grabbing shrink-0"
-          onClick={(e) => e.stopPropagation()}
+        <div
+          className="p-0.5 text-slate-500 shrink-0"
+          aria-hidden="true"
         >
-          <GripVertical className="w-4 h-4" aria-hidden="true" />
-        </button>
+          <GripVertical className="w-4 h-4" />
+        </div>
         <div className="flex-1 min-w-0">
           <h4 className="text-sm font-medium text-white truncate">
             {item.companyName}

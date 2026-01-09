@@ -3220,6 +3220,7 @@ class UpdateTrackerItemRequest(BaseModel):
     lead_investor: Optional[str] = None
     website: Optional[str] = None
     notes: Optional[str] = None
+    status: Optional[str] = None
     last_contact_date: Optional[str] = None
     next_step: Optional[str] = None
 
@@ -3354,6 +3355,8 @@ async def update_existing_tracker_item(
                 updates["website"] = request.website
             if request.notes is not None:
                 updates["notes"] = request.notes
+            if request.status is not None:
+                updates["status"] = request.status
             if request.next_step is not None:
                 updates["next_step"] = request.next_step
             if request.last_contact_date is not None:
