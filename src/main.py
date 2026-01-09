@@ -2734,6 +2734,98 @@ async def backfill_deal_dates(
     )
 
 
+class CrossReferenceDatesResponse(BaseModel):
+    deals_processed: int
+    deals_updated: int
+    deals_already_earliest: int
+    details: list
+
+
+@app.post("/deals/cross-reference-dates", response_model=CrossReferenceDatesResponse)
+async def cross_reference_dates(
+    limit: int = Query(500, ge=1, le=1000, description="Max deals to process"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Cross-reference deals with multiple articles to find the earliest announcement date.
+
+    For each deal, checks all linked articles and updates announced_date to the earliest
+    published_date found. This corrects cases where a deal was first scraped from a
+    secondary source but later found in an earlier article.
+    """
+    from sqlalchemy import func
+
+    processed = 0
+    updated = 0
+    already_earliest = 0
+    details = []
+
+    try:
+        async with get_session() as session:
+            # Find deals with their articles
+            stmt = (
+                select(Deal)
+                .options(selectinload(Deal.articles))
+                .options(selectinload(Deal.company))
+                .order_by(Deal.created_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            deals = result.scalars().all()
+
+            for deal in deals:
+                processed += 1
+
+                if not deal.articles:
+                    continue
+
+                # Find earliest date among all linked articles
+                article_dates = [
+                    a.published_date for a in deal.articles
+                    if a.published_date is not None
+                ]
+
+                if not article_dates:
+                    continue
+
+                earliest_date = min(article_dates)
+
+                # Update if earliest is before current announced_date
+                if deal.announced_date:
+                    if earliest_date < deal.announced_date:
+                        company_name = deal.company.name if deal.company else "Unknown"
+                        details.append({
+                            "deal_id": deal.id,
+                            "company": company_name,
+                            "old_date": str(deal.announced_date),
+                            "new_date": str(earliest_date),
+                            "articles_checked": len(deal.articles),
+                        })
+                        deal.announced_date = earliest_date
+                        deal.updated_at = datetime.now(timezone.utc)
+                        updated += 1
+                    else:
+                        already_earliest += 1
+                else:
+                    # Deal had no date, set it
+                    deal.announced_date = earliest_date
+                    deal.updated_at = datetime.now(timezone.utc)
+                    updated += 1
+
+            await session.commit()
+
+    except Exception as e:
+        logger.error("Request failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    return CrossReferenceDatesResponse(
+        deals_processed=processed,
+        deals_updated=updated,
+        deals_already_earliest=already_earliest,
+        details=details[:50],  # Limit details to 50 for response size
+    )
+
+
 class CleanupOldDealsResponse(BaseModel):
     deals_deleted: int
     cutoff_date: str

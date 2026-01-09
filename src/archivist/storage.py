@@ -434,6 +434,25 @@ async def save_deal(
             f"Skipping duplicate deal: {extraction.startup_name} "
             f"{extraction.round_label.value} - matches deal #{existing_deal.id}"
         )
+
+        # Cross-reference: Update to earlier date if this article has one
+        # This ensures we use the earliest known announcement date
+        if announced_date and existing_deal.announced_date:
+            if announced_date < existing_deal.announced_date:
+                logger.info(
+                    f"Updating deal #{existing_deal.id} date: "
+                    f"{existing_deal.announced_date} → {announced_date} (earlier source found)"
+                )
+                existing_deal.announced_date = announced_date
+                existing_deal.updated_at = datetime.now(timezone.utc)
+        elif announced_date and not existing_deal.announced_date:
+            # Deal had no date, now we have one
+            logger.info(
+                f"Setting deal #{existing_deal.id} date: {announced_date} (previously null)"
+            )
+            existing_deal.announced_date = announced_date
+            existing_deal.updated_at = datetime.now(timezone.utc)
+
         # Check if this article URL already exists (prevent duplicate articles)
         if not await check_article_url_exists(session, article_url):
             # Link article to existing deal
