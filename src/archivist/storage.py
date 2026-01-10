@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional, Tuple
 from sqlalchemy import select, nullslast
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -480,22 +481,22 @@ async def save_deal(
             existing_deal.announced_date = announced_date
             existing_deal.updated_at = datetime.now(timezone.utc)
 
-        # Check if this article URL already exists (prevent duplicate articles)
-        if not await check_article_url_exists(session, article_url):
-            # Link article to existing deal
-            article = Article(
-                deal_id=existing_deal.id,
-                url=article_url,
-                title=article_title,
-                source_fund_slug=source_fund_slug,
-                extracted_text=article_text,
-                is_processed=True,
-            )
-            session.add(article)
+        # FIX: Use ON CONFLICT DO NOTHING to prevent race condition
+        # Between check_article_url_exists() and insert, another task could insert same URL
+        stmt = pg_insert(Article).values(
+            deal_id=existing_deal.id,
+            url=article_url,
+            title=article_title,
+            source_fund_slug=source_fund_slug,
+            extracted_text=article_text,
+            is_processed=True,
+        ).on_conflict_do_nothing(index_elements=['url'])
+        result = await session.execute(stmt)
+        if result.rowcount > 0:
             await session.flush()
             logger.debug(f"Linked new article to existing deal #{existing_deal.id}")
         else:
-            logger.debug(f"Article URL already exists, skipping: {article_url}")
+            logger.debug(f"Article URL already exists (concurrent insert): {article_url}")
         return None, None  # Signal that this was a duplicate
 
     # Get or create company with website and LinkedIn

@@ -243,3 +243,36 @@ class TrackerItem(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     )
+
+
+class Feedback(SQLModel, table=True):
+    """User feedback: flags and suggestions.
+
+    Replaces Google Sheets integration - stores directly in PostgreSQL.
+
+    feedback_type:
+    - 'flag': Report a problem with a deal
+    - 'suggestion': Suggest a missing company or report an error
+    """
+    __tablename__ = "feedback"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # Feedback type and content
+    feedback_type: str = Field(max_length=20, index=True)  # 'flag' or 'suggestion'
+    company_name: str = Field(max_length=255)
+    deal_id: Optional[int] = Field(default=None, foreign_key="deals.id")
+    reason: Optional[str] = None  # Flag reason or suggestion details
+    suggestion_type: Optional[str] = Field(default=None, max_length=50)  # 'missing_company', 'error', 'other'
+    source_url: Optional[str] = None
+    reporter_email: Optional[str] = Field(default=None, max_length=255)
+
+    # Review tracking
+    reviewed: bool = Field(default=False, index=True)
+    reviewed_at: Optional[datetime] = None
+
+    # Metadata
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    )

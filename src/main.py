@@ -3508,22 +3508,30 @@ async def flag_company(
     Flag a company for review.
 
     Used when users spot errors with a company's deal information.
-    Appends to Google Sheets for review.
+    Saves to PostgreSQL feedback table.
     """
-    try:
-        from .feedback import append_flag_to_sheet
+    from .archivist.models import Feedback
+    from .archivist.database import async_session_maker
 
-        result = await append_flag_to_sheet(
-            deal_id=request.deal_id,
-            company_name=request.company_name,
-            reason=request.reason,
-            source_url=request.source_url,
-            reporter_email=request.reporter_email,
-        )
+    try:
+        async with async_session_maker() as session:
+            feedback = Feedback(
+                feedback_type="flag",
+                company_name=request.company_name,
+                deal_id=request.deal_id,
+                reason=request.reason,
+                source_url=request.source_url,
+                reporter_email=request.reporter_email,
+            )
+            session.add(feedback)
+            await session.commit()
+            await session.refresh(feedback)
+
+            timestamp = feedback.created_at.isoformat()
 
         return FeedbackResponse(
-            success=result["success"],
-            timestamp=result["timestamp"],
+            success=True,
+            timestamp=timestamp,
             company_name=request.company_name,
             message="Thanks for flagging! We'll review this soon.",
         )
@@ -3541,27 +3549,122 @@ async def submit_suggestion(
     Submit a suggestion (missing company, general feedback).
 
     Used when users want to suggest companies we should be tracking
-    or report other issues.
+    or report other issues. Saves to PostgreSQL feedback table.
     """
-    try:
-        from .feedback import append_suggestion_to_sheet
+    from .archivist.models import Feedback
+    from .archivist.database import async_session_maker
 
-        result = await append_suggestion_to_sheet(
-            company_name=request.company_name,
-            details=request.details,
-            reporter_email=request.reporter_email,
-            suggestion_type=request.suggestion_type,
-        )
+    try:
+        async with async_session_maker() as session:
+            feedback = Feedback(
+                feedback_type="suggestion",
+                company_name=request.company_name,
+                reason=request.details,  # Store details in reason field
+                suggestion_type=request.suggestion_type,
+                reporter_email=request.reporter_email,
+            )
+            session.add(feedback)
+            await session.commit()
+            await session.refresh(feedback)
+
+            timestamp = feedback.created_at.isoformat()
 
         return FeedbackResponse(
-            success=result["success"],
-            timestamp=result["timestamp"],
+            success=True,
+            timestamp=timestamp,
             company_name=request.company_name,
             message="Thanks for the suggestion! We'll look into it.",
         )
     except Exception as e:
         logger.error("Failed to submit suggestion: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to submit suggestion")
+
+
+@app.get("/feedback")
+async def list_feedback(
+    reviewed: Optional[bool] = None,
+    feedback_type: Optional[str] = None,
+    limit: int = 50,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    List feedback entries for manual review.
+
+    Args:
+        reviewed: Filter by reviewed status (true/false)
+        feedback_type: Filter by type ('flag' or 'suggestion')
+        limit: Max number of entries to return
+    """
+    from sqlmodel import select
+    from .archivist.models import Feedback
+    from .archivist.database import async_session_maker
+
+    try:
+        async with async_session_maker() as session:
+            query = select(Feedback).order_by(Feedback.created_at.desc()).limit(limit)
+
+            if reviewed is not None:
+                query = query.where(Feedback.reviewed == reviewed)
+            if feedback_type:
+                query = query.where(Feedback.feedback_type == feedback_type)
+
+            result = await session.execute(query)
+            items = result.scalars().all()
+
+            return {
+                "count": len(items),
+                "items": [
+                    {
+                        "id": f.id,
+                        "feedback_type": f.feedback_type,
+                        "company_name": f.company_name,
+                        "deal_id": f.deal_id,
+                        "reason": f.reason,
+                        "suggestion_type": f.suggestion_type,
+                        "source_url": f.source_url,
+                        "reporter_email": f.reporter_email,
+                        "reviewed": f.reviewed,
+                        "created_at": f.created_at.isoformat() if f.created_at else None,
+                    }
+                    for f in items
+                ],
+            }
+    except Exception as e:
+        logger.error("Failed to list feedback: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to list feedback")
+
+
+@app.patch("/feedback/{feedback_id}/reviewed")
+async def mark_feedback_reviewed(
+    feedback_id: int,
+    api_key: str = Depends(verify_api_key),
+):
+    """Mark a feedback entry as reviewed."""
+    from datetime import timezone
+    from sqlmodel import select
+    from .archivist.models import Feedback
+    from .archivist.database import async_session_maker
+
+    try:
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(Feedback).where(Feedback.id == feedback_id)
+            )
+            feedback = result.scalar_one_or_none()
+
+            if not feedback:
+                raise HTTPException(status_code=404, detail="Feedback not found")
+
+            feedback.reviewed = True
+            feedback.reviewed_at = datetime.now(timezone.utc)
+            await session.commit()
+
+            return {"success": True, "id": feedback_id, "reviewed": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to mark feedback as reviewed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to update feedback")
 
 
 # ----- CLI Runner -----
