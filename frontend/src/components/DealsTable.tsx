@@ -32,10 +32,9 @@ import {
   Target,
   Check,
   Loader2,
-  Flag,
 } from 'lucide-react';
 import type { Deal, EnterpriseCategory, InvestmentStage, PaginatedDeals, SortDirection } from '../types';
-import { addDealToTracker, flagDeal } from '../api/deals';
+import { addDealToTracker } from '../api/deals';
 import { STAGE_LABELS } from '../types';
 
 interface DealsTableProps {
@@ -187,7 +186,6 @@ interface DealRowProps {
 const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
   const isRejected = !deal.isEnterpriseAi || !deal.investorRoles.includes('lead');
   const [trackingStatus, setTrackingStatus] = useState<'idle' | 'loading' | 'success' | 'already' | 'error'>('idle');
-  const [flagStatus, setFlagStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
   const handleTrack = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -213,32 +211,6 @@ const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
       }
     }
   }, [deal.id, trackingStatus]);
-
-  const handleFlag = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (flagStatus === 'loading' || flagStatus === 'success') return;
-
-    // Prompt for reason
-    const reason = window.prompt(
-      `Flag "${deal.startupName}" - What's wrong?\n\n(e.g., "Wrong amount", "Not Enterprise AI", "Duplicate")`
-    );
-    if (reason === null) return; // User cancelled
-
-    setFlagStatus('loading');
-    try {
-      await flagDeal(
-        deal.id ? parseInt(deal.id) : null,
-        deal.startupName,
-        reason || undefined,
-        deal.sourceUrl || undefined
-      );
-      setFlagStatus('success');
-    } catch (err) {
-      console.error('Failed to flag deal:', err);
-      setFlagStatus('error');
-      setTimeout(() => setFlagStatus('idle'), 3000);
-    }
-  }, [deal.id, deal.startupName, deal.sourceUrl, flagStatus]);
 
   return (
     <tr
@@ -285,8 +257,6 @@ const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
           isRejected={isRejected}
           trackingStatus={trackingStatus}
           onTrack={handleTrack}
-          flagStatus={flagStatus}
-          onFlag={handleFlag}
         />
       </td>
 
@@ -363,16 +333,12 @@ function CompanyLinks({
   isRejected,
   trackingStatus,
   onTrack,
-  flagStatus,
-  onFlag,
 }: {
   website?: string;
   ceoLinkedin?: string;
   isRejected: boolean;
   trackingStatus: 'idle' | 'loading' | 'success' | 'already' | 'error';
   onTrack: (e: React.MouseEvent) => void;
-  flagStatus: 'idle' | 'loading' | 'success' | 'error';
-  onFlag: (e: React.MouseEvent) => void;
 }) {
   const hasWebsite = !!website;
   const hasLinkedin = !!ceoLinkedin;
@@ -441,34 +407,6 @@ function CompanyLinks({
           <Check className="w-4 h-4" />
         ) : (
           <Target className="w-4 h-4" />
-        )}
-      </button>
-
-      {/* Flag Button */}
-      <button
-        onClick={onFlag}
-        disabled={flagStatus === 'loading' || flagStatus === 'success'}
-        className={`p-1.5 rounded transition-all ${
-          flagStatus === 'success'
-            ? 'text-red-400 bg-red-400/10'
-            : flagStatus === 'error'
-            ? 'text-red-500 bg-red-500/10'
-            : flagStatus === 'loading'
-            ? 'text-slate-400 cursor-wait'
-            : 'hover:bg-slate-700 text-slate-400 hover:text-red-400 cursor-pointer'
-        } ${isRejected ? 'opacity-50' : ''}`}
-        title={
-          flagStatus === 'success'
-            ? 'Flagged for review'
-            : flagStatus === 'error'
-            ? 'Failed to flag'
-            : 'Report an error'
-        }
-      >
-        {flagStatus === 'loading' ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          <Flag className="w-4 h-4" />
         )}
       </button>
     </div>

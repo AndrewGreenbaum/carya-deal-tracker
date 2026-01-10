@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { Home, ChevronDown, ChevronUp, Search, X, Kanban, MessageSquare } from 'lucide-react';
+import { Home, ChevronDown, ChevronUp, Search, X, Kanban, Mail } from 'lucide-react';
 import type { FilterState, EnterpriseCategory, Fund, ViewType, CostTracker } from '../types';
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
@@ -258,18 +258,12 @@ export function CommandSidebar({
 
       {/* Feedback Section */}
       <div className="p-4 border-t border-slate-800">
-        <p className="text-xs text-slate-500 mb-1">
-          Hey, we aren't perfect.
-        </p>
-        <p className="text-xs text-slate-400 mb-3">
-          We fucked up? Help us fix it.
-        </p>
         <button
           onClick={onOpenFeedback}
-          className="w-full flex items-center justify-center gap-2 text-xs px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 transition-colors"
+          className="w-full flex items-center gap-2 text-xs px-3 py-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors"
         >
-          <MessageSquare className="w-3.5 h-3.5" />
-          Submit Feedback
+          <Mail className="w-4 h-4" />
+          <span>We fuck up? Help us fix it</span>
         </button>
       </div>
     </aside>
