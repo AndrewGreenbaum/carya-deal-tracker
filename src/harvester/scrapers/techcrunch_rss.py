@@ -83,49 +83,49 @@ class TechCrunchScraper:
 
                 feed = feedparser.parse(response.text)
 
-            # Check for malformed feed
-            if feed.bozo:
-                logger.warning(f"Malformed TechCrunch feed {feed_category}: {feed.bozo_exception}")
-                return []
+                # Check for malformed feed
+                if feed.bozo:
+                    logger.warning(f"Malformed TechCrunch feed {feed_url}: {feed.bozo_exception}")
+                    return []
 
-            items = []
-            for entry in feed.entries:
-                # FIX: Skip entries without URLs (empty URLs cause downstream issues)
-                if not entry.get('link'):
-                    continue
+                items = []
+                for entry in feed.entries:
+                    # FIX: Skip entries without URLs (empty URLs cause downstream issues)
+                    if not entry.get('link'):
+                        continue
 
-                # Parse publication date
-                pub_date = None
-                if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    # FIX: Check tuple length before unpacking (crash prevention)
-                    # FIX #14: Use timezone-aware datetime to prevent comparison issues
-                    if len(entry.published_parsed) >= 6:
-                        pub_date = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                    # Parse publication date
+                    pub_date = None
+                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                        # FIX: Check tuple length before unpacking (crash prevention)
+                        # FIX #14: Use timezone-aware datetime to prevent comparison issues
+                        if len(entry.published_parsed) >= 6:
+                            pub_date = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
 
-                # Clean description
-                description = entry.get('summary', '')
-                if description:
-                    soup = BeautifulSoup(description, 'lxml')
-                    description = soup.get_text(strip=True)
+                    # Clean description
+                    description = entry.get('summary', '')
+                    if description:
+                        soup = BeautifulSoup(description, 'lxml')
+                        description = soup.get_text(strip=True)
 
-                # Extract categories/tags
-                categories = []
-                if hasattr(entry, 'tags'):
-                    categories = [tag.term for tag in entry.tags if hasattr(tag, 'term')]
+                    # Extract categories/tags
+                    categories = []
+                    if hasattr(entry, 'tags'):
+                        categories = [tag.term for tag in entry.tags if hasattr(tag, 'term')]
 
-                # Get author
-                author = None
-                if hasattr(entry, 'author'):
-                    author = entry.author
+                    # Get author
+                    author = None
+                    if hasattr(entry, 'author'):
+                        author = entry.author
 
-                items.append(TechCrunchArticle(
-                    title=entry.get('title', ''),
-                    url=entry.get('link', ''),
-                    description=description[:1000],
-                    published=pub_date,
-                    author=author,
-                    categories=categories,
-                ))
+                    items.append(TechCrunchArticle(
+                        title=entry.get('title', ''),
+                        url=entry.get('link', ''),
+                        description=description[:1000],
+                        published=pub_date,
+                        author=author,
+                        categories=categories,
+                    ))
 
                 return items
 
