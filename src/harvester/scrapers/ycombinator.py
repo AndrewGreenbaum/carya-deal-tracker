@@ -106,9 +106,9 @@ class YCombinatorScraper:
         await self.client.aclose()
 
     async def fetch_companies_algolia(self, batch: str, hits_per_page: int = 100) -> List[YCCompany]:
-        """Fetch companies from Algolia API for a specific batch."""
+        """Fetch companies from Algolia API for a specific batch with pagination."""
         try:
-            # FIX #17: Validate Algolia config before using
+            # Validate Algolia config before using
             app_id = getattr(settings, 'yc_algolia_app_id', None)
             api_key = getattr(settings, 'yc_algolia_api_key', None)
             if not app_id or not api_key:
@@ -122,43 +122,63 @@ class YCombinatorScraper:
                 "Content-Type": "application/json",
             }
 
-            # Search for companies in specific batch
-            payload = {
-                "query": "",
-                "hitsPerPage": hits_per_page,
-                "facetFilters": [f"batch:{batch}"],
-            }
+            # Paginate through all results (YC batches have 200-400 companies)
+            all_companies = []
+            page = 0
+            max_pages = 10  # Safety limit
 
-            response = await self.client.post(url, json=payload, headers=headers)
-            response.raise_for_status()
+            while page < max_pages:
+                payload = {
+                    "query": "",
+                    "hitsPerPage": hits_per_page,
+                    "page": page,
+                    "facetFilters": [f"batch:{batch}"],
+                }
 
-            data = response.json()
-            companies = []
+                response = await self.client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
 
-            for hit in data.get("hits", []):
-                # FIX: Skip companies without slug (creates malformed URL)
-                slug = hit.get("slug", "")
-                if not slug:
-                    continue
+                data = response.json()
+                hits = data.get("hits", [])
 
-                # FIX: Filter None values from industries list before join (crash prevention)
-                industries_raw = hit.get("industries") or []
-                industries = ", ".join(i for i in industries_raw if i)
+                if not hits:
+                    break  # No more results
 
-                companies.append(YCCompany(
-                    name=hit.get("name", ""),
-                    url=f"https://www.ycombinator.com/companies/{slug}",
-                    description=hit.get("one_liner", ""),
-                    batch=hit.get("batch", batch),
-                    industry=industries,
-                    location=hit.get("all_locations", ""),
-                    website=hit.get("website", ""),
-                    status=hit.get("status", ""),
-                ))
+                for hit in hits:
+                    # Skip companies without slug (creates malformed URL)
+                    slug = hit.get("slug", "")
+                    if not slug or not hit.get("name", "").strip():
+                        continue
 
-            return companies
+                    # Filter None values from industries list
+                    industries_raw = hit.get("industries") or []
+                    industries = ", ".join(i for i in industries_raw if i)
 
-        # FIX: Handle specific HTTP errors first, then general with exc_info
+                    all_companies.append(YCCompany(
+                        name=hit.get("name", "").strip(),
+                        url=f"https://www.ycombinator.com/companies/{slug}",
+                        description=hit.get("one_liner", ""),
+                        batch=hit.get("batch", batch),
+                        industry=industries,
+                        location=hit.get("all_locations", ""),
+                        website=hit.get("website", ""),
+                        status=hit.get("status", ""),
+                    ))
+
+                # Check if we've fetched all results
+                total_hits = data.get("nbHits", 0)
+                fetched = (page + 1) * hits_per_page
+                if fetched >= total_hits:
+                    break
+
+                page += 1
+                await asyncio.sleep(0.2)  # Rate limit between pages
+
+            if page > 0:
+                logger.debug(f"YC batch {batch}: fetched {len(all_companies)} companies across {page + 1} pages")
+
+            return all_companies
+
         except httpx.HTTPError as e:
             logger.error(f"HTTP error fetching YC companies from Algolia for batch {batch}: {e}")
             return []
@@ -272,12 +292,13 @@ class YCombinatorScraper:
             fetched_at=datetime.now(timezone.utc),
         )
 
-    async def scrape_all(self, include_all_batches: bool = False) -> List[NormalizedArticle]:
+    async def scrape_all(self, include_all_batches: bool = False, filter_enterprise: bool = True) -> List[NormalizedArticle]:
         """
         Full scraping pipeline for Y Combinator.
 
         Args:
             include_all_batches: If True, fetch all recent batches. If False, only current.
+            filter_enterprise: If True, only include Enterprise AI companies.
 
         Returns:
             List of NormalizedArticle objects for companies and blog posts.
@@ -287,11 +308,19 @@ class YCombinatorScraper:
         # Get companies from recent batches
         companies = await self.fetch_recent_batch_companies()
 
-        # Filter for Enterprise AI if needed
+        # Filter for Enterprise AI to avoid wasting Claude tokens on consumer companies
+        enterprise_count = 0
+        skipped_count = 0
         for company in companies:
+            if filter_enterprise and not self.is_enterprise_ai_company(company):
+                skipped_count += 1
+                continue
+            enterprise_count += 1
             article = await self.company_to_article(company)
             articles.append(article)
-            await asyncio.sleep(0.1)
+
+        if filter_enterprise:
+            logger.info(f"YC companies: {enterprise_count} Enterprise AI, {skipped_count} skipped (consumer/other)")
 
         # Get blog posts for announcements
         blog_posts = await self.fetch_blog_posts()

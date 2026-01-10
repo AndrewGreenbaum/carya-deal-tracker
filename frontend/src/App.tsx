@@ -17,6 +17,7 @@ import { CommandSidebar } from './components/CommandSidebar';
 import { StatsCards } from './components/StatsCards';
 import { DealsTable } from './components/DealsTable';
 import { DealModal } from './components/DealModal';
+import { FeedbackModal } from './components/FeedbackModal';
 import { StealthTracker } from './components/StealthTracker';
 import { ScraperControl } from './components/ScraperControl';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -150,6 +151,7 @@ function App() {
 
   // Modal state
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   // Debounce search query
   useEffect(() => {
@@ -332,6 +334,7 @@ function App() {
           currentView={currentView}
           onViewChange={setCurrentView}
           costTracker={costTracker}
+          onOpenFeedback={() => setFeedbackOpen(true)}
         />
 
         {/* Main Content */}
@@ -400,6 +403,11 @@ function App() {
       {/* Deal Modal */}
       {selectedDeal && (
         <DealModal deal={selectedDeal} onClose={() => setSelectedDeal(null)} />
+      )}
+
+      {/* Feedback Modal */}
+      {feedbackOpen && (
+        <FeedbackModal onClose={() => setFeedbackOpen(false)} />
       )}
 
       {/* Settings Panel */}

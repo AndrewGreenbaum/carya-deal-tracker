@@ -6,12 +6,13 @@
  * - SEC EDGAR status
  * - Scrapers status (18/18 ACTIVE)
  * - Claude 3.5 status
- * - Next scrape countdown
+ * - Next scrape countdown (live updating every second)
  *
  * Command Center dark theme
  */
 
-import { Database, Server, Cpu, Settings, RefreshCw } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Database, Server, Cpu, Settings, RefreshCw, Clock } from 'lucide-react';
 import type { SystemStatus } from '../types';
 
 interface CommandHeaderProps {
@@ -27,23 +28,43 @@ export function CommandHeader({
   onSettingsClick,
   isRefreshing = false,
 }: CommandHeaderProps) {
+  // Live countdown state - updates every second
+  const [countdown, setCountdown] = useState<string | null>(null);
+
   // Calculate countdown to next scrape
-  const getNextScrapeCountdown = (): string | null => {
+  const calculateCountdown = (): string | null => {
     if (!systemStatus.nextScrape) return null;
 
     const nextRun = new Date(systemStatus.nextScrape);
     const now = new Date();
     const diffMs = nextRun.getTime() - now.getTime();
 
-    if (diffMs <= 0) return 'Now';
+    if (diffMs <= 0) return 'Running...';
 
-    const minutes = Math.floor(diffMs / 60000);
+    const hours = Math.floor(diffMs / 3600000);
+    const minutes = Math.floor((diffMs % 3600000) / 60000);
     const seconds = Math.floor((diffMs % 60000) / 1000);
 
+    if (hours > 0) {
+      return `${hours}h ${minutes.toString().padStart(2, '0')}m ${seconds.toString().padStart(2, '0')}s`;
+    }
     return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
   };
 
-  const nextScrape = getNextScrapeCountdown();
+  // Update countdown every second
+  useEffect(() => {
+    // Initial calculation
+    setCountdown(calculateCountdown());
+
+    // Update every second
+    const interval = setInterval(() => {
+      setCountdown(calculateCountdown());
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [systemStatus.nextScrape]);
+
+  const nextScrape = countdown;
 
   return (
     <header className="h-16 border-b border-slate-800 bg-[#0a0a0c] flex items-center justify-between px-6 shrink-0 z-20">
@@ -90,8 +111,11 @@ export function CommandHeader({
         {/* Next Scrape Countdown */}
         {nextScrape && (
           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 rounded border border-slate-800">
+            <Clock className="w-3 h-3 text-slate-400" />
             <span className="text-slate-400">NEXT:</span>
-            <span className="text-emerald-400 font-mono">{nextScrape}</span>
+            <span className={`font-mono ${nextScrape === 'Running...' ? 'text-orange-400 animate-pulse' : 'text-emerald-400'}`}>
+              {nextScrape}
+            </span>
           </div>
         )}
 

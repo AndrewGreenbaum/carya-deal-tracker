@@ -189,30 +189,33 @@ class GitHubTrendingScraper:
         return repos
 
     async def fetch_all_trending(self, since: str = "daily") -> List[TrendingRepo]:
-        """Fetch trending repos across multiple languages."""
+        """Fetch trending repos across multiple languages in parallel."""
         all_repos = []
         seen_names = set()
 
-        # First get all languages trending
-        html = await self.fetch_trending_page(since=since)
-        repos = self.parse_trending_repos(html)
-        for repo in repos:
-            if repo.name not in seen_names:
-                seen_names.add(repo.name)
-                all_repos.append(repo)
+        # Fetch all pages in parallel (general + language-specific)
+        async def fetch_and_parse(language: Optional[str] = None) -> List[TrendingRepo]:
+            html = await self.fetch_trending_page(language=language, since=since)
+            return self.parse_trending_repos(html)
 
-        await asyncio.sleep(0.5)
+        # Create tasks for parallel fetching
+        tasks = [fetch_and_parse(None)]  # General trending
+        tasks.extend([fetch_and_parse(lang) for lang in self.languages])
 
-        # Then get language-specific trending
-        for lang in self.languages:
-            html = await self.fetch_trending_page(language=lang, since=since)
-            repos = self.parse_trending_repos(html)
-            for repo in repos:
+        # Execute all in parallel
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Deduplicate results
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Error fetching trending page: {result}")
+                continue
+            for repo in result:
                 if repo.name not in seen_names:
                     seen_names.add(repo.name)
                     all_repos.append(repo)
-            await asyncio.sleep(0.5)
 
+        logger.info(f"GitHub Trending: {len(all_repos)} unique repos from {len(self.languages) + 1} pages")
         return all_repos
 
     def is_enterprise_devtool(self, repo: TrendingRepo) -> bool:
