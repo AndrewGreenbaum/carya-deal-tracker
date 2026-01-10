@@ -580,16 +580,19 @@ async def save_deal(
         )
         session.add(deal_investor)
 
-    # Create article record
-    article = Article(
+    # Create article record - use ON CONFLICT to handle race conditions
+    # Even for new deals, another task could be inserting the same article URL
+    stmt = pg_insert(Article).values(
         deal_id=deal.id,
         url=article_url,
         title=article_title,
         source_fund_slug=source_fund_slug,
         extracted_text=article_text,
         is_processed=True,
-    )
-    session.add(article)
+    ).on_conflict_do_nothing(index_elements=['url'])
+    result = await session.execute(stmt)
+    if result.rowcount == 0:
+        logger.debug(f"Article URL already exists (concurrent insert): {article_url}")
 
     await session.flush()
 
