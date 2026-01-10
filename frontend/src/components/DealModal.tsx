@@ -385,7 +385,7 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
             }`}
             title={
               trackingStatus === 'success' || trackingStatus === 'already'
-                ? 'Already in Tracker'
+                ? 'Already tracked'
                 : 'Add to deal tracker'
             }
           >
@@ -397,9 +397,9 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
               <Target className="w-4 h-4" />
             )}
             {trackingStatus === 'success'
-              ? 'Added!'
+              ? 'Tracked'
               : trackingStatus === 'already'
-              ? 'Already Added'
+              ? 'Tracked'
               : trackingStatus === 'error'
               ? 'Retry'
               : 'Track'}

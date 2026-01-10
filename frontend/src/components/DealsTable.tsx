@@ -195,18 +195,17 @@ const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
     try {
       await addDealToTracker(parseInt(deal.id), 'watching');
       setTrackingStatus('success');
-      // Reset after 3 seconds
-      setTimeout(() => setTrackingStatus('idle'), 3000);
+      // Keep showing success - don't reset
     } catch (err: unknown) {
       console.error('Failed to add to tracker:', err);
       // Check if it's a 400 error (already tracked)
       const error = err as { status?: number };
       if (error.status === 400) {
         setTrackingStatus('already');
-        // Keep showing "already" for 3s then reset
-        setTimeout(() => setTrackingStatus('idle'), 3000);
+        // Keep showing already - don't reset
       } else {
         setTrackingStatus('error');
+        // Only reset error state after 3 seconds
         setTimeout(() => setTrackingStatus('idle'), 3000);
       }
     }
@@ -392,10 +391,8 @@ function CompanyLinks({
             : 'hover:bg-slate-700 text-slate-400 hover:text-blue-400 cursor-pointer'
         } ${isRejected ? 'opacity-50' : ''}`}
         title={
-          trackingStatus === 'success'
-            ? 'Added to Tracker!'
-            : trackingStatus === 'already'
-            ? 'Already Added'
+          trackingStatus === 'success' || trackingStatus === 'already'
+            ? 'Tracked'
             : trackingStatus === 'error'
             ? 'Failed to add'
             : 'Add to Tracker'
