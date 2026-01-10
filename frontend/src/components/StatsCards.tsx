@@ -1,15 +1,14 @@
 /**
- * StatsCards - 4 metric cards for the dashboard
+ * StatsCards - 3 metric cards for the dashboard
  *
  * Shows:
  * - New Deals (24h) with trend
  * - Enterprise AI Ratio
  * - Tokens/Claude calls
- * - Verification rate
  */
 
 import { memo } from 'react';
-import { Zap, PieChart, Code, ShieldCheck, TrendingUp, TrendingDown } from 'lucide-react';
+import { Zap, PieChart, Code, TrendingUp, TrendingDown } from 'lucide-react';
 import type { DashboardStats } from '../types';
 
 interface StatsCardsProps {
@@ -18,7 +17,7 @@ interface StatsCardsProps {
 
 export const StatsCards = memo(function StatsCards({ stats }: StatsCardsProps) {
   return (
-    <div className="grid grid-cols-4 gap-4 p-6 border-b border-slate-800 bg-[#0a0a0c]">
+    <div className="grid grid-cols-3 gap-4 p-6 border-b border-slate-800 bg-[#0a0a0c]">
       {/* Total Deals Scanned */}
       <StatCard
         title="Total Deals"
@@ -41,15 +40,6 @@ export const StatsCards = memo(function StatsCards({ stats }: StatsCardsProps) {
         value={stats.tokensUsed}
         icon={<Code className="w-4 h-4 text-purple-500" />}
         subtitle={`~${stats.claudeCalls.toLocaleString()} Claude calls`}
-      />
-
-      {/* Verification Rate */}
-      <StatCard
-        title="Verification"
-        value={`${stats.verificationRate}%`}
-        icon={<ShieldCheck className="w-4 h-4 text-emerald-500" />}
-        subtitle="Snippets required"
-        subtitleColor="text-emerald-400"
       />
     </div>
   );
