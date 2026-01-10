@@ -104,38 +104,38 @@ class VentureburnScraper:
 
                 feed = feedparser.parse(response.text)
 
-            # Check for malformed feed
-            if feed.bozo:
-                logger.warning(f"Malformed Ventureburn feed: {feed.bozo_exception}")
-                return []
+                # Check for malformed feed
+                if feed.bozo:
+                    logger.warning(f"Malformed Ventureburn feed: {feed.bozo_exception}")
+                    return []
 
-            articles = []
+                articles = []
 
-            for entry in feed.entries:
-                # Parse publication date
-                pub_date = None
-                if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    pub_date = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                for entry in feed.entries:
+                    # Parse publication date
+                    pub_date = None
+                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                        pub_date = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
 
-                # Clean description
-                description = entry.get('summary', '') or entry.get('description', '')
-                if description:
-                    soup = BeautifulSoup(description, 'lxml')
-                    description = soup.get_text(strip=True)[:2000]
+                    # Clean description
+                    description = entry.get('summary', '') or entry.get('description', '')
+                    if description:
+                        soup = BeautifulSoup(description, 'lxml')
+                        description = soup.get_text(strip=True)[:2000]
 
-                # Extract categories
-                categories = []
-                if hasattr(entry, 'tags'):
-                    categories = [tag.term for tag in entry.tags if hasattr(tag, 'term')]
+                    # Extract categories
+                    categories = []
+                    if hasattr(entry, 'tags'):
+                        categories = [tag.term for tag in entry.tags if hasattr(tag, 'term')]
 
-                articles.append(VentureburnArticle(
-                    title=entry.get('title', ''),
-                    url=entry.get('link', ''),
-                    description=description,
-                    published=pub_date,
-                    author=entry.get('author', None),
-                    categories=categories,
-                ))
+                    articles.append(VentureburnArticle(
+                        title=entry.get('title', ''),
+                        url=entry.get('link', ''),
+                        description=description,
+                        published=pub_date,
+                        author=entry.get('author', None),
+                        categories=categories,
+                    ))
 
                 return articles
 
