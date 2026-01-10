@@ -3511,10 +3511,10 @@ async def flag_company(
     Saves to PostgreSQL feedback table.
     """
     from .archivist.models import Feedback
-    from .archivist.database import async_session_maker
+    from .archivist.database import async_session_factory
 
     try:
-        async with async_session_maker() as session:
+        async with async_session_factory() as session:
             feedback = Feedback(
                 feedback_type="flag",
                 company_name=request.company_name,
@@ -3552,10 +3552,10 @@ async def submit_suggestion(
     or report other issues. Saves to PostgreSQL feedback table.
     """
     from .archivist.models import Feedback
-    from .archivist.database import async_session_maker
+    from .archivist.database import async_session_factory
 
     try:
-        async with async_session_maker() as session:
+        async with async_session_factory() as session:
             feedback = Feedback(
                 feedback_type="suggestion",
                 company_name=request.company_name,
@@ -3597,10 +3597,10 @@ async def list_feedback(
     """
     from sqlmodel import select
     from .archivist.models import Feedback
-    from .archivist.database import async_session_maker
+    from .archivist.database import async_session_factory
 
     try:
-        async with async_session_maker() as session:
+        async with async_session_factory() as session:
             query = select(Feedback).order_by(Feedback.created_at.desc()).limit(limit)
 
             if reviewed is not None:
@@ -3643,10 +3643,10 @@ async def mark_feedback_reviewed(
     from datetime import timezone
     from sqlmodel import select
     from .archivist.models import Feedback
-    from .archivist.database import async_session_maker
+    from .archivist.database import async_session_factory
 
     try:
-        async with async_session_maker() as session:
+        async with async_session_factory() as session:
             result = await session.execute(
                 select(Feedback).where(Feedback.id == feedback_id)
             )
