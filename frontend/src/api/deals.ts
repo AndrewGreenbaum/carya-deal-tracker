@@ -843,6 +843,51 @@ export async function addDealToTracker(
 }
 
 // ============================================
+// Feedback & Flagging
+// ============================================
+
+interface FeedbackResponse {
+  success: boolean;
+  timestamp: string;
+  company_name: string;
+  message: string;
+}
+
+export async function flagDeal(
+  dealId: number | null,
+  companyName: string,
+  reason?: string,
+  sourceUrl?: string
+): Promise<{ success: boolean; message: string }> {
+  const data = await apiPost<FeedbackResponse>('/feedback/flag', {
+    deal_id: dealId,
+    company_name: companyName,
+    reason: reason || null,
+    source_url: sourceUrl || null,
+  });
+  return {
+    success: data.success,
+    message: data.message,
+  };
+}
+
+export async function submitFeedback(
+  companyName: string,
+  details?: string,
+  suggestionType: 'missing_company' | 'error' | 'other' = 'missing_company'
+): Promise<{ success: boolean; message: string }> {
+  const data = await apiPost<FeedbackResponse>('/feedback/suggestion', {
+    company_name: companyName,
+    details: details || null,
+    suggestion_type: suggestionType,
+  });
+  return {
+    success: data.success,
+    message: data.message,
+  };
+}
+
+// ============================================
 // Cache Management
 // ============================================
 

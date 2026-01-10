@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     slack_webhook_url: str = ""
     discord_webhook_url: str = ""
 
+    # Google Sheets (for feedback/flagging)
+    google_sheets_credentials: str = ""  # JSON string of service account credentials
+    google_sheets_id: str = ""  # Spreadsheet ID from the URL
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

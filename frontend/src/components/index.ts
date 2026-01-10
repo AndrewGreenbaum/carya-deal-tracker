@@ -8,6 +8,7 @@ export { CommandSidebar } from './CommandSidebar';
 export { StatsCards } from './StatsCards';
 export { DealsTable } from './DealsTable';
 export { DealModal } from './DealModal';
+export { FeedbackModal } from './FeedbackModal';
 export { StealthTracker } from './StealthTracker';
 export { ScraperControl } from './ScraperControl';
 export { SettingsPanel } from './SettingsPanel';

@@ -519,6 +519,22 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         logger.error("StrictlyVC scraping failed: %s", e)
         results["strictlyvc"] = {"error": str(e)}
 
+    # 12. DELAWARE CORPS (uses Brave Search - catches new tech company formations)
+    if settings.brave_search_key:
+        try:
+            from ..harvester.scrapers.delaware_corps import DelawareCorpsScraper
+
+            async with DelawareCorpsScraper() as scraper:
+                articles = await scraper.scrape_all(days_back=days, min_score=3)
+
+            stats = await process_external_articles(articles, "delaware_corps")
+            results["delaware_corps"] = stats
+            total_deals_saved += stats["deals_saved"]
+
+        except Exception as e:
+            logger.error("Delaware Corps scraping failed: %s", e)
+            results["delaware_corps"] = {"error": str(e)}
+
     results["total_deals_saved"] = total_deals_saved
     logger.info(f"External sources complete: {total_deals_saved} total deals saved")
 

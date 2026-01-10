@@ -29,10 +29,11 @@ import {
   Target,
   Check,
   Loader2,
+  Flag,
 } from 'lucide-react';
 import type { Deal, EnterpriseCategory } from '../types';
 import { STAGE_LABELS, CATEGORY_LABELS } from '../types';
-import { addDealToTracker } from '../api/deals';
+import { addDealToTracker, flagDeal } from '../api/deals';
 
 interface DealModalProps {
   deal: Deal;
@@ -43,6 +44,34 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [trackingStatus, setTrackingStatus] = useState<'idle' | 'loading' | 'success' | 'already' | 'error'>('idle');
+  const [flagStatus, setFlagStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  const handleFlag = useCallback(async () => {
+    if (flagStatus === 'loading' || flagStatus === 'success') return;
+
+    // Prompt for reason
+    const reason = window.prompt(
+      `Flag "${deal.startupName}" - What's wrong?\n\n(e.g., "Wrong funding amount", "Not Enterprise AI", "Duplicate entry")`
+    );
+
+    // User cancelled
+    if (reason === null) return;
+
+    setFlagStatus('loading');
+    try {
+      await flagDeal(
+        deal.id ? parseInt(deal.id) : null,
+        deal.startupName,
+        reason || undefined,
+        deal.sourceUrl || undefined
+      );
+      setFlagStatus('success');
+    } catch (err) {
+      console.error('Failed to flag deal:', err);
+      setFlagStatus('error');
+      setTimeout(() => setFlagStatus('idle'), 3000);
+    }
+  }, [deal.id, deal.startupName, deal.sourceUrl, flagStatus]);
 
   const handleAddToTracker = useCallback(async () => {
     if (trackingStatus === 'loading' || trackingStatus === 'success' || trackingStatus === 'already') return;
@@ -319,6 +348,29 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
           <button onClick={onClose} className="btn-secondary">
             Close
           </button>
+          {/* Flag Button */}
+          <button
+            onClick={handleFlag}
+            disabled={flagStatus === 'loading' || flagStatus === 'success'}
+            className={`flex items-center gap-2 px-3 py-2 rounded font-medium transition-colors ${
+              flagStatus === 'success'
+                ? 'bg-red-600/20 text-red-400 border border-red-600/50 cursor-default'
+                : flagStatus === 'error'
+                ? 'bg-red-600 hover:bg-red-500 text-white'
+                : flagStatus === 'loading'
+                ? 'bg-slate-700 text-slate-400 cursor-wait'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-red-600/50 hover:text-red-400'
+            }`}
+            title={flagStatus === 'success' ? 'Flagged for review' : 'Report an error with this company'}
+          >
+            {flagStatus === 'loading' ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Flag className={`w-4 h-4 ${flagStatus === 'success' ? 'text-red-400' : ''}`} />
+            )}
+            {flagStatus === 'success' ? 'Flagged!' : flagStatus === 'error' ? 'Retry' : 'Flag'}
+          </button>
+          {/* Track Button */}
           <button
             onClick={handleAddToTracker}
             disabled={trackingStatus === 'loading' || trackingStatus === 'success' || trackingStatus === 'already'}
@@ -328,9 +380,14 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
                 : trackingStatus === 'error'
                 ? 'bg-red-600 hover:bg-red-500 text-white'
                 : trackingStatus === 'loading'
-                ? 'bg-amber-600/50 text-white cursor-wait'
-                : 'bg-amber-600 hover:bg-amber-500 text-white'
+                ? 'bg-blue-600/50 text-white cursor-wait'
+                : 'bg-blue-600 hover:bg-blue-500 text-white'
             }`}
+            title={
+              trackingStatus === 'success' || trackingStatus === 'already'
+                ? 'Already in Tracker'
+                : 'Add to deal tracker'
+            }
           >
             {trackingStatus === 'loading' ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -340,12 +397,12 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
               <Target className="w-4 h-4" />
             )}
             {trackingStatus === 'success'
-              ? 'Added to Tracker'
+              ? 'Added!'
               : trackingStatus === 'already'
-              ? 'Already in Tracker'
+              ? 'Already Added'
               : trackingStatus === 'error'
               ? 'Retry'
-              : 'Add to Tracker'}
+              : 'Track'}
           </button>
         </div>
       </div>
