@@ -71,7 +71,7 @@ export function CommandHeader({
       {/* Logo */}
       <div className="flex items-center gap-4">
         <div className="w-3 h-3 bg-emerald-500 rounded-full pulse-glow" />
-        <h1 className="text-xl font-bold tracking-tighter text-white">
+        <h1 className="text-xl font-bold tracking-tighter bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 bg-clip-text text-transparent animate-shimmer bg-[length:200%_100%]">
           Carya Eagle Eye
         </h1>
       </div>
