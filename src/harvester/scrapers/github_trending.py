@@ -293,30 +293,53 @@ class GitHubTrendingScraper:
             fetched_at=datetime.now(timezone.utc),
         )
 
-    async def scrape_all(self, since: str = "daily", filter_enterprise: bool = True) -> List[NormalizedArticle]:
+    async def scrape_all(
+        self,
+        since: str = "daily",
+        filter_enterprise: bool = True,
+        repos: Optional[List[TrendingRepo]] = None
+    ) -> List[NormalizedArticle]:
         """
         Full scraping pipeline for GitHub Trending.
 
         Args:
             since: Time range - "daily", "weekly", or "monthly"
             filter_enterprise: Only include enterprise dev tools
+            repos: Optional pre-fetched repos to avoid double HTTP fetching
 
         Returns:
             List of NormalizedArticle objects.
         """
-        repos = await self.fetch_all_trending(since=since)
+        # Use pre-fetched repos or fetch new ones
+        if repos is None:
+            repos = await self.fetch_all_trending(since=since)
 
-        articles = []
-        for repo in repos:
-            # Optionally filter for enterprise tools
-            if filter_enterprise and not self.is_enterprise_devtool(repo):
+        # OPTIMIZATION: Filter BEFORE fetching README (saves 70-210 HTTP requests)
+        if filter_enterprise:
+            filtered_repos = [r for r in repos if self.is_enterprise_devtool(r)]
+            logger.info(f"GitHub Trending: {len(filtered_repos)} enterprise repos (filtered from {len(repos)})")
+        else:
+            filtered_repos = repos
+
+        # Fetch READMEs in parallel with semaphore (not serial)
+        semaphore = asyncio.Semaphore(5)
+
+        async def convert_with_limit(repo: TrendingRepo) -> NormalizedArticle:
+            async with semaphore:
+                return await self.repo_to_article(repo)
+
+        tasks = [convert_with_limit(repo) for repo in filtered_repos]
+        articles = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Filter out any exceptions
+        valid_articles = []
+        for article in articles:
+            if isinstance(article, Exception):
+                logger.error(f"Error converting repo to article: {article}")
                 continue
+            valid_articles.append(article)
 
-            article = await self.repo_to_article(repo)
-            articles.append(article)
-            await asyncio.sleep(0.2)
-
-        return articles
+        return valid_articles
 
 
 # Convenience function

@@ -478,7 +478,7 @@ class SECEdgarScraper:
             author="SEC EDGAR",
             tags=tags,
             fund_slug=fund_slug or "",
-            fetched_at=datetime.utcnow(),
+            fetched_at=datetime.now(timezone.utc),
         )
 
     async def scrape_all(

@@ -100,34 +100,41 @@ class HackerNewsScraper:
         Returns:
             List of search result dicts
         """
-        try:
-            # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
-            cutoff = int((datetime.now(timezone.utc) - timedelta(hours=hours_back)).timestamp())
+        for attempt in range(3):
+            try:
+                # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
+                cutoff = int((datetime.now(timezone.utc) - timedelta(hours=hours_back)).timestamp())
 
-            params = {
-                "query": query,
-                "hitsPerPage": num_results,
-                "numericFilters": f"created_at_i>{cutoff}",
-            }
-            if tags:
-                params["tags"] = tags
+                params = {
+                    "query": query,
+                    "hitsPerPage": num_results,
+                    "numericFilters": f"created_at_i>{cutoff}",
+                }
+                if tags:
+                    params["tags"] = tags
 
-            response = await self.client.get(
-                f"{HN_ALGOLIA_API}/search",
-                params=params,
-            )
-            response.raise_for_status()
+                response = await self.client.get(
+                    f"{HN_ALGOLIA_API}/search",
+                    params=params,
+                )
+                response.raise_for_status()
 
-            data = response.json()
-            return data.get("hits", [])
+                data = response.json()
+                return data.get("hits", [])
 
-        except httpx.HTTPError as e:
-            # FIX: Specific exception + logger (not print)
-            logger.error(f"HTTP error searching HN Algolia: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error searching HN Algolia: {e}", exc_info=True)
-            return []
+            except httpx.HTTPError as e:
+                if attempt < 2:
+                    delay = 2 ** attempt
+                    logger.warning(f"HTTP error searching HN Algolia (attempt {attempt + 1}/3), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"HTTP error searching HN Algolia after 3 attempts: {e}")
+                    return []
+            except Exception as e:
+                logger.error(f"Unexpected error searching HN Algolia: {e}", exc_info=True)
+                return []
+
+        return []
 
     async def fetch_story(self, story_id: int) -> Optional[Dict[str, Any]]:
         """Fetch a single story from HN API."""

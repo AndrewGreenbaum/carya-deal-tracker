@@ -17,14 +17,17 @@ Filtered for funding-related articles only.
 """
 
 import asyncio
+import logging
 import feedparser
 import httpx
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from ..base_scraper import NormalizedArticle
+
+logger = logging.getLogger(__name__)
 from ..fund_matcher import match_fund_name
 from ...config.settings import settings
 
@@ -93,19 +96,26 @@ class VentureburnScraper:
         await self.client.aclose()
 
     async def fetch_feed(self, feed_url: str) -> List[VentureburnArticle]:
-        """Fetch and parse RSS feed."""
-        try:
-            response = await self.client.get(feed_url)
-            response.raise_for_status()
+        """Fetch and parse RSS feed with retry logic."""
+        for attempt in range(3):
+            try:
+                response = await self.client.get(feed_url)
+                response.raise_for_status()
 
-            feed = feedparser.parse(response.text)
+                feed = feedparser.parse(response.text)
+
+            # Check for malformed feed
+            if feed.bozo:
+                logger.warning(f"Malformed Ventureburn feed: {feed.bozo_exception}")
+                return []
+
             articles = []
 
             for entry in feed.entries:
                 # Parse publication date
                 pub_date = None
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    pub_date = datetime(*entry.published_parsed[:6])
+                    pub_date = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
 
                 # Clean description
                 description = entry.get('summary', '') or entry.get('description', '')
@@ -127,17 +137,27 @@ class VentureburnScraper:
                     categories=categories,
                 ))
 
-            return articles
+                return articles
 
-        except Exception as e:
-            print(f"Error fetching Ventureburn feed: {e}")
-            return []
+            except httpx.HTTPError as e:
+                if attempt < 2:
+                    delay = 2 ** attempt
+                    logger.warning(f"HTTP error fetching Ventureburn feed (attempt {attempt + 1}/3), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"HTTP error fetching Ventureburn feed after 3 attempts: {e}")
+                    return []
+            except Exception as e:
+                logger.error(f"Unexpected error fetching Ventureburn feed: {e}", exc_info=True)
+                return []
+
+        return []
 
     async def fetch_all_feeds(self, hours_back: int = 168) -> List[VentureburnArticle]:
         """Fetch main feed and category feeds."""
         all_articles = []
         seen_urls = set()
-        cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
 
         # Main feed
         main_articles = await self.fetch_feed(VENTUREBURN_FEEDS["main"])
@@ -213,7 +233,7 @@ class VentureburnScraper:
                 author=article.author or "Ventureburn",
                 tags=tags,
                 fund_slug=fund_slug or "",
-                fetched_at=datetime.utcnow(),
+                fetched_at=datetime.now(timezone.utc),
             ))
 
         return normalized

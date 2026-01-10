@@ -12,7 +12,7 @@ Runs scraping every 4 hours of all 18 VC funds with:
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -314,6 +314,14 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
     5. TechCrunch RSS
     6. Fortune Term Sheet RSS
     7. LinkedIn Jobs (stealth detector)
+    8. Crunchbase News RSS
+    9. VentureBeat RSS
+    10. Axios Pro Rata RSS
+    11. StrictlyVC RSS
+    12. Delaware Corps (new tech company formations)
+    13. Y Combinator (Demo Day companies)
+    14. GitHub Trending (dev tools before funding)
+    15. Hacker News (launch posts)
 
     Args:
         days: Number of days to look back
@@ -535,6 +543,52 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             logger.error("Delaware Corps scraping failed: %s", e)
             results["delaware_corps"] = {"error": str(e)}
 
+    # 13. Y COMBINATOR (free - Demo Day companies)
+    try:
+        from ..harvester.scrapers.ycombinator import YCombinatorScraper
+
+        async with YCombinatorScraper() as scraper:
+            articles = await scraper.scrape_all(filter_enterprise=True)
+
+        stats = await process_external_articles(articles, "ycombinator")
+        results["ycombinator"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error("Y Combinator scraping failed: %s", e)
+        results["ycombinator"] = {"error": str(e)}
+
+    # 14. GITHUB TRENDING (free - dev tools before funding)
+    try:
+        from ..harvester.scrapers.github_trending import GitHubTrendingScraper
+
+        async with GitHubTrendingScraper() as scraper:
+            repos = await scraper.fetch_all_trending(since="daily")
+            articles = await scraper.scrape_all(since="daily", filter_enterprise=True, repos=repos)
+
+        stats = await process_external_articles(articles, "github_trending")
+        results["github_trending"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error("GitHub Trending scraping failed: %s", e)
+        results["github_trending"] = {"error": str(e)}
+
+    # 15. HACKER NEWS (free - launch posts)
+    try:
+        from ..harvester.scrapers.hackernews import HackerNewsScraper
+
+        async with HackerNewsScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+
+        stats = await process_external_articles(articles, "hackernews")
+        results["hackernews"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error("Hacker News scraping failed: %s", e)
+        results["hackernews"] = {"error": str(e)}
+
     results["total_deals_saved"] = total_deals_saved
     logger.info(f"External sources complete: {total_deals_saved} total deals saved")
 
@@ -553,7 +607,7 @@ async def scheduled_scrape_job():
     which contain partner name queries for funds like Benchmark,
     Khosla, and First Round that don't have useful website scrapers.
     """
-    job_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    job_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     logger.info(f"[{job_id}] Starting scheduled scrape job")
 
     # CRITICAL FIX: Clear content hash cache at start of each run
@@ -563,7 +617,7 @@ async def scheduled_scrape_job():
     clear_content_hash_cache()
     logger.info(f"[{job_id}] Content hash cache cleared for fresh run")
 
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
 
     try:
         # ===== PHASE 1: Scrape fund websites =====
@@ -600,7 +654,7 @@ async def scheduled_scrape_job():
 
         # ===== Calculate total stats =====
         total_deals = fund_deals + external_deals
-        duration = (datetime.utcnow() - start_time).total_seconds()
+        duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
         logger.info(
             f"[{job_id}] Scrape complete: "
@@ -625,7 +679,7 @@ async def scheduled_scrape_job():
 
     except Exception as e:
         logger.error(f"[{job_id}] Scrape job failed: {e}", exc_info=True)
-        duration = (datetime.utcnow() - start_time).total_seconds()
+        duration = (datetime.now(timezone.utc) - start_time).total_seconds()
         # Still try to send error notification
         await send_scrape_summary(
             job_id=job_id,

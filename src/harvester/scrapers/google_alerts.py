@@ -160,6 +160,11 @@ class GoogleAlertsScraper:
                 # Parse RSS feed
                 feed = feedparser.parse(response.text)
 
+                # Check for malformed feed
+                if feed.bozo:
+                    logger.warning(f"Malformed Google Alerts feed: {feed.bozo_exception}")
+                    return []
+
                 items = []
                 for entry in feed.entries:
                     # Skip entries without URLs (empty URLs cause downstream issues)

@@ -75,12 +75,18 @@ class TechCrunchScraper:
         await self.client.aclose()
 
     async def fetch_feed(self, feed_url: str) -> List[TechCrunchArticle]:
-        """Fetch and parse a single RSS feed."""
-        try:
-            response = await self.client.get(feed_url)
-            response.raise_for_status()
+        """Fetch and parse a single RSS feed with retry logic."""
+        for attempt in range(3):
+            try:
+                response = await self.client.get(feed_url)
+                response.raise_for_status()
 
-            feed = feedparser.parse(response.text)
+                feed = feedparser.parse(response.text)
+
+            # Check for malformed feed
+            if feed.bozo:
+                logger.warning(f"Malformed TechCrunch feed {feed_category}: {feed.bozo_exception}")
+                return []
 
             items = []
             for entry in feed.entries:
@@ -121,15 +127,21 @@ class TechCrunchScraper:
                     categories=categories,
                 ))
 
-            return items
+                return items
 
-        except httpx.HTTPError as e:
-            # FIX: Specific exception + logger instead of print()
-            logger.error(f"HTTP error fetching TechCrunch feed {feed_url}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error fetching TechCrunch feed {feed_url}: {e}", exc_info=True)
-            return []
+            except httpx.HTTPError as e:
+                if attempt < 2:
+                    delay = 2 ** attempt
+                    logger.warning(f"HTTP error fetching TechCrunch feed (attempt {attempt + 1}/3), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"HTTP error fetching TechCrunch feed after 3 attempts: {e}")
+                    return []
+            except Exception as e:
+                logger.error(f"Unexpected error fetching TechCrunch feed {feed_url}: {e}", exc_info=True)
+                return []
+
+        return []
 
     async def fetch_all_feeds(self, hours_back: int = 168) -> List[TechCrunchArticle]:
         """Fetch all configured RSS feeds."""

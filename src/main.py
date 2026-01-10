@@ -1435,10 +1435,10 @@ async def run_github_trending_scraper_endpoint(
 
     try:
         async with GitHubTrendingScraper() as scraper:
-            # Get all repos first (unfiltered)
+            # Fetch repos once, then pass to scrape_all to avoid double-fetch
             all_repos = await scraper.fetch_all_trending(since=since)
-            # Then get filtered articles
-            articles = await scraper.scrape_all(since=since, filter_enterprise=True)
+            # Pass pre-fetched repos to avoid fetching again
+            articles = await scraper.scrape_all(since=since, filter_enterprise=True, repos=all_repos)
 
         return GitHubTrendingResponse(
             repos_found=len(all_repos),
@@ -2268,8 +2268,9 @@ async def run_all_sources(
     try:
         from .harvester.scrapers.github_trending import GitHubTrendingScraper
         async with GitHubTrendingScraper() as scraper:
+            # Fetch once, pass to scrape_all to avoid double-fetch
             all_repos = await scraper.fetch_all_trending(since="daily")
-            articles = await scraper.scrape_all(since="daily", filter_enterprise=True)
+            articles = await scraper.scrape_all(since="daily", filter_enterprise=True, repos=all_repos)
         results["github_trending"] = GitHubTrendingResponse(
             repos_found=len(all_repos),
             enterprise_devtools=len(articles),

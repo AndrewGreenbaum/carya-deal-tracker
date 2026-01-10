@@ -103,19 +103,26 @@ class TechFundingNewsScraper:
         await self.client.aclose()
 
     async def fetch_feed(self, feed_url: str, category: str) -> List[TechFundingArticle]:
-        """Fetch and parse a single RSS feed."""
-        try:
-            response = await self.client.get(feed_url)
-            response.raise_for_status()
+        """Fetch and parse a single RSS feed with retry logic."""
+        for attempt in range(3):
+            try:
+                response = await self.client.get(feed_url)
+                response.raise_for_status()
 
-            feed = feedparser.parse(response.text)
+                feed = feedparser.parse(response.text)
+
+            # Check for malformed feed
+            if feed.bozo:
+                logger.warning(f"Malformed Tech Funding News feed {category}: {feed.bozo_exception}")
+                return []
+
             articles = []
 
             for entry in feed.entries:
                 # Parse publication date
                 pub_date = None
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    pub_date = datetime(*entry.published_parsed[:6])
+                    pub_date = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
 
                 # Clean description
                 description = entry.get('summary', '') or entry.get('description', '')
@@ -138,17 +145,27 @@ class TechFundingNewsScraper:
                     feed_category=category,
                 ))
 
-            return articles
+                return articles
 
-        except Exception as e:
-            logger.error(f"Error fetching Tech Funding News feed {category}: {e}")
-            return []
+            except httpx.HTTPError as e:
+                if attempt < 2:
+                    delay = 2 ** attempt
+                    logger.warning(f"HTTP error fetching Tech Funding News feed {category} (attempt {attempt + 1}/3), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"HTTP error fetching Tech Funding News feed {category} after 3 attempts: {e}")
+                    return []
+            except Exception as e:
+                logger.error(f"Unexpected error fetching Tech Funding News feed {category}: {e}", exc_info=True)
+                return []
+
+        return []
 
     async def fetch_all_feeds(self, hours_back: int = 168) -> List[TechFundingArticle]:
         """Fetch all configured RSS feeds."""
         all_articles = []
         seen_urls = set()
-        cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
 
         for category, feed_url in self.feeds.items():
             articles = await self.fetch_feed(feed_url, category)

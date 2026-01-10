@@ -106,6 +106,12 @@ class CrunchbaseNewsScraper:
                 response.raise_for_status()
 
                 feed = feedparser.parse(response.text)
+
+                # Check for malformed feed
+                if feed.bozo:
+                    logger.warning(f"Malformed Crunchbase News feed {category}: {feed.bozo_exception}")
+                    return []
+
                 articles = []
 
                 for entry in feed.entries:
@@ -120,7 +126,7 @@ class CrunchbaseNewsScraper:
                         date_tuple = getattr(entry, date_field, None)
                         if date_tuple and len(date_tuple) >= 6:
                             try:
-                                pub_date = datetime(*date_tuple[:6])
+                                pub_date = datetime(*date_tuple[:6], tzinfo=timezone.utc)
                                 break
                             except (TypeError, ValueError):
                                 continue
@@ -169,7 +175,7 @@ class CrunchbaseNewsScraper:
         """Fetch all configured RSS feeds."""
         all_articles = []
         seen_urls = set()
-        cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
 
         for category, feed_url in self.feeds.items():
             articles = await self.fetch_feed(feed_url, category)
