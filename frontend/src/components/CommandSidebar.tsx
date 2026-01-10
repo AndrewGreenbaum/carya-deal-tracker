@@ -257,13 +257,16 @@ export function CommandSidebar({
       </div>
 
       {/* Feedback Section */}
-      <div className="p-4 border-t border-slate-800">
+      <div className="p-4 border-t border-slate-800 text-center">
+        <p className="text-xs text-slate-400 mb-3">
+          We fuck up? Help us fix it
+        </p>
         <button
           onClick={onOpenFeedback}
-          className="w-full flex items-center gap-2 text-xs px-3 py-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors"
+          className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors"
+          title="Submit feedback"
         >
-          <Mail className="w-4 h-4" />
-          <span>We fuck up? Help us fix it</span>
+          <Mail className="w-5 h-5" />
         </button>
       </div>
     </aside>
