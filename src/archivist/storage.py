@@ -357,13 +357,14 @@ async def find_duplicate_deal(
         if not company_names_match(company_name, company.name):
             continue
 
-        # Amount match: within 20% tolerance (increased from 10%)
+        # Amount match: within 10% tolerance (reduced from 20% to prevent false positives)
+        # 20% was too broad: $50M and $60M would match, causing separate deals to merge
         # If either amount is missing, we still consider it a potential match
         # (articles sometimes don't mention the amount)
         if normalized_amount and deal.amount:
             existing_amount = normalize_amount(deal.amount)
             if existing_amount:
-                tolerance = max(normalized_amount, existing_amount) * 0.2  # 20% tolerance
+                tolerance = max(normalized_amount, existing_amount) * 0.1  # 10% tolerance
                 if abs(normalized_amount - existing_amount) > tolerance:
                     continue
 
@@ -382,10 +383,14 @@ async def check_article_url_exists(session: AsyncSession, url: str) -> bool:
     Check if an article with this URL already exists in the database.
 
     Used to prevent duplicate article records when linking to existing deals.
+
+    FIX: Use EXISTS subquery instead of SELECT with LIMIT 1 for efficiency.
+    EXISTS stops at first match without fetching row data.
     """
-    stmt = select(Article).where(Article.url == url).limit(1)
+    from sqlalchemy import exists
+    stmt = select(exists().where(Article.url == url))
     result = await session.execute(stmt)
-    return result.scalar_one_or_none() is not None
+    return result.scalar()
 
 
 async def save_deal(

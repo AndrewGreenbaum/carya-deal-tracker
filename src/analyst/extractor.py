@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # Session-based content hash cache (cleared between runs)
 # Prevents duplicate Claude calls for same article content
 _content_hash_cache: Set[str] = set()
+_content_hash_lock = asyncio.Lock()  # FIX: Async-safe cache access
 
 from .schemas import DealExtraction, ArticleAnalysis, LeadStatus, RoundType, EnterpriseCategory
 from ..config.settings import settings
@@ -142,32 +143,38 @@ def is_likely_funding_content(text: str) -> bool:
 
 
 def _compute_content_hash(text: str) -> str:
-    """Compute a hash of the article content for deduplication."""
+    """Compute a hash of the article content for deduplication.
+
+    FIX: Extended from 16 to 32 chars (128-bit) for lower collision risk.
+    """
     # Normalize whitespace and lowercase for consistent hashing
     normalized = " ".join(text.lower().split())
-    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+    return hashlib.sha256(normalized.encode()).hexdigest()[:32]  # 128-bit
 
 
-def _is_duplicate_content(text: str) -> bool:
+async def _is_duplicate_content(text: str) -> bool:
     """
     Check if we've already processed this content in this session.
 
     Returns True if duplicate (should skip), False if new.
+
+    FIX: Made async with lock for thread-safety in concurrent extraction.
     """
     content_hash = _compute_content_hash(text)
     text_preview = text[:100].replace('\n', ' ') if text else "(empty)"
 
-    if content_hash in _content_hash_cache:
-        logger.warning(
-            f"Duplicate content detected - hash={content_hash}, "
-            f"cache_size={len(_content_hash_cache)}, "
-            f"text_preview='{text_preview}...'"
-        )
-        return True
+    async with _content_hash_lock:
+        if content_hash in _content_hash_cache:
+            logger.warning(
+                f"Duplicate content detected - hash={content_hash}, "
+                f"cache_size={len(_content_hash_cache)}, "
+                f"text_preview='{text_preview}...'"
+            )
+            return True
 
-    logger.debug(f"New content - hash={content_hash}, adding to cache (size={len(_content_hash_cache)})")
-    _content_hash_cache.add(content_hash)
-    return False
+        logger.debug(f"New content - hash={content_hash}, adding to cache (size={len(_content_hash_cache)})")
+        _content_hash_cache.add(content_hash)
+        return False
 
 
 def clear_content_hash_cache() -> None:
@@ -357,7 +364,7 @@ async def extract_deal(
     """
     # Content hash dedup: Skip if we've already processed identical content in this run
     # Cache is cleared ONCE at job start in scheduler/jobs.py for cross-source dedup
-    if not skip_dedup_check and _is_duplicate_content(article_text):
+    if not skip_dedup_check and await _is_duplicate_content(article_text):
         logger.info(f"Skipping duplicate content for: {source_url}")
         return None
 

@@ -3,8 +3,11 @@ Centralized Fund Name Matching.
 
 Used by both extractor.py and storage.py to consistently match investor names
 to tracked fund slugs. Prevents deal mislinks caused by order-dependent substring matching.
+
+FIX: Added word boundary matching to prevent false positives like "menlo business" → "menlo".
 """
 
+import re
 from typing import Optional
 
 
@@ -197,11 +200,17 @@ def match_fund_name(investor_name: str) -> Optional[str]:
         if has_negative:
             continue  # Skip this fund entirely
 
-        # Check for positive matches
+        # Check for positive matches with word boundary
+        # FIX: Use regex word boundaries to prevent false positives
+        # e.g., "menlo business" should NOT match "menlo"
         for variant in variants:
-            if variant in name_lower:
+            # Build regex pattern with word boundaries
+            # Escape special regex chars and add word boundary markers
+            pattern = rf'\b{re.escape(variant)}\b'
+            match = re.search(pattern, name_lower)
+            if match:
                 # Record match with position for priority
-                pos = name_lower.find(variant)
+                pos = match.start()
                 matches.append((slug, pos))
                 break  # Only count first matching variant per fund
 

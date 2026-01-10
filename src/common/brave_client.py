@@ -36,7 +36,10 @@ class BraveAPIError(Exception):
 
 
 class TTLCache:
-    """Simple TTL cache for query results with automatic cleanup."""
+    """Simple TTL cache for query results with automatic cleanup.
+
+    FIX: Added asyncio.Lock for thread-safety in concurrent async access.
+    """
 
     # Cleanup every N set operations to prevent unbounded growth
     CLEANUP_INTERVAL = 100
@@ -45,39 +48,42 @@ class TTLCache:
         self._cache: Dict[str, Tuple[float, Any]] = {}
         self._ttl = ttl_seconds
         self._operations_since_cleanup = 0
+        self._lock = asyncio.Lock()  # FIX: Async-safe cache access
 
     def _make_key(self, query: str, search_type: str, freshness: str) -> str:
         """Create cache key from query parameters."""
         key_str = f"{search_type}:{freshness}:{query}"
         return hashlib.md5(key_str.encode()).hexdigest()
 
-    def get(self, query: str, search_type: str, freshness: str) -> Optional[Any]:
-        """Get cached result if not expired."""
+    async def get(self, query: str, search_type: str, freshness: str) -> Optional[Any]:
+        """Get cached result if not expired. Async-safe."""
         key = self._make_key(query, search_type, freshness)
-        if key in self._cache:
-            timestamp, value = self._cache[key]
-            if time() - timestamp < self._ttl:
-                return value
-            del self._cache[key]
-        return None
+        async with self._lock:
+            if key in self._cache:
+                timestamp, value = self._cache[key]
+                if time() - timestamp < self._ttl:
+                    return value
+                del self._cache[key]
+            return None
 
-    def set(self, query: str, search_type: str, freshness: str, value: Any):
-        """Store result in cache."""
+    async def set(self, query: str, search_type: str, freshness: str, value: Any):
+        """Store result in cache. Async-safe."""
         key = self._make_key(query, search_type, freshness)
-        self._cache[key] = (time(), value)
+        async with self._lock:
+            self._cache[key] = (time(), value)
 
-        # Periodic cleanup to prevent unbounded memory growth
-        self._operations_since_cleanup += 1
-        if self._operations_since_cleanup >= self.CLEANUP_INTERVAL:
-            self.cleanup()
-            self._operations_since_cleanup = 0
+            # Periodic cleanup to prevent unbounded memory growth
+            self._operations_since_cleanup += 1
+            if self._operations_since_cleanup >= self.CLEANUP_INTERVAL:
+                self._cleanup_locked()
+                self._operations_since_cleanup = 0
 
     def clear(self):
         """Clear all cached entries."""
         self._cache.clear()
 
-    def cleanup(self) -> int:
-        """Remove expired entries from cache. Returns number of entries removed."""
+    def _cleanup_locked(self) -> int:
+        """Remove expired entries (called while lock is held)."""
         now = time()
         expired_keys = [k for k, (ts, _) in self._cache.items() if now - ts >= self._ttl]
         for k in expired_keys:
@@ -85,6 +91,11 @@ class TTLCache:
         if expired_keys:
             logger.debug(f"Cache cleanup: removed {len(expired_keys)} expired entries, size={len(self._cache)}")
         return len(expired_keys)
+
+    async def cleanup(self) -> int:
+        """Remove expired entries from cache. Returns number of entries removed."""
+        async with self._lock:
+            return self._cleanup_locked()
 
     def size(self) -> int:
         """Return number of cached entries."""
@@ -273,7 +284,7 @@ class BraveClient:
         """
         # Check cache first
         if use_cache:
-            cached = _query_cache.get(query, "news", freshness)
+            cached = await _query_cache.get(query, "news", freshness)
             if cached is not None:
                 logger.debug(f"Cache hit for news query: {query[:50]}...")
                 return cached
@@ -289,7 +300,7 @@ class BraveClient:
 
         # Store in cache
         if use_cache and result is not None:
-            _query_cache.set(query, "news", freshness, result)
+            await _query_cache.set(query, "news", freshness, result)
 
         return result
 
@@ -316,7 +327,7 @@ class BraveClient:
 
         # Check cache first
         if use_cache:
-            cached = _query_cache.get(query, "web", cache_freshness)
+            cached = await _query_cache.get(query, "web", cache_freshness)
             if cached is not None:
                 logger.debug(f"Cache hit for web query: {query[:50]}...")
                 return cached
@@ -334,7 +345,7 @@ class BraveClient:
 
         # Store in cache
         if use_cache and result is not None:
-            _query_cache.set(query, "web", cache_freshness, result)
+            await _query_cache.set(query, "web", cache_freshness, result)
 
         return result
 
