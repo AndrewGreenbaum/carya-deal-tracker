@@ -71,7 +71,12 @@ KNOWN_FALSE_POSITIVES = {
     # Miden name collision: 0xMiden (blockchain) vs Miden (YC fintech) vs Miden.ai (solar)
     "miden": ["miden.co"],  # Skip African fintech when enriching blockchain Miden
     "0xmiden": ["miden.co"],  # Same - prefer miden.xyz
+    # Graphite (code review) vs Graphite Health (healthcare IT)
+    "graphite": ["graphitehealth", "graphitehealth.io", "graphitehealth.com"],
 }
+
+# Domain keywords that indicate wrong industry (unless company name contains them)
+HEALTHCARE_DOMAIN_KEYWORDS = ["health", "medical", "clinic", "hospital", "pharma", "care"]
 
 # Valid TLDs for startup websites
 VALID_TLDS = ("com", "io", "ai", "co", "dev", "app", "tech", "cloud", "xyz", "me", "health", "bio", "so", "gg")
@@ -118,16 +123,27 @@ class BraveEnrichmentClient:
             if tld not in VALID_TLDS:
                 return False
 
-            # Company name should appear in domain (fuzzy match)
+            # Company name should appear in domain (stricter matching)
             company_slug = re.sub(r"[^a-z0-9]", "", company_lower)
             domain_slug = re.sub(r"[^a-z0-9]", "", domain.split(".")[0])
 
-            # At least partial match
-            if len(company_slug) >= 4:
-                if company_slug[:4] in domain_slug or domain_slug in company_slug:
-                    return True
+            # Healthcare domain filter: reject if domain has "health" but company name doesn't
+            # This prevents "graphite" → "graphitehealth.io" false positives
+            for healthcare_kw in HEALTHCARE_DOMAIN_KEYWORDS:
+                if healthcare_kw in domain_slug and healthcare_kw not in company_slug:
+                    return False
 
-            # Short names need exact match
+            # FIX: Require full company name in domain (not just 4-char prefix)
+            # Option A: Full company name appears in domain
+            if company_slug in domain_slug:
+                return True
+
+            # Option B: Domain name appears in company name (for short domains like "gv.com")
+            # Only allow this for domains with 4+ chars to avoid false positives
+            if len(domain_slug) >= 4 and domain_slug in company_slug:
+                return True
+
+            # Option C: Exact match
             if company_slug == domain_slug:
                 return True
 

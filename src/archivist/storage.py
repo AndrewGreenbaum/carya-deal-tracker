@@ -416,9 +416,31 @@ async def save_deal(
     from ..harvester.fund_matcher import match_fund_name
 
     # Determine announced_date for duplicate check
+    # FIX: Improved date validation to prevent wrong dates
     announced_date = extraction.round_date
+
+    # Cross-validate: warn if LLM date differs significantly from article date
+    if announced_date and article_published_date:
+        diff_days = abs((announced_date - article_published_date).days)
+        if diff_days > 14:  # More than 2 weeks difference
+            logger.warning(
+                f"Date mismatch for {extraction.startup_name}: "
+                f"LLM extracted {announced_date}, article published {article_published_date}, "
+                f"diff={diff_days} days - using LLM date but flagging for review"
+            )
+
+    # Fallback to article date only if:
+    # 1. LLM didn't extract a date
+    # 2. Article date is not in the future (prevents wrong indexing dates)
     if announced_date is None and article_published_date:
-        announced_date = article_published_date
+        today = date.today()
+        if article_published_date <= today:
+            announced_date = article_published_date
+        else:
+            logger.warning(
+                f"Skipping future article date for {extraction.startup_name}: "
+                f"{article_published_date} is after today ({today})"
+            )
 
     # Check for duplicate deal BEFORE creating new records
     existing_deal = await find_duplicate_deal(
