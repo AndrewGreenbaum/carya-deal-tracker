@@ -2187,13 +2187,21 @@ async def run_all_sources(
     # Google Alerts (if configured)
     if settings.google_alerts_feeds:
         try:
+            from .scheduler.jobs import process_external_articles
             feed_urls = [f.strip() for f in settings.google_alerts_feeds.split(',') if f.strip()]
             async with GoogleAlertsScraper(feed_urls) as scraper:
                 articles = await scraper.scrape_all()
 
+            # Process articles through extraction pipeline
+            stats = await process_external_articles(articles, "google_alerts")
+
             results["google_alerts"] = GoogleAlertsResponse(
                 feeds_configured=len(feed_urls),
                 articles_found=len(articles),
+                articles_skipped_duplicate=stats.get("articles_skipped_duplicate", 0),
+                deals_extracted=stats.get("deals_extracted", 0),
+                deals_saved=stats.get("deals_saved", 0),
+                errors=stats.get("errors", 0),
             )
         except Exception:
             results["google_alerts"] = None
@@ -3460,6 +3468,99 @@ async def add_deal_to_tracker(
     except Exception as e:
         logger.error("Failed to add deal to tracker: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ----- Feedback Endpoints -----
+
+
+class FlagRequest(BaseModel):
+    """Request to flag a company with an error."""
+    deal_id: Optional[int] = None
+    company_name: str
+    reason: Optional[str] = None
+    source_url: Optional[str] = None
+    reporter_email: Optional[str] = None
+
+
+class SuggestionRequest(BaseModel):
+    """Request to suggest a company or report feedback."""
+    company_name: str
+    details: Optional[str] = None
+    reporter_email: Optional[str] = None
+    suggestion_type: str = "missing_company"  # missing_company, error, other
+
+
+class FeedbackResponse(BaseModel):
+    """Response for feedback operations."""
+    success: bool
+    timestamp: str
+    company_name: str
+    message: str = "Thank you for your feedback!"
+
+
+@app.post("/feedback/flag", response_model=FeedbackResponse)
+async def flag_company(
+    request: FlagRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Flag a company for review.
+
+    Used when users spot errors with a company's deal information.
+    Appends to Google Sheets for review.
+    """
+    try:
+        from .feedback import append_flag_to_sheet
+
+        result = await append_flag_to_sheet(
+            deal_id=request.deal_id,
+            company_name=request.company_name,
+            reason=request.reason,
+            source_url=request.source_url,
+            reporter_email=request.reporter_email,
+        )
+
+        return FeedbackResponse(
+            success=result["success"],
+            timestamp=result["timestamp"],
+            company_name=request.company_name,
+            message="Thanks for flagging! We'll review this soon.",
+        )
+    except Exception as e:
+        logger.error("Failed to flag company: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to submit flag")
+
+
+@app.post("/feedback/suggestion", response_model=FeedbackResponse)
+async def submit_suggestion(
+    request: SuggestionRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Submit a suggestion (missing company, general feedback).
+
+    Used when users want to suggest companies we should be tracking
+    or report other issues.
+    """
+    try:
+        from .feedback import append_suggestion_to_sheet
+
+        result = await append_suggestion_to_sheet(
+            company_name=request.company_name,
+            details=request.details,
+            reporter_email=request.reporter_email,
+            suggestion_type=request.suggestion_type,
+        )
+
+        return FeedbackResponse(
+            success=result["success"],
+            timestamp=result["timestamp"],
+            company_name=request.company_name,
+            message="Thanks for the suggestion! We'll look into it.",
+        )
+    except Exception as e:
+        logger.error("Failed to submit suggestion: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to submit suggestion")
 
 
 # ----- CLI Runner -----

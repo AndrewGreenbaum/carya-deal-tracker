@@ -164,6 +164,7 @@ class GoogleAlertsScraper:
                 for entry in feed.entries:
                     # Skip entries without URLs (empty URLs cause downstream issues)
                     if not entry.get('link'):
+                        logger.debug(f"Skipping entry without URL: {entry.get('title', 'No title')}")
                         continue
 
                     # Parse publication date with fallbacks
@@ -175,11 +176,15 @@ class GoogleAlertsScraper:
                             pub_date = datetime(*date_tuple[:6], tzinfo=timezone.utc)
                             break
 
-                    # Clean up description (remove HTML)
+                    # Clean up description (remove HTML if present)
                     description = entry.get('summary', '')
-                    if description:
-                        soup = BeautifulSoup(description, 'lxml')
-                        description = soup.get_text(strip=True)
+                    if description and ('<' in description and '>' in description):
+                        try:
+                            soup = BeautifulSoup(description, 'lxml')
+                            description = soup.get_text(strip=True)
+                        except Exception as e:
+                            logger.debug(f"Failed to parse HTML description: {e}")
+                            # Keep original description if parsing fails
 
                     # Extract source from title if present
                     title = entry.get('title', '')
@@ -226,8 +231,7 @@ class GoogleAlertsScraper:
         async def fetch_with_limit(feed_url: str) -> List[GoogleAlertItem]:
             async with semaphore:
                 items = await self.fetch_feed(feed_url)
-            # Rate limit delay OUTSIDE semaphore to allow parallel fetching
-            await asyncio.sleep(0.3)
+            # Rate limiting removed - only retry on errors (handled in fetch_feed)
             return items
 
         # Fetch all feeds in parallel
@@ -285,7 +289,7 @@ class GoogleAlertsScraper:
                     content = soup.select_one(selector)
                     if content:
                         text = content.get_text(separator='\n', strip=True)
-                        if len(text) > 200:
+                        if len(text) >= 500:  # Minimum 500 chars for meaningful LLM extraction
                             return text[:5000]
 
                 # Fallback to body
@@ -342,7 +346,6 @@ class GoogleAlertsScraper:
         async def fetch_article_with_limit(item: GoogleAlertItem) -> Tuple[GoogleAlertItem, Optional[str]]:
             async with semaphore:
                 full_text = await self.fetch_full_article(item.url)
-                await asyncio.sleep(0.2)  # Rate limit
                 return (item, full_text)
 
         tasks = [fetch_article_with_limit(item) for item in valid_items]
