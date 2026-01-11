@@ -282,7 +282,7 @@ async def find_duplicate_deal(
     - Company names match (using smart fuzzy matching)
     - Same round type
     - Same normalized amount (within 20% tolerance) OR one/both amounts missing
-    - Date within 30 days OR deals from last 90 days if no date
+    - Date within 30 days OR deals from last 180 days (6 months) if no date
 
     TIER 2 - Same-Day Match (catches same-day duplicates from multiple sources):
     - Company names match exactly (case-insensitive)
@@ -310,13 +310,13 @@ async def find_duplicate_deal(
         .where(Deal.round_type == round_type)
     )
 
-    # Date filter with fallback for missing dates - EXPANDED to 30 days
+    # Date filter with fallback for missing dates - 6-month window
     if announced_date:
-        # Look within 30 days of the announced date (increased from 14)
+        # Look within 30 days of the announced date
         date_start = announced_date - timedelta(days=30)
         date_end = announced_date + timedelta(days=30)
         # Include deals with matching date OR deals with NULL date (recent ones)
-        recent_cutoff = date.today() - timedelta(days=90)  # Increased from 60
+        recent_cutoff = date.today() - timedelta(days=180)  # 6 months
         stmt = stmt.where(
             or_(
                 Deal.announced_date.between(date_start, date_end),
@@ -325,9 +325,9 @@ async def find_duplicate_deal(
             )
         )
     else:
-        # No date provided: only look at recent deals (last 90 days)
+        # No date provided: only look at recent deals (last 6 months / 180 days)
         # This prevents matching against ancient deals
-        recent_cutoff = date.today() - timedelta(days=90)
+        recent_cutoff = date.today() - timedelta(days=180)
         stmt = stmt.where(
             or_(
                 Deal.announced_date >= recent_cutoff,

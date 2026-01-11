@@ -23,6 +23,7 @@ import { ScraperControl } from './components/ScraperControl';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Tracker } from './components/Tracker';
+import { AdminFeedback } from './components/AdminFeedback';
 import {
   fetchDeals,
   fetchFunds,
@@ -92,6 +93,11 @@ const sampleDeals: Deal[] = [
 ];
 
 function App() {
+  // Check for admin page URL
+  if (window.location.pathname === '/admin') {
+    return <AdminFeedback />;
+  }
+
   // View state
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [settingsOpen, setSettingsOpen] = useState(false);

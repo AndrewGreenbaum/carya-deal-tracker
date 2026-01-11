@@ -144,7 +144,7 @@ class DealExtraction(BaseModel):
 
         Rejects:
         - Future dates (LLM error)
-        - Dates older than 90 days (likely historical VC blog post being scraped)
+        - Dates older than 180 days / 6 months (likely historical VC blog post being scraped)
 
         Returns None to fallback to article.published_date.
         """
@@ -158,10 +158,10 @@ class DealExtraction(BaseModel):
             logger.warning(f"Rejecting future date {v} - likely extraction error")
             return None
 
-        # Reject dates older than 90 days (likely historical mention)
-        cutoff = today - timedelta(days=90)
+        # Reject dates older than 180 days / 6 months (likely historical mention)
+        cutoff = today - timedelta(days=180)
         if v < cutoff:
-            logger.warning(f"Rejecting old date {v} - likely historical VC blog post")
+            logger.warning(f"Rejecting old date {v} (>6 months) - likely historical VC blog post")
             return None
 
         return v
