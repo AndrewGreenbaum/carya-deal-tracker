@@ -2749,6 +2749,161 @@ async def backfill_deal_dates(
     )
 
 
+class DateEnrichmentResultResponse(BaseModel):
+    """Single deal date enrichment result."""
+    deal_id: int
+    company_name: str
+    round_type: str
+    found_date: Optional[str] = None
+    date_source: Optional[str] = None
+    search_url: Optional[str] = None
+    confidence: str = "low"
+
+
+class DateEnrichmentResponse(BaseModel):
+    """Response for date enrichment via Brave Search."""
+    deals_processed: int
+    deals_enriched: int
+    deals_not_found: int
+    results: List[DateEnrichmentResultResponse]
+
+
+@app.post("/enrichment/dates", response_model=DateEnrichmentResponse)
+async def enrich_deal_dates(
+    limit: int = Query(50, ge=1, le=200, description="Max deals to process"),
+    force: bool = Query(False, description="Re-enrich deals that already have dates"),
+    persist: bool = Query(True, description="Save results to database"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Enrich deals missing announced_date via Brave Search.
+
+    Searches for funding announcement dates for deals where:
+    - LLM couldn't extract a date from the article
+    - Portfolio page scrapes had no article metadata
+    - article.published_date fallback was also None
+
+    Uses Brave Search to find the actual funding announcement and extracts
+    the date from search result metadata (page_age) or snippets.
+
+    Query strategies:
+    1. "[Company] [Round] raises funding"
+    2. "[Company] [Round] funding announced"
+    3. "[Company] [Round] [Lead Investor] funding" (if lead investor known)
+    """
+    from .enrichment.date_enrichment import DateEnrichmentClient
+    import asyncio as aio
+
+    processed = 0
+    enriched = 0
+    not_found = 0
+    results: List[DateEnrichmentResultResponse] = []
+
+    try:
+        async with get_session() as session:
+            # Find deals missing announced_date (or all deals if force=True)
+            if force:
+                stmt = (
+                    select(Deal)
+                    .options(
+                        selectinload(Deal.company),
+                        selectinload(Deal.investors),
+                    )
+                    .order_by(Deal.created_at.desc())
+                    .limit(limit)
+                )
+            else:
+                stmt = (
+                    select(Deal)
+                    .options(
+                        selectinload(Deal.company),
+                        selectinload(Deal.investors),
+                    )
+                    .where(Deal.announced_date.is_(None))
+                    .order_by(Deal.created_at.desc())
+                    .limit(limit)
+                )
+
+            result = await session.execute(stmt)
+            deals = result.scalars().all()
+
+            if not deals:
+                return DateEnrichmentResponse(
+                    deals_processed=0,
+                    deals_enriched=0,
+                    deals_not_found=0,
+                    results=[],
+                )
+
+            # Enrich each deal
+            async with DateEnrichmentClient() as client:
+                for deal in deals:
+                    processed += 1
+
+                    company_name = deal.company.name if deal.company else None
+                    if not company_name or company_name.lower() in ("<unknown>", "unknown", "n/a"):
+                        not_found += 1
+                        continue
+
+                    round_type = deal.investment_stage or "funding"
+
+                    # Get lead investor if available
+                    lead_investor = None
+                    if deal.investors:
+                        for inv in deal.investors:
+                            if inv.is_lead:
+                                lead_investor = inv.investor_name
+                                break
+
+                    # Enrich via Brave Search
+                    enrichment_result = await client.enrich_deal_date(
+                        deal_id=deal.id,
+                        company_name=company_name,
+                        round_type=round_type,
+                        lead_investor=lead_investor,
+                    )
+
+                    # Build response
+                    result_response = DateEnrichmentResultResponse(
+                        deal_id=deal.id,
+                        company_name=company_name,
+                        round_type=round_type,
+                        found_date=str(enrichment_result.found_date) if enrichment_result.found_date else None,
+                        date_source=enrichment_result.date_source,
+                        search_url=enrichment_result.search_url,
+                        confidence=enrichment_result.confidence,
+                    )
+                    results.append(result_response)
+
+                    if enrichment_result.found_date:
+                        enriched += 1
+
+                        # Persist to database directly (same session)
+                        if persist:
+                            deal.announced_date = enrichment_result.found_date
+                            deal.updated_at = datetime.now(timezone.utc)
+                    else:
+                        not_found += 1
+
+                    # Rate limit between searches
+                    await aio.sleep(0.5)
+
+            # Commit all changes at once
+            if persist:
+                await session.commit()
+
+    except Exception as e:
+        logger.error("Date enrichment failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    return DateEnrichmentResponse(
+        deals_processed=processed,
+        deals_enriched=enriched,
+        deals_not_found=not_found,
+        results=results,
+    )
+
+
 class CrossReferenceDatesResponse(BaseModel):
     deals_processed: int
     deals_updated: int

@@ -322,6 +322,8 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
     13. Y Combinator (Demo Day companies)
     14. GitHub Trending (dev tools before funding)
     15. Hacker News (launch posts)
+    16. Tech Funding News (SaaS/AI/FinTech)
+    17. Ventureburn (emerging markets/Africa)
 
     Args:
         days: Number of days to look back
@@ -589,6 +591,36 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         logger.error("Hacker News scraping failed: %s", e)
         results["hackernews"] = {"error": str(e)}
 
+    # 16. TECH FUNDING NEWS (free RSS - SaaS/AI/FinTech)
+    try:
+        from ..harvester.scrapers.tech_funding_news import TechFundingNewsScraper
+
+        async with TechFundingNewsScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+
+        stats = await process_external_articles(articles, "tech_funding_news")
+        results["tech_funding_news"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error("Tech Funding News scraping failed: %s", e)
+        results["tech_funding_news"] = {"error": str(e)}
+
+    # 17. VENTUREBURN (free RSS - emerging markets/Africa)
+    try:
+        from ..harvester.scrapers.ventureburn import VentureburnScraper
+
+        async with VentureburnScraper() as scraper:
+            articles = await scraper.scrape_all(hours_back=days * 24)
+
+        stats = await process_external_articles(articles, "ventureburn")
+        results["ventureburn"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error("Ventureburn scraping failed: %s", e)
+        results["ventureburn"] = {"error": str(e)}
+
     results["total_deals_saved"] = total_deals_saved
     logger.info(f"External sources complete: {total_deals_saved} total deals saved")
 
@@ -666,7 +698,7 @@ async def scheduled_scrape_job():
         # Always run enrichment to catch up on any missing data
         logger.info(f"[{job_id}] Phase 3: Starting automatic enrichment (website + LinkedIn)")
         # Increased limit to 100 for aggressive coverage (was 50)
-        enriched = await enrich_new_deals(limit=100)
+        enriched = await enrich_new_deals(limit=200)
         logger.info(f"[{job_id}] Enrichment complete: {enriched} companies updated")
 
         # Send notification
