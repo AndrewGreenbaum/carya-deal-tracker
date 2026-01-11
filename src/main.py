@@ -2791,8 +2791,14 @@ async def enrich_deal_dates(
     2. "[Company] [Round] funding announced"
     3. "[Company] [Round] [Lead Investor] funding" (if lead investor known)
     """
-    from .enrichment.date_enrichment import DateEnrichmentClient
     import asyncio as aio
+
+    # Import with error handling
+    try:
+        from .enrichment.date_enrichment import DateEnrichmentClient
+    except ImportError as e:
+        logger.error("Failed to import DateEnrichmentClient: %s", e)
+        raise HTTPException(status_code=500, detail=f"Import error: {e}")
 
     processed = 0
     enriched = 0
@@ -2845,7 +2851,7 @@ async def enrich_deal_dates(
                         not_found += 1
                         continue
 
-                    round_type = deal.investment_stage or "funding"
+                    round_type = deal.round_type or "funding"
 
                     # Get lead investor if available
                     lead_investor = None
@@ -2881,7 +2887,7 @@ async def enrich_deal_dates(
                         # Persist to database directly (same session)
                         if persist:
                             deal.announced_date = enrichment_result.found_date
-                            deal.updated_at = datetime.now(timezone.utc)
+                            deal.updated_at = datetime.utcnow()
                     else:
                         not_found += 1
 
@@ -2892,9 +2898,11 @@ async def enrich_deal_dates(
             if persist:
                 await session.commit()
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Date enrichment failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=f"Date enrichment error: {type(e).__name__}: {str(e)}")
 
     return DateEnrichmentResponse(
         deals_processed=processed,
