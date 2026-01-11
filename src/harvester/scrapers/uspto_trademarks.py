@@ -18,7 +18,7 @@ import re
 import httpx
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
 from ..base_scraper import NormalizedArticle
@@ -304,7 +304,7 @@ class USPTOTrademarkScraper:
             author="USPTO",
             tags=["uspto", "trademark", "stealth_signal", f"class_{tm.nice_class}"],
             fund_slug="",
-            fetched_at=datetime.utcnow(),
+            fetched_at=datetime.now(timezone.utc),
         )
 
     async def scrape_all(

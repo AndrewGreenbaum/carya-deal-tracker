@@ -186,6 +186,20 @@ class StealthDetection(SQLModel, table=True):
     notes: Optional[str] = None
 
 
+class PortfolioSnapshot(SQLModel, table=True):
+    """Store portfolio page snapshots for diff detection.
+
+    Replaces ephemeral /tmp/ storage with persistent database storage.
+    This survives Railway redeploys and ensures accurate diff detection.
+    """
+    __tablename__ = "portfolio_snapshots"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    fund_slug: str = Field(unique=True, index=True)  # One snapshot per fund
+    companies_json: str  # JSON list of company names (lowercase)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class ThesisDrift(SQLModel, table=True):
     """Track thesis drift scores over time."""
     __tablename__ = "thesis_drift"

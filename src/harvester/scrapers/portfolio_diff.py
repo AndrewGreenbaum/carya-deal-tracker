@@ -20,12 +20,16 @@ import re
 import httpx
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
-from datetime import datetime, date
-from pathlib import Path
-from typing import List, Optional, Dict, Set, Any
+from datetime import datetime, date, timezone
+from typing import List, Optional, Dict, Set
+
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
+from ...archivist.database import get_session
+from ...archivist.models import PortfolioSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -124,11 +128,8 @@ PORTFOLIO_URLS = {
     },
 }
 
-# Snapshot storage path
-# NOTE: /tmp/ is ephemeral on Railway - snapshots are lost on redeploy.
-# This means first run after deploy will show no diffs. Consider storing
-# in database for persistent snapshots in a future enhancement.
-SNAPSHOT_DIR = Path("/tmp/bud-tracker-snapshots")
+# Snapshots are stored in database (portfolio_snapshots table)
+# This survives Railway redeploys and ensures accurate diff detection.
 
 
 @dataclass
@@ -167,7 +168,6 @@ class PortfolioDiffScraper:
             },
             follow_redirects=True,
         )
-        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
     async def __aenter__(self):
         return self
@@ -175,29 +175,40 @@ class PortfolioDiffScraper:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.client.aclose()
 
-    def _get_snapshot_path(self, fund_slug: str) -> Path:
-        """Get path for fund's snapshot file."""
-        return SNAPSHOT_DIR / f"{fund_slug}_portfolio.json"
+    async def _load_snapshot(self, fund_slug: str) -> Set[str]:
+        """Load previous snapshot of company names from database."""
+        async with get_session() as session:
+            stmt = select(PortfolioSnapshot).where(PortfolioSnapshot.fund_slug == fund_slug)
+            result = await session.execute(stmt)
+            snapshot = result.scalar_one_or_none()
 
-    def _load_snapshot(self, fund_slug: str) -> Set[str]:
-        """Load previous snapshot of company names."""
-        path = self._get_snapshot_path(fund_slug)
-        if path.exists():
-            try:
-                data = json.loads(path.read_text())
-                return set(data.get("companies", []))
-            except (json.JSONDecodeError, KeyError):
-                return set()
-        return set()
+            if snapshot:
+                try:
+                    companies = json.loads(snapshot.companies_json)
+                    return set(companies)
+                except json.JSONDecodeError:
+                    return set()
+            return set()
 
-    def _save_snapshot(self, fund_slug: str, companies: Set[str]) -> None:
-        """Save current snapshot of company names."""
-        path = self._get_snapshot_path(fund_slug)
-        data = {
-            "companies": list(companies),
-            "updated_at": datetime.utcnow().isoformat(),
-        }
-        path.write_text(json.dumps(data, indent=2))
+    async def _save_snapshot(self, fund_slug: str, companies: Set[str]) -> None:
+        """Save current snapshot of company names to database."""
+        async with get_session() as session:
+            companies_json = json.dumps(list(companies))
+
+            # Use ON CONFLICT to upsert
+            stmt = pg_insert(PortfolioSnapshot).values(
+                fund_slug=fund_slug,
+                companies_json=companies_json,
+                updated_at=datetime.now(timezone.utc),
+            ).on_conflict_do_update(
+                index_elements=['fund_slug'],
+                set_={
+                    'companies_json': companies_json,
+                    'updated_at': datetime.now(timezone.utc),
+                }
+            )
+            await session.execute(stmt)
+            await session.commit()
 
     async def scrape_portfolio_page(self, fund_slug: str) -> List[PortfolioCompany]:
         """
@@ -279,7 +290,8 @@ class PortfolioDiffScraper:
                     continue
 
                 # If we found companies, stop trying other selectors
-                if len(companies) > 5:
+                # FIX: Lower threshold - some funds show fewer than 5 companies
+                if len(companies) >= 1:
                     break
 
             return companies
@@ -292,8 +304,8 @@ class PortfolioDiffScraper:
         """
         Get diff between current portfolio and stored snapshot.
         """
-        # Load previous snapshot
-        previous = self._load_snapshot(fund_slug)
+        # Load previous snapshot from database
+        previous = await self._load_snapshot(fund_slug)
 
         # Scrape current portfolio
         current_companies = await self.scrape_portfolio_page(fund_slug)
@@ -306,8 +318,8 @@ class PortfolioDiffScraper:
         # Find removed companies (in previous but not in current)
         removed_names = previous - current_names
 
-        # Save current snapshot for next run
-        self._save_snapshot(fund_slug, current_names)
+        # Save current snapshot to database for next run
+        await self._save_snapshot(fund_slug, current_names)
 
         return PortfolioDiff(
             fund_slug=fund_slug,
@@ -332,15 +344,20 @@ class PortfolioDiffScraper:
         if company.url:
             text_parts.append(f"\nPortfolio URL: {company.url}")
 
+        # Generate fund-specific URL if company URL not available
+        fund_config = PORTFOLIO_URLS.get(company.fund_slug, {})
+        fund_url = fund_config.get("url", f"https://{company.fund_slug}.com/portfolio/")
+        fallback_url = f"{fund_url.rstrip('/')}#{company.name.lower().replace(' ', '-')}"
+
         return NormalizedArticle(
-            url=company.url or f"https://example.com/portfolio/{company.name.lower().replace(' ', '-')}",
+            url=company.url or fallback_url,
             title=f"Stealth Addition: {company.name} added to {company.fund_slug} portfolio",
             text="\n".join(text_parts),
             published_date=company.first_seen or date.today(),
             author=f"{company.fund_slug} Portfolio",
             tags=["portfolio_diff", "stealth", "pre_announcement", company.fund_slug],
             fund_slug=company.fund_slug,
-            fetched_at=datetime.utcnow(),
+            fetched_at=datetime.now(timezone.utc),
         )
 
     async def scrape_all(
@@ -373,8 +390,8 @@ class PortfolioDiffScraper:
                 article = self.diff_to_article(company)
                 all_articles.append(article)
 
-            # Rate limit between funds
-            await asyncio.sleep(1)
+            # Rate limit between funds (0.3s matches other scrapers)
+            await asyncio.sleep(0.3)
 
         return all_articles
 
@@ -388,8 +405,8 @@ class PortfolioDiffScraper:
         for fund_slug in PORTFOLIO_URLS.keys():
             companies = await self.scrape_portfolio_page(fund_slug)
             snapshots[fund_slug] = [c.name for c in companies]
-            self._save_snapshot(fund_slug, {c.name.lower() for c in companies})
-            await asyncio.sleep(1)
+            await self._save_snapshot(fund_slug, {c.name.lower() for c in companies})
+            await asyncio.sleep(0.3)
 
         return snapshots
 

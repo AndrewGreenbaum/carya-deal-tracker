@@ -469,6 +469,40 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             logger.error("LinkedIn Jobs scraping failed: %s", e)
             results["linkedin_jobs"] = {"error": str(e)}
 
+    # 7b. PORTFOLIO DIFF (stealth detection via portfolio page diffing - FREE)
+    try:
+        from ..harvester.scrapers.portfolio_diff import PortfolioDiffScraper
+        from ..archivist.storage import save_stealth_detection
+
+        async with PortfolioDiffScraper() as scraper:
+            articles = await scraper.scrape_all()
+
+        # Save stealth detections (portfolio diff doesn't go through deal extraction)
+        stealth_saved = 0
+        async with get_session() as session:
+            for article in articles:
+                try:
+                    await save_stealth_detection(
+                        session=session,
+                        fund_slug=article.fund_slug,
+                        detected_url=article.url,
+                        company_name=article.title.split(":")[1].strip() if ":" in article.title else None,
+                        notes=f"Source: Portfolio Diff | Tags: {', '.join(article.tags)}",
+                    )
+                    stealth_saved += 1
+                except Exception as e:
+                    logger.warning(f"Failed to save stealth detection: {e}")
+
+        results["portfolio_diff"] = {
+            "articles_found": len(articles),
+            "stealth_saved": stealth_saved,
+        }
+        logger.info(f"Portfolio Diff: {len(articles)} new additions, {stealth_saved} saved")
+
+    except Exception as e:
+        logger.error("Portfolio Diff scraping failed: %s", e)
+        results["portfolio_diff"] = {"error": str(e)}
+
     # 8. CRUNCHBASE NEWS (free RSS)
     try:
         from ..harvester.scrapers.crunchbase_news import CrunchbaseNewsScraper

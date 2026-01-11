@@ -190,21 +190,34 @@ class LinkedInJobsScraper:
             if not company_name and title:
                 company_name = title[:50] + "..." if len(title) > 50 else title
 
-            # Check if stealth
+            # Check if stealth (with negation detection)
             text_lower = f"{title} {description}".lower()
-            is_stealth = any(kw in text_lower for kw in [
+
+            # FIX: Check for negation patterns first
+            negation_patterns = [
+                "not stealth", "no longer stealth", "exited stealth",
+                "out of stealth", "left stealth", "emerged from stealth"
+            ]
+            has_negation = any(neg in text_lower for neg in negation_patterns)
+
+            # Only mark as stealth if positive signal and no negation
+            stealth_keywords = [
                 "stealth", "stealth mode", "stealth startup",
                 "well-funded startup", "recently funded",
                 "pre-launch", "unannounced"
-            ])
+            ]
+            is_stealth = any(kw in text_lower for kw in stealth_keywords) and not has_negation
 
             # Check for fund matches using centralized fund_matcher
             # (handles name variants, negative keywords, and disambiguation)
             matched_fund = match_fund_name(f"{title} {description}")
 
             # FIX: Parse actual posted date from Brave Search age field
+            # Handle case where _parse_relative_date returns None
             age = result.get("age", "")
-            posted_date = self._parse_relative_date(age) if age else date.today()
+            posted_date = self._parse_relative_date(age) if age else None
+            if posted_date is None:
+                posted_date = date.today()
 
             return LinkedInJob(
                 title=title,
@@ -283,21 +296,28 @@ class LinkedInJobsScraper:
         seen_urls: set = set()
 
         for query in STEALTH_JOB_QUERIES:
-            results = await self.search_brave(query, count=10)
+            try:
+                results = await self.search_brave(query, count=10)
 
-            for result in results:
-                job = self.parse_job_result(result)
-                if job and job.url not in seen_urls:
-                    seen_urls.add(job.url)
-                    all_jobs.append(job)
+                for result in results:
+                    job = self.parse_job_result(result)
+                    if job and job.url not in seen_urls:
+                        seen_urls.add(job.url)
+                        all_jobs.append(job)
+
+            except Exception as e:
+                # Log error but continue with other queries
+                logger.error(f"Stealth query failed: {query[:50]}... - {e}")
+                continue
 
             await asyncio.sleep(self.rate_limit_delay)  # Rate limit
 
         # Convert to articles
+        # FIX: Only include true stealth signals for stealth_detections table
+        # Fund matches without stealth should go through regular deal pipeline
         articles = []
         for job in all_jobs:
-            # Only include if stealth or has fund match
-            if job.is_stealth or job.matched_fund:
+            if job.is_stealth:
                 articles.append(self.job_to_article(job))
 
         return articles

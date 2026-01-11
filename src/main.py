@@ -663,8 +663,10 @@ async def list_stealth_detections(
             if fund_slug:
                 stmt = stmt.where(StealthDetection.fund_slug == fund_slug)
 
-            # Get total count
-            count_stmt = select(func.count()).select_from(stmt.subquery())
+            # Get total count (direct count avoids subquery overhead)
+            count_stmt = select(func.count(StealthDetection.id))
+            if fund_slug:
+                count_stmt = count_stmt.where(StealthDetection.fund_slug == fund_slug)
             total_result = await session.execute(count_stmt)
             total = total_result.scalar() or 0
 
@@ -2887,7 +2889,7 @@ async def enrich_deal_dates(
                         # Persist to database directly (same session)
                         if persist:
                             deal.announced_date = enrichment_result.found_date
-                            deal.updated_at = datetime.utcnow()
+                            deal.updated_at = datetime.now(timezone.utc)
                     else:
                         not_found += 1
 

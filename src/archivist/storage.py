@@ -705,27 +705,32 @@ async def save_stealth_detection(
     Returns:
         The created StealthDetection record
     """
-    # Check for existing detection with same URL to avoid duplicates
-    stmt = select(StealthDetection).where(StealthDetection.detected_url == detected_url)
-    result = await session.execute(stmt)
-    existing = result.scalar_one_or_none()
+    # FIX: Use ON CONFLICT to prevent race condition
+    # Between check and insert, another task could insert same URL
+    from sqlalchemy.sql import func
 
-    if existing:
-        # Update existing detection if we have new info
-        if company_name and not existing.company_name:
-            existing.company_name = company_name
-        if notes and not existing.notes:
-            existing.notes = notes
-        return existing
-
-    detection = StealthDetection(
+    stmt = pg_insert(StealthDetection).values(
         fund_slug=fund_slug,
         detected_url=detected_url,
         company_name=company_name,
         notes=notes,
-    )
-    session.add(detection)
-    await session.flush()
+    ).on_conflict_do_update(
+        index_elements=['detected_url'],
+        set_={
+            # Only update if new values are provided and existing are null
+            'company_name': func.coalesce(
+                StealthDetection.company_name,
+                company_name
+            ),
+            'notes': func.coalesce(
+                StealthDetection.notes,
+                notes
+            ),
+        }
+    ).returning(StealthDetection)
+
+    result = await session.execute(stmt)
+    detection = result.scalar_one()
     return detection
 
 

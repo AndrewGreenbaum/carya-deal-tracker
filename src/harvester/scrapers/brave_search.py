@@ -14,7 +14,7 @@ OPTIMIZED:
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any, Tuple
 
 from ..base_scraper import NormalizedArticle
@@ -535,7 +535,7 @@ class BraveSearchScraper:
             author=result.source,
             tags=["brave_search", result.source],
             fund_slug=fund_slug,
-            fetched_at=datetime.utcnow(),
+            fetched_at=datetime.now(timezone.utc),
         )
 
     async def scrape_all(

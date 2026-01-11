@@ -289,7 +289,13 @@ class DelawareCorpsScraper:
 
             if not entity_name:
                 # Use title as fallback, clean it up
-                entity_name = re.sub(r'\s*[-|]\s*.*$', '', title).strip()
+                # FIX: Only strip common suffixes, not all dashes (preserves "Name-Finder" style names)
+                entity_name = re.sub(
+                    r'\s*[-|]\s*(Delaware|Corporation|Corp|Inc|LLC|Filing|Incorporation|State|Division).*$',
+                    '',
+                    title,
+                    flags=re.IGNORECASE
+                ).strip()
 
             if not entity_name or len(entity_name) < 2 or len(entity_name) > 100:
                 return None
