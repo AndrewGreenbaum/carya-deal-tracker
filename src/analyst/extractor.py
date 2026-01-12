@@ -9,6 +9,7 @@ OPTIMIZED:
 - Batch extraction for multiple articles
 - Early exit for non-funding content
 - Content hash deduplication to avoid duplicate API calls
+- Token usage logging for cost tracking
 """
 
 import asyncio
@@ -20,8 +21,13 @@ import httpx
 from anthropic import Anthropic, APITimeoutError, APIError, RateLimitError
 from instructor.core import InstructorRetryException
 from typing import Optional, List, Set
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+# Thread-local storage for source tracking (set by callers)
+_current_source_name: Optional[str] = None
+_current_scan_id: Optional[str] = None
 
 # API call configuration - loaded from settings (see below after settings import)
 
@@ -102,6 +108,112 @@ Output valid JSON matching the schema."""
 
 # Initialize the cached system message with the prompt text
 CACHED_SYSTEM_MESSAGE[0]["text"] = SYSTEM_PROMPT
+
+
+# =============================================================================
+# TOKEN USAGE LOGGING
+# =============================================================================
+
+# Haiku pricing (December 2024)
+HAIKU_INPUT_COST_PER_MILLION = 0.25  # $0.25 per 1M input tokens
+HAIKU_OUTPUT_COST_PER_MILLION = 1.25  # $1.25 per 1M output tokens
+HAIKU_CACHE_READ_COST_PER_MILLION = 0.025  # $0.025 per 1M cache read tokens
+HAIKU_CACHE_WRITE_COST_PER_MILLION = 0.3125  # $0.3125 per 1M cache write tokens
+
+
+def set_extraction_context(source_name: str, scan_id: Optional[str] = None) -> None:
+    """Set the current extraction context for token logging.
+
+    Call this before starting extraction to track which source is being processed.
+
+    Args:
+        source_name: Name of the source (e.g., "brave_search", "techcrunch", "a16z")
+        scan_id: Optional job ID for grouping (e.g., scan timestamp)
+    """
+    global _current_source_name, _current_scan_id
+    _current_source_name = source_name
+    _current_scan_id = scan_id
+
+
+def clear_extraction_context() -> None:
+    """Clear the extraction context after processing."""
+    global _current_source_name, _current_scan_id
+    _current_source_name = None
+    _current_scan_id = None
+
+
+def _calculate_cost(
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0
+) -> float:
+    """Calculate estimated cost in USD for token usage."""
+    cost = (
+        (input_tokens * HAIKU_INPUT_COST_PER_MILLION / 1_000_000) +
+        (output_tokens * HAIKU_OUTPUT_COST_PER_MILLION / 1_000_000) +
+        (cache_read_tokens * HAIKU_CACHE_READ_COST_PER_MILLION / 1_000_000) +
+        (cache_write_tokens * HAIKU_CACHE_WRITE_COST_PER_MILLION / 1_000_000)
+    )
+    return round(cost, 6)
+
+
+async def log_token_usage(
+    input_tokens: int,
+    output_tokens: int,
+    source_name: Optional[str] = None,
+    scan_id: Optional[str] = None,
+    article_url: Optional[str] = None,
+    model: str = "claude-3-5-haiku-20241022",
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0
+) -> None:
+    """Log token usage to database for cost tracking.
+
+    Args:
+        input_tokens: Number of input tokens used
+        output_tokens: Number of output tokens generated
+        source_name: Source identifier (uses context if not provided)
+        scan_id: Job ID for grouping (uses context if not provided)
+        article_url: URL of the article being processed
+        model: Model name used
+        cache_read_tokens: Tokens read from cache
+        cache_write_tokens: Tokens written to cache
+    """
+    # Use context values if not explicitly provided
+    source = source_name or _current_source_name or "unknown"
+    job_id = scan_id or _current_scan_id
+
+    cost = _calculate_cost(input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+
+    try:
+        # Import here to avoid circular imports
+        from ..archivist.database import get_session
+        from ..archivist.models import TokenUsage
+
+        async with get_session() as session:
+            usage = TokenUsage(
+                timestamp=datetime.now(timezone.utc),
+                source_name=source,
+                scan_id=job_id,
+                article_url=article_url[:2000] if article_url and len(article_url) > 2000 else article_url,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                model=model,
+                estimated_cost_usd=cost
+            )
+            session.add(usage)
+            # Session commits on exit
+
+        logger.debug(
+            f"Token usage logged: source={source}, input={input_tokens}, "
+            f"output={output_tokens}, cost=${cost:.4f}"
+        )
+    except Exception as e:
+        # Don't fail extraction if logging fails
+        logger.warning(f"Failed to log token usage: {e}")
 
 
 # Keywords that indicate funding content (for early exit optimization)
@@ -445,7 +557,8 @@ async def extract_deal(
 
     for attempt in range(MAX_RETRIES + 1):
         try:
-            response = client.messages.create(
+            # Use create_with_completion to get both parsed model AND raw response with usage
+            response, completion = client.messages.create_with_completion(
                 model=settings.llm_model,
                 max_tokens=settings.llm_max_tokens,
                 temperature=settings.llm_temperature,
@@ -453,6 +566,21 @@ async def extract_deal(
                 messages=[{"role": "user", "content": prompt}],
                 response_model=DealExtraction,
             )
+
+            # Log token usage from the completion
+            if completion and hasattr(completion, 'usage'):
+                usage = completion.usage
+                # Extract cache tokens if available (Anthropic-specific)
+                cache_read = getattr(usage, 'cache_read_input_tokens', 0) or 0
+                cache_write = getattr(usage, 'cache_creation_input_tokens', 0) or 0
+                await log_token_usage(
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    article_url=source_url,
+                    model=settings.llm_model,
+                    cache_read_tokens=cache_read,
+                    cache_write_tokens=cache_write
+                )
 
             # Post-process: verify tracked fund identification
             response = _verify_tracked_fund(response)
@@ -622,7 +750,8 @@ async def extract_article(
 
     for attempt in range(MAX_RETRIES + 1):
         try:
-            response = client.messages.create(
+            # Use create_with_completion to get both parsed model AND raw response with usage
+            response, completion = client.messages.create_with_completion(
                 model=settings.llm_model,
                 max_tokens=settings.llm_max_tokens,
                 temperature=settings.llm_temperature,
@@ -630,6 +759,20 @@ async def extract_article(
                 messages=[{"role": "user", "content": prompt}],
                 response_model=ArticleAnalysis,
             )
+
+            # Log token usage from the completion
+            if completion and hasattr(completion, 'usage'):
+                usage = completion.usage
+                cache_read = getattr(usage, 'cache_read_input_tokens', 0) or 0
+                cache_write = getattr(usage, 'cache_creation_input_tokens', 0) or 0
+                await log_token_usage(
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    article_url=source_url,
+                    model=settings.llm_model,
+                    cache_read_tokens=cache_read,
+                    cache_write_tokens=cache_write
+                )
 
             # Post-process each deal
             for deal in response.deals:

@@ -169,11 +169,15 @@ async def process_external_articles(
     Returns:
         Dict with processing stats
     """
-    from ..analyst.extractor import extract_deal
+    from ..analyst.extractor import extract_deal, set_extraction_context, clear_extraction_context
     from ..archivist.storage import save_deal
     from ..archivist.database import get_session
     from ..archivist.models import Article
     from sqlalchemy import select
+
+    # Set extraction context for token logging
+    scan_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    set_extraction_context(source_name, scan_id)
 
     stats = {
         "articles_received": len(articles),
@@ -294,6 +298,9 @@ async def process_external_articles(
         f"saved={stats['deals_saved']}, "
         f"errors={stats['errors']}"
     )
+
+    # Clear extraction context when done
+    clear_extraction_context()
 
     return stats
 

@@ -290,3 +290,40 @@ class Feedback(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     )
+
+
+class TokenUsage(SQLModel, table=True):
+    """Track Claude API token usage per extraction.
+
+    Records input/output tokens for each Claude API call to enable:
+    - Cost breakdown by source (brave_search, techcrunch, a16z, etc.)
+    - Daily/weekly/monthly usage trends
+    - Identifying which sources consume the most tokens
+
+    Pricing (Claude 3.5 Haiku as of Dec 2024):
+    - Input: $0.25 per 1M tokens
+    - Output: $1.25 per 1M tokens
+    - Cache read: $0.025 per 1M tokens (90% discount)
+    - Cache write: $0.3125 per 1M tokens
+    """
+    __tablename__ = "token_usage"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # Source identification
+    source_name: str = Field(index=True)  # "brave_search", "techcrunch", "a16z", etc.
+    scan_id: Optional[str] = Field(default=None)  # Job ID for grouping
+    article_url: Optional[str] = Field(default=None)
+
+    # Token counts
+    input_tokens: int = Field(default=0)
+    output_tokens: int = Field(default=0)
+    cache_read_tokens: int = Field(default=0)
+    cache_write_tokens: int = Field(default=0)
+
+    # Model info
+    model: str = Field(default="claude-3-5-haiku-20241022")
+
+    # Calculated cost (USD)
+    estimated_cost_usd: float = Field(default=0.0)

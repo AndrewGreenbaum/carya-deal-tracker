@@ -254,6 +254,46 @@ class HealthResponse(BaseModel):
     implemented_scrapers: int
 
 
+class TokenUsageBySource(BaseModel):
+    """Token usage breakdown by source."""
+    source: str
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    total_tokens: int
+    cost_usd: float
+    call_count: int
+
+
+class TokenUsageByDay(BaseModel):
+    """Token usage breakdown by day."""
+    date: str
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    total_tokens: int
+    cost_usd: float
+    call_count: int
+
+
+class TokenUsageResponse(BaseModel):
+    """Token usage summary response."""
+    period: str
+    start_date: str
+    end_date: str
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cache_read_tokens: int
+    total_cache_write_tokens: int
+    total_tokens: int
+    total_cost_usd: float
+    total_calls: int
+    by_source: List[TokenUsageBySource]
+    by_day: List[TokenUsageByDay]
+
+
 class FounderResponse(BaseModel):
     """Founder information for API response."""
     name: str
@@ -312,6 +352,123 @@ async def health_check():
 
     cache.set("health", response, ttl_seconds=300)
     return response
+
+
+@app.get("/usage/tokens", response_model=TokenUsageResponse)
+async def get_token_usage(
+    days: int = Query(7, ge=1, le=90, description="Number of days to look back"),
+    _: str = Depends(verify_api_key)
+):
+    """
+    Get token usage breakdown for cost analysis.
+
+    Returns:
+    - Total tokens used (input, output, cache)
+    - Cost breakdown by source (brave_search, techcrunch, a16z, etc.)
+    - Cost breakdown by day
+
+    Pricing (Claude 3.5 Haiku):
+    - Input: $0.25 per 1M tokens
+    - Output: $1.25 per 1M tokens
+    - Cache read: $0.025 per 1M tokens
+    - Cache write: $0.3125 per 1M tokens
+    """
+    try:
+        from .archivist.models import TokenUsage
+        from sqlalchemy import cast, Date
+
+        async with get_session() as session:
+            # Calculate date range
+            end_date = datetime.now(timezone.utc)
+            start_date = end_date - timedelta(days=days)
+
+            # Query all token usage in date range
+            stmt = select(TokenUsage).where(TokenUsage.timestamp >= start_date)
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+
+            # Aggregate totals
+            total_input = sum(r.input_tokens for r in rows)
+            total_output = sum(r.output_tokens for r in rows)
+            total_cache_read = sum(r.cache_read_tokens for r in rows)
+            total_cache_write = sum(r.cache_write_tokens for r in rows)
+            total_cost = sum(r.estimated_cost_usd for r in rows)
+
+            # Group by source
+            by_source_dict: Dict[str, dict] = {}
+            for r in rows:
+                if r.source_name not in by_source_dict:
+                    by_source_dict[r.source_name] = {
+                        "input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "cost": 0.0, "count": 0
+                    }
+                by_source_dict[r.source_name]["input"] += r.input_tokens
+                by_source_dict[r.source_name]["output"] += r.output_tokens
+                by_source_dict[r.source_name]["cache_read"] += r.cache_read_tokens
+                by_source_dict[r.source_name]["cache_write"] += r.cache_write_tokens
+                by_source_dict[r.source_name]["cost"] += r.estimated_cost_usd
+                by_source_dict[r.source_name]["count"] += 1
+
+            by_source = [
+                TokenUsageBySource(
+                    source=source,
+                    input_tokens=data["input"],
+                    output_tokens=data["output"],
+                    cache_read_tokens=data["cache_read"],
+                    cache_write_tokens=data["cache_write"],
+                    total_tokens=data["input"] + data["output"],
+                    cost_usd=round(data["cost"], 4),
+                    call_count=data["count"]
+                )
+                for source, data in sorted(by_source_dict.items(), key=lambda x: x[1]["cost"], reverse=True)
+            ]
+
+            # Group by day
+            by_day_dict: Dict[str, dict] = {}
+            for r in rows:
+                day_str = r.timestamp.strftime("%Y-%m-%d")
+                if day_str not in by_day_dict:
+                    by_day_dict[day_str] = {
+                        "input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "cost": 0.0, "count": 0
+                    }
+                by_day_dict[day_str]["input"] += r.input_tokens
+                by_day_dict[day_str]["output"] += r.output_tokens
+                by_day_dict[day_str]["cache_read"] += r.cache_read_tokens
+                by_day_dict[day_str]["cache_write"] += r.cache_write_tokens
+                by_day_dict[day_str]["cost"] += r.estimated_cost_usd
+                by_day_dict[day_str]["count"] += 1
+
+            by_day = [
+                TokenUsageByDay(
+                    date=day,
+                    input_tokens=data["input"],
+                    output_tokens=data["output"],
+                    cache_read_tokens=data["cache_read"],
+                    cache_write_tokens=data["cache_write"],
+                    total_tokens=data["input"] + data["output"],
+                    cost_usd=round(data["cost"], 4),
+                    call_count=data["count"]
+                )
+                for day, data in sorted(by_day_dict.items(), reverse=True)
+            ]
+
+            return TokenUsageResponse(
+                period=f"last_{days}_days",
+                start_date=start_date.strftime("%Y-%m-%d"),
+                end_date=end_date.strftime("%Y-%m-%d"),
+                total_input_tokens=total_input,
+                total_output_tokens=total_output,
+                total_cache_read_tokens=total_cache_read,
+                total_cache_write_tokens=total_cache_write,
+                total_tokens=total_input + total_output,
+                total_cost_usd=round(total_cost, 4),
+                total_calls=len(rows),
+                by_source=by_source,
+                by_day=by_day
+            )
+
+    except Exception as e:
+        logger.error(f"Failed to get token usage: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get token usage: {str(e)}")
 
 
 @app.get("/funds", response_model=List[FundResponse])
@@ -2103,6 +2260,55 @@ async def run_strictlyvc_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+# ----- PR Wire RSS (PRNewswire, GlobeNewswire, BusinessWire) -----
+
+class PRWireResponse(BaseModel):
+    feeds_scraped: int
+    articles_found: int
+    funding_articles: int
+    fund_matches: int
+
+
+@app.post("/scrapers/prwire", response_model=PRWireResponse)
+async def run_prwire_endpoint(
+    hours_back: int = Query(168, ge=1, le=720, description="Hours to look back (default 7 days)"),
+    fund_filter: bool = Query(True, description="Only return articles mentioning tracked funds"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run PR Wire RSS scraper.
+
+    Scrapes official funding press releases from:
+    - PRNewswire (venture capital category)
+    - GlobeNewswire (financing agreements)
+    - BusinessWire (all business news)
+
+    These are the PRIMARY sources for official funding announcements.
+    FREE - uses public RSS feeds.
+    """
+    from .harvester.scrapers.prwire_rss import PRWireRSSScraper
+
+    try:
+        async with PRWireRSSScraper() as scraper:
+            articles = await scraper.scrape_all_feeds(
+                hours_back=hours_back,
+                fund_filter=fund_filter,
+            )
+
+        fund_matches = len([a for a in articles if a.fund_slug])
+
+        return PRWireResponse(
+            feeds_scraped=5,  # 1 PRNewswire + 2 GlobeNewswire + 2 BusinessWire feeds
+            articles_found=len(articles),
+            funding_articles=len(articles),  # All are funding-related after filter
+            fund_matches=fund_matches,
+        )
+
+    except Exception as e:
+        logger.error("Request failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 # ----- All Sources Combined -----
 
 class AllSourcesResponse(BaseModel):
@@ -2122,6 +2328,7 @@ class AllSourcesResponse(BaseModel):
     venturebeat: Optional[VentureBeatResponse] = None
     axios_prorata: Optional[AxiosProRataResponse] = None
     strictlyvc: Optional[StrictlyVCResponse] = None
+    prwire: Optional[PRWireResponse] = None  # PRNewswire, GlobeNewswire, BusinessWire
     # Tier 1 Stealth Detection
     portfolio_diff: Optional[PortfolioDiffResponse] = None
     uspto_trademarks: Optional[USPTOTrademarkResponse] = None
