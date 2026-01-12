@@ -39,6 +39,8 @@ export function TrackerColumn({
     blue: 'bg-blue-500',
     amber: 'bg-amber-500',
     emerald: 'bg-emerald-500',
+    green: 'bg-green-500',
+    red: 'bg-red-500',
   };
 
   return (
@@ -84,6 +86,8 @@ export function TrackerColumn({
               {id === 'reached_out' && 'No outreach yet'}
               {id === 'in_conversation' && 'No active conversations'}
               {id === 'closing_spv' && 'No deals closing'}
+              {id === 'spv_complete' && 'No completed SPVs'}
+              {id === 'spv_rejected' && 'No rejected deals'}
             </span>
             <span className="text-slate-600 text-xs mt-1">
               {id === 'watching' ? 'Add a company or drag deals here' : 'Drag items here'}

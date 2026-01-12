@@ -288,7 +288,7 @@ export function Tracker() {
       )}
 
       {/* Kanban Board */}
-      <div className="flex-1 overflow-x-auto p-6">
+      <div className="flex-1 overflow-x-auto overflow-y-hidden p-6">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
@@ -296,7 +296,7 @@ export function Tracker() {
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex gap-4 min-h-full">
+          <div className="flex gap-4 min-h-full" style={{ minWidth: 'max-content' }}>
             {COLUMNS.map((status) => {
               const columnItems = getItemsByStatus(status);
               return (

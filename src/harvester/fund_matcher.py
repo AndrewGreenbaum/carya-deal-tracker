@@ -89,6 +89,7 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     ],
     "thrive": [
         "thrive capital",
+        "josh kushner",  # Thrive's founder/GP
     ],
     "general_catalyst": [
         "general catalyst",
