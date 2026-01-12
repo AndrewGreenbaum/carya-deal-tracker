@@ -1060,12 +1060,14 @@ async def run_brave_search_scraper_endpoint(
                 include_stealth=True,
                 include_regional=include_regional,
                 include_early_signals=include_early_signals,
+                include_partner_names=True,  # Critical for funds without public announcements
             )
 
         cache.invalidate("deals")
 
-        # Calculate query count
+        # Calculate query count - now includes partner queries
         queries_executed = 38  # Base: 18 lead + 18 participation + 1 enterprise + 1 stealth
+        queries_executed += 57  # Partner name queries for all funds
         if include_regional:
             queries_executed += 10  # 10 regions
         if include_early_signals:

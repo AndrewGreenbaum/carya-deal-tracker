@@ -760,14 +760,14 @@ def setup_scheduler() -> AsyncIOScheduler:
     Initialize and start the APScheduler.
 
     Configures:
-    - Scrape job every 4 hours (at 0:00, 4:00, 8:00, 12:00, 16:00, 20:00 UTC)
+    - Scrape job every 4 hours (at 12am, 4am, 8am, 12pm, 4pm, 8pm EST)
     - Job store in memory (stateless)
-    - Timezone: UTC
+    - Timezone: America/New_York (EST/EDT)
     """
     global scheduler
 
     scheduler = AsyncIOScheduler(
-        timezone="UTC",
+        timezone="America/New_York",
         job_defaults={
             "coalesce": False,  # Queue missed runs instead of dropping them
             "max_instances": 1,  # Only one instance at a time
@@ -775,10 +775,10 @@ def setup_scheduler() -> AsyncIOScheduler:
         }
     )
 
-    # Add scrape job - runs every 4 hours at :00
+    # Add scrape job - runs every 4 hours at :00 EST
     scheduler.add_job(
         scheduled_scrape_job,
-        trigger=CronTrigger(hour='*/4', minute=0),  # Every 4 hours
+        trigger=CronTrigger(hour='*/4', minute=0, timezone="America/New_York"),
         id="scheduled_scrape",
         name="VC Fund Scrape (4-hourly)",
         replace_existing=True,

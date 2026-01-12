@@ -29,6 +29,10 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     "benchmark": [
         "benchmark capital",
         "benchmark",
+        "bill gurley",  # Well-known Benchmark partner
+        "sarah tavel",
+        "peter fenton",
+        "eric vishria",
     ],
     "founders_fund": [
         "founders fund",
@@ -37,6 +41,9 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     "greylock": [
         "greylock partners",
         "greylock",
+        "reid hoffman",  # Co-founder LinkedIn, Greylock partner
+        "jerry chen",
+        "saam motamedi",
     ],
     "accel": [
         "accel partners",
@@ -55,6 +62,8 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     "redpoint": [
         "redpoint ventures",
         "redpoint",
+        "tomasz tunguz",  # Well-known Redpoint partner
+        "logan bartlett",
     ],
     "khosla": [
         "khosla ventures",
@@ -71,6 +80,8 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     "gv": [
         "google ventures",
         "gv ",  # Note the space to avoid matching "GV" in other contexts
+        "david krane",  # GV CEO
+        "mg siegler",
     ],
     "usv": [
         "union square ventures",
@@ -85,6 +96,8 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     "first_round": [
         "first round capital",
         "first round",
+        "josh kopelman",  # First Round founder
+        "phin barnes",
     ],
 }
 
