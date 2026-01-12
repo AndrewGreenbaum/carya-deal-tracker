@@ -166,10 +166,11 @@ ENTERPRISE_KEYWORDS = [
     "AI analytics startup", "enterprise search AI",
 ]
 
-# Lead investor phrases
+# Lead investor phrases - include past AND present tense variations
 LEAD_PHRASES = [
     "led by", "led the round", "led the investment",
-    "leading the round", "lead investor", "spearheaded by",
+    "leading the round", "leads the round", "leads the investment",
+    "lead investor", "spearheaded by", "co-led by",
 ]
 
 # Participation phrases
@@ -275,7 +276,8 @@ class BraveSearchScraper:
         exclusion_query = " ".join(exclusions) if exclusions else ""
 
         if query_type == "lead":
-            lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES[:3]])
+            # Use first 6 phrases to include present tense variations
+            lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES[:6]])
             query = f'({name_query}) AND ({lead_query}) AND ({funding_query})'
         else:
             participation_query = " OR ".join([f'"{phrase}"' for phrase in PARTICIPATION_PHRASES[:4]])
@@ -293,7 +295,8 @@ class BraveSearchScraper:
         else:
             keywords = " OR ".join([f'"{kw}"' for kw in ENTERPRISE_KEYWORDS[:6]])
 
-        lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES[:3]])
+        # Use first 6 phrases to include present tense variations
+        lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES[:6]])
         funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:4]])
         return f'({keywords}) AND ({funding_query}) AND ({lead_query})'
 
