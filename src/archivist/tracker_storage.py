@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 # Valid status values for Kanban columns
-VALID_STATUSES = {"watching", "reached_out", "in_conversation", "closing_spv"}
+VALID_STATUSES = {"watching", "reached_out", "in_conversation", "closing_spv", "spv_complete", "spv_rejected"}
 
 
 async def get_tracker_items(

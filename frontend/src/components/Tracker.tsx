@@ -37,7 +37,7 @@ import {
   deleteTrackerItem,
 } from '../api/deals';
 
-const COLUMNS: TrackerStatus[] = ['watching', 'reached_out', 'in_conversation', 'closing_spv'];
+const COLUMNS: TrackerStatus[] = ['watching', 'reached_out', 'in_conversation', 'closing_spv', 'spv_complete', 'spv_rejected'];
 
 export function Tracker() {
   const [items, setItems] = useState<TrackerItem[]>([]);

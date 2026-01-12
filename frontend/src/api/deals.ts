@@ -722,6 +722,8 @@ interface TrackerItemsApiResponse {
     reached_out: number;
     in_conversation: number;
     closing_spv: number;
+    spv_complete: number;
+    spv_rejected: number;
   };
 }
 
