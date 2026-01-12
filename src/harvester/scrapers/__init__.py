@@ -62,6 +62,9 @@ from .venturebeat import VentureBeatScraper, run_venturebeat_scraper
 from .axios_prorata import AxiosProRataScraper, run_axios_prorata_scraper
 from .strictlyvc import StrictlyVCScraper, run_strictlyvc_scraper
 
+# PR Wire RSS (PRNewswire, GlobeNewswire, BusinessWire)
+from .prwire_rss import PRWireRSSScraper, scrape_prwire_feeds
+
 __all__ = [
     # Original 5
     "A16ZScraper",
@@ -139,4 +142,7 @@ __all__ = [
     "run_axios_prorata_scraper",
     "StrictlyVCScraper",
     "run_strictlyvc_scraper",
+    # PR Wire RSS
+    "PRWireRSSScraper",
+    "scrape_prwire_feeds",
 ]

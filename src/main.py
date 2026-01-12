@@ -2614,6 +2614,22 @@ async def run_all_sources(
     except Exception:
         results["strictlyvc"] = None
 
+    # PR Wire RSS (always runs - free RSS from PRNewswire, GlobeNewswire, BusinessWire)
+    try:
+        from .harvester.scrapers.prwire_rss import PRWireRSSScraper
+        async with PRWireRSSScraper() as scraper:
+            articles = await scraper.scrape_all_feeds(hours_back=days * 24, fund_filter=True)
+        fund_matches = len([a for a in articles if a.fund_slug])
+        results["prwire"] = PRWireResponse(
+            feeds_scraped=5,
+            articles_found=len(articles),
+            funding_articles=len(articles),
+            fund_matches=fund_matches,
+        )
+    except Exception as e:
+        logger.warning(f"PR wire RSS error: {e}")
+        results["prwire"] = None
+
     # ----- Tier 1 Stealth Detection -----
 
     # Portfolio Diff (always runs - free, scrapes public portfolio pages)
