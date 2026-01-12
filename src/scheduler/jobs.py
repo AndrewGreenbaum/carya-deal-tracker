@@ -570,7 +570,23 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         logger.error("StrictlyVC scraping failed: %s", e)
         results["strictlyvc"] = {"error": str(e)}
 
-    # 12. DELAWARE CORPS (uses Brave Search - catches new tech company formations)
+    # 12. PR WIRE RSS (free - PRNewswire, GlobeNewswire, BusinessWire press releases)
+    try:
+        from ..harvester.scrapers.prwire_rss import PRWireRSSScraper
+
+        async with PRWireRSSScraper() as scraper:
+            # Use fund_filter=True to only process articles mentioning tracked funds
+            articles = await scraper.scrape_all_feeds(hours_back=days * 24, fund_filter=True)
+
+        stats = await process_external_articles(articles, "prwire")
+        results["prwire"] = stats
+        total_deals_saved += stats["deals_saved"]
+
+    except Exception as e:
+        logger.error("PR Wire RSS scraping failed: %s", e)
+        results["prwire"] = {"error": str(e)}
+
+    # 13. DELAWARE CORPS (uses Brave Search - catches new tech company formations)
     if settings.brave_search_key:
         try:
             from ..harvester.scrapers.delaware_corps import DelawareCorpsScraper
