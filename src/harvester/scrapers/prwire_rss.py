@@ -231,19 +231,14 @@ class PRWireRSSScraper:
         # Convert to NormalizedArticle
         normalized: List[NormalizedArticle] = []
         for article in all_articles:
-            # Use description as raw_text since we don't have full content yet
+            # Use description as text since we don't have full content yet
             # The full content will be fetched via Firecrawl or direct scrape
             normalized.append(NormalizedArticle(
                 title=article.title,
                 url=article.url,
-                raw_text=f"{article.title}\n\n{article.description}",
+                text=f"{article.title}\n\n{article.description}",
                 published_date=article.published_date.date() if article.published_date else None,
-                source=article.source,
-                scrape_quality={
-                    "has_full_text": False,  # Only have summary
-                    "source_type": "prwire_rss",
-                    "needs_full_scrape": True,
-                },
+                fund_slug=article.source,  # Use source as fund_slug for tracking
             ))
 
         return normalized
