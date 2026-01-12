@@ -259,6 +259,9 @@ export async function fetchSchedulerStatus(): Promise<SchedulerStatusResponse> {
     jobs: Array<{ id: string; name: string; next_run?: string }>;
   }>('/scheduler/status', false);
 
+  // Extract next_run from the first job (scheduled_scrape)
+  const nextRun = data.jobs.find((j) => j.id === 'scheduled_scrape')?.next_run;
+
   return {
     status: data.status as SchedulerStatusResponse['status'],
     jobs: data.jobs.map((j) => ({
@@ -266,6 +269,7 @@ export async function fetchSchedulerStatus(): Promise<SchedulerStatusResponse> {
       name: j.name,
       nextRun: j.next_run,
     })),
+    next_run: nextRun,
   };
 }
 
