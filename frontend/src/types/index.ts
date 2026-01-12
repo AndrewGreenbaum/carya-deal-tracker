@@ -347,7 +347,7 @@ export const STAGE_LABELS: Record<InvestmentStage, string> = {
 // Tracker CRM Types
 // ============================================
 
-export type TrackerStatus = 'watching' | 'reached_out' | 'in_conversation' | 'closing_spv';
+export type TrackerStatus = 'watching' | 'reached_out' | 'in_conversation' | 'closing_spv' | 'spv_complete' | 'spv_rejected';
 
 export interface TrackerItem {
   id: number;
@@ -372,6 +372,8 @@ export interface TrackerStats {
   reached_out: number;
   in_conversation: number;
   closing_spv: number;
+  spv_complete: number;
+  spv_rejected: number;
 }
 
 export interface TrackerItemsResponse {
@@ -385,6 +387,8 @@ export const TRACKER_STATUS_LABELS: Record<TrackerStatus, string> = {
   reached_out: 'Reached Out',
   in_conversation: 'In Conversation',
   closing_spv: 'Closing SPV',
+  spv_complete: 'SPV Complete',
+  spv_rejected: 'SPV Rejected',
 };
 
 export const TRACKER_STATUS_COLORS: Record<TrackerStatus, string> = {
@@ -392,6 +396,8 @@ export const TRACKER_STATUS_COLORS: Record<TrackerStatus, string> = {
   reached_out: 'blue',
   in_conversation: 'amber',
   closing_spv: 'emerald',
+  spv_complete: 'green',
+  spv_rejected: 'red',
 };
 
 // The 18 tracked funds (from backend registry)

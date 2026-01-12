@@ -543,6 +543,10 @@ async def save_deal(
     await session.flush()
 
     # Add lead investors
+    # FIX: Respect verification result - if _verify_tracked_fund() rejected the lead claim
+    # (snippet lacks "led by" language), save investors as non-leads
+    is_verified_lead = extraction.tracked_fund_is_lead
+
     for investor in extraction.lead_investors:
         fund = None
         # Use centralized fund matcher (handles variants + negative keywords)
@@ -554,7 +558,7 @@ async def save_deal(
             deal_id=deal.id,
             fund_id=fund.id if fund else None,
             investor_name=investor.name,
-            is_lead=True,
+            is_lead=is_verified_lead,  # Respect verification result, not always True
             is_tracked_fund=fund is not None,  # Use actual match result
             partner_name=investor.partner_name,
             role=investor.role.value,

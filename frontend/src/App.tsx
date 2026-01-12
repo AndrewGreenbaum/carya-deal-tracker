@@ -24,6 +24,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Tracker } from './components/Tracker';
 import { AdminFeedback } from './components/AdminFeedback';
+import { TokenUsage } from './components/TokenUsage';
 import {
   fetchDeals,
   fetchFunds,
@@ -93,6 +94,11 @@ const sampleDeals: Deal[] = [
 ];
 
 function App() {
+  // Check for usage dashboard URL (no password)
+  if (window.location.pathname === '/usage') {
+    return <TokenUsage />;
+  }
+
   // Check for admin page URL
   if (window.location.pathname === '/admin') {
     return <AdminFeedback />;

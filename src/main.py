@@ -378,8 +378,8 @@ async def get_token_usage(
         from sqlalchemy import cast, Date
 
         async with get_session() as session:
-            # Calculate date range
-            end_date = datetime.now(timezone.utc)
+            # Calculate date range (use naive datetime for DB compatibility)
+            end_date = datetime.now(timezone.utc).replace(tzinfo=None)
             start_date = end_date - timedelta(days=days)
 
             # Query all token usage in date range
