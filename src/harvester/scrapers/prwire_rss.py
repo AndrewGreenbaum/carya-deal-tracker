@@ -4,7 +4,8 @@ PR Wire RSS Feed Scraper.
 Scrapes RSS feeds from PR distribution services where funding announcements are published:
 - PRNewswire (prnewswire.com)
 - GlobeNewswire (globenewswire.com)
-- BusinessWire (businesswire.com)
+
+Note: BusinessWire deprecated their public RSS feeds (require authenticated PressPass).
 
 These services are the primary distribution channels for official funding press releases.
 The Brave News API often misses these - RSS feeds provide direct access.
@@ -37,13 +38,8 @@ GLOBENEWSWIRE_FEEDS = [
     "https://www.globenewswire.com/RssFeed/subjectcode/26-Mergers%20and%20Acquisitions/feedTitle/GlobeNewswire%20-%20Mergers%20and%20Acquisitions",
 ]
 
-# BusinessWire feeds
-BUSINESSWIRE_FEEDS = [
-    "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeEFxTWg==",  # All business news
-]
-
-# All feeds combined
-ALL_PR_FEEDS = PRNEWSWIRE_FEEDS + GLOBENEWSWIRE_FEEDS + BUSINESSWIRE_FEEDS
+# All feeds combined (BusinessWire deprecated public RSS - requires PressPass auth)
+ALL_PR_FEEDS = PRNEWSWIRE_FEEDS + GLOBENEWSWIRE_FEEDS
 
 
 # Keywords to filter funding-related press releases

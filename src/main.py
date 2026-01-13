@@ -2260,7 +2260,7 @@ async def run_strictlyvc_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# ----- PR Wire RSS (PRNewswire, GlobeNewswire, BusinessWire) -----
+# ----- PR Wire RSS (PRNewswire, GlobeNewswire) -----
 
 class PRWireResponse(BaseModel):
     feeds_scraped: int
@@ -2280,8 +2280,9 @@ async def run_prwire_endpoint(
 
     Scrapes official funding press releases from:
     - PRNewswire (venture capital category)
-    - GlobeNewswire (financing agreements)
-    - BusinessWire (all business news)
+    - GlobeNewswire (financing agreements + M&A)
+
+    Note: BusinessWire deprecated public RSS (requires authenticated PressPass).
 
     These are the PRIMARY sources for official funding announcements.
     FREE - uses public RSS feeds.
@@ -2298,7 +2299,7 @@ async def run_prwire_endpoint(
         fund_matches = len([a for a in articles if a.fund_slug])
 
         return PRWireResponse(
-            feeds_scraped=5,  # 1 PRNewswire + 2 GlobeNewswire + 2 BusinessWire feeds
+            feeds_scraped=3,  # 1 PRNewswire + 2 GlobeNewswire
             articles_found=len(articles),
             funding_articles=len(articles),  # All are funding-related after filter
             fund_matches=fund_matches,
@@ -2328,7 +2329,7 @@ class AllSourcesResponse(BaseModel):
     venturebeat: Optional[VentureBeatResponse] = None
     axios_prorata: Optional[AxiosProRataResponse] = None
     strictlyvc: Optional[StrictlyVCResponse] = None
-    prwire: Optional[PRWireResponse] = None  # PRNewswire, GlobeNewswire, BusinessWire
+    prwire: Optional[PRWireResponse] = None  # PRNewswire, GlobeNewswire
     # Tier 1 Stealth Detection
     portfolio_diff: Optional[PortfolioDiffResponse] = None
     uspto_trademarks: Optional[USPTOTrademarkResponse] = None
@@ -2614,14 +2615,14 @@ async def run_all_sources(
     except Exception:
         results["strictlyvc"] = None
 
-    # PR Wire RSS (always runs - free RSS from PRNewswire, GlobeNewswire, BusinessWire)
+    # PR Wire RSS (always runs - free RSS from PRNewswire, GlobeNewswire)
     try:
         from .harvester.scrapers.prwire_rss import PRWireRSSScraper
         async with PRWireRSSScraper() as scraper:
             articles = await scraper.scrape_all_feeds(hours_back=days * 24, fund_filter=True)
         fund_matches = len([a for a in articles if a.fund_slug])
         results["prwire"] = PRWireResponse(
-            feeds_scraped=5,
+            feeds_scraped=3,  # 1 PRNewswire + 2 GlobeNewswire
             articles_found=len(articles),
             funding_articles=len(articles),
             fund_matches=fund_matches,
