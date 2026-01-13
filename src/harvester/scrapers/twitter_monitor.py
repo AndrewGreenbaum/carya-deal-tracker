@@ -38,6 +38,7 @@ from ...config.settings import settings
 # Official Twitter/X handles for tracked VC funds
 # Only includes validated, working handles
 VC_TWITTER_HANDLES = {
+    # Fund accounts
     "benchmark": "benchmark",
     "sequoia": "sequoia",
     "index": "IndexVentures",
@@ -50,6 +51,17 @@ VC_TWITTER_HANDLES = {
     "accel": "Accel",
     "felicis": "FelicisVC",
     "first_round": "firstround",
+}
+
+# Partner accounts who actively tweet about deals
+# These are individual GPs who often announce investments before fund accounts
+VC_PARTNER_HANDLES = {
+    "benchmark_bgurley": "bgurley",         # Bill Gurley - VERY ACTIVE
+    "benchmark_sarahtavel": "sarahtavel",   # Sarah Tavel
+    "redpoint_ttunguz": "ttunguz",          # Tomasz Tunguz - VERY ACTIVE
+    "first_round_joshk": "joshk",           # Josh Kopelman
+    "greylock_reidhoffman": "reidhoffman",  # Reid Hoffman
+    "sequoia_amysun": "chasingamy",         # Amy Sun
 }
 
 # Search queries for funding news
@@ -352,12 +364,13 @@ class TwitterMonitor:
 
     async def monitor_vc_accounts(self, hours_back: int = 168) -> List[Tweet]:
         """
-        Monitor all tracked VC Twitter accounts.
+        Monitor all tracked VC Twitter accounts + key partner accounts.
 
         Returns funding-related tweets only.
         """
         all_tweets = []
 
+        # Monitor fund accounts
         for fund_slug, handle in VC_TWITTER_HANDLES.items():
             if not self._check_rate_limit():
                 break
@@ -365,6 +378,24 @@ class TwitterMonitor:
             tweets = await self.get_user_tweets(
                 username=handle,
                 max_results=20,
+                hours_back=hours_back,
+            )
+
+            # Filter for funding-related tweets
+            for tweet in tweets:
+                if self._is_funding_related(tweet.text):
+                    all_tweets.append(tweet)
+
+            await asyncio.sleep(1)  # Rate limiting
+
+        # Monitor individual partner accounts (often announce deals before fund accounts)
+        for partner_key, handle in VC_PARTNER_HANDLES.items():
+            if not self._check_rate_limit():
+                break
+
+            tweets = await self.get_user_tweets(
+                username=handle,
+                max_results=10,  # Fewer tweets per partner
                 hours_back=hours_back,
             )
 

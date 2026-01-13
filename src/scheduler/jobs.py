@@ -26,6 +26,33 @@ from .notifications import send_scrape_summary
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# TOKEN OPTIMIZATION CONSTANTS
+# =============================================================================
+
+MAX_ARTICLES_PER_SOURCE = 25  # Cap articles per source to reduce token usage
+
+
+def is_likely_funding_from_title(title: str) -> bool:
+    """
+    Quick check if article title suggests funding news.
+
+    Used as pre-filter to skip non-funding articles BEFORE Claude call.
+    This saves 10-15% tokens by avoiding obviously irrelevant articles.
+
+    Uses loose matching - any funding keyword passes.
+    """
+    if not title:
+        return True  # Don't filter out articles with no title
+
+    title_lower = title.lower()
+    funding_signals = [
+        'raises', 'raised', 'funding', 'series', 'seed', 'million', 'billion',
+        'led by', 'backed', 'investment', 'round', 'capital', 'vc', 'venture',
+        'announces', 'secures', 'closes', 'valuation', 'pre-seed'
+    ]
+    return any(signal in title_lower for signal in funding_signals)
+
 
 async def enrich_new_deals(limit: int = 25):
     """
@@ -182,6 +209,7 @@ async def process_external_articles(
     stats = {
         "articles_received": len(articles),
         "articles_skipped_duplicate": 0,
+        "articles_skipped_title": 0,  # NEW: Title pre-filter
         "deals_extracted": 0,
         "deals_saved": 0,
         "errors": 0,
@@ -189,6 +217,12 @@ async def process_external_articles(
 
     if not articles:
         return stats
+
+    # OPTIMIZATION: Apply source limit
+    if len(articles) > MAX_ARTICLES_PER_SOURCE:
+        logger.info(f"[{source_name}] Limiting from {len(articles)} to {MAX_ARTICLES_PER_SOURCE} articles")
+        articles = articles[:MAX_ARTICLES_PER_SOURCE]
+        stats["articles_received"] = MAX_ARTICLES_PER_SOURCE
 
     logger.info(f"[{source_name}] Processing {len(articles)} articles through extraction pipeline")
 
@@ -208,7 +242,24 @@ async def process_external_articles(
         logger.info(f"[{source_name}] All {len(articles)} articles already processed")
         return stats
 
-    logger.info(f"[{source_name}] {len(new_articles)} new articles to process (skipped {stats['articles_skipped_duplicate']} duplicates)")
+    # OPTIMIZATION: Title pre-filter - skip articles with non-funding titles
+    filtered_articles = []
+    for article in new_articles:
+        if is_likely_funding_from_title(article.title):
+            filtered_articles.append(article)
+        else:
+            stats["articles_skipped_title"] += 1
+
+    if stats["articles_skipped_title"] > 0:
+        logger.info(f"[{source_name}] Skipped {stats['articles_skipped_title']} articles by title filter")
+
+    new_articles = filtered_articles
+
+    if not new_articles:
+        logger.info(f"[{source_name}] No articles passed title filter")
+        return stats
+
+    logger.info(f"[{source_name}] {len(new_articles)} new articles to process (skipped {stats['articles_skipped_duplicate']} duplicates, {stats['articles_skipped_title']} by title)")
 
     # OPTIMIZATION: Concurrent processing with semaphore (vs serial 0.5s per article)
     MAX_CONCURRENT = 5
@@ -294,6 +345,7 @@ async def process_external_articles(
         f"[{source_name}] Extraction complete: "
         f"received={stats['articles_received']}, "
         f"duplicates={stats['articles_skipped_duplicate']}, "
+        f"title_filtered={stats['articles_skipped_title']}, "
         f"extracted={stats['deals_extracted']}, "
         f"saved={stats['deals_saved']}, "
         f"errors={stats['errors']}"

@@ -33,6 +33,9 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
         "sarah tavel",
         "peter fenton",
         "eric vishria",
+        "chetan puttagunta",
+        "miles grimshaw",
+        "victor lazarte",
     ],
     "founders_fund": [
         "founders fund",
@@ -44,6 +47,9 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
         "reid hoffman",  # Co-founder LinkedIn, Greylock partner
         "jerry chen",
         "saam motamedi",
+        "david thacker",
+        "seth rosenberg",
+        "asheem chandna",
     ],
     "accel": [
         "accel partners",
@@ -64,6 +70,9 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
         "redpoint",
         "tomasz tunguz",  # Well-known Redpoint partner
         "logan bartlett",
+        "annie kadavy",
+        "scott raney",
+        "jason warner",
     ],
     "khosla": [
         "khosla ventures",
@@ -90,6 +99,9 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     "thrive": [
         "thrive capital",
         "josh kushner",  # Thrive's founder/GP
+        "kareem zaki",
+        "josh miller",
+        "nadia singer",
     ],
     "general_catalyst": [
         "general catalyst",
@@ -99,6 +111,10 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
         "first round",
         "josh kopelman",  # First Round founder
         "phin barnes",
+        "bill trenchard",
+        "rob hayes",
+        "howard morgan",
+        "todd jackson",
     ],
 }
 
@@ -173,6 +189,101 @@ NEGATIVE_KEYWORDS: dict[str, list[str]] = {
         # and shouldn't be excluded
     ],
 }
+
+
+# SEC legal entity patterns → fund slugs
+# SEC Form D filings use legal entity names, not public fund names
+SEC_ENTITY_PATTERNS: dict[str, list[str]] = {
+    "benchmark": [
+        "benchmark capital management",
+        "benchmark capital partners",
+    ],
+    "thrive": [
+        "thrive partners",
+        "tc group",  # Thrive Capital's legal name
+    ],
+    "greylock": [
+        "greylock partners",
+        "greylock xv",
+        "greylock xiv",
+        "greylock xiii",
+    ],
+    "redpoint": [
+        "redpoint omega",
+        "redpoint ventures",
+    ],
+    "first_round": [
+        "first round capital",
+        "first round lp",
+    ],
+    "a16z": [
+        "andreessen horowitz",
+        "ah capital",
+    ],
+    "sequoia": [
+        "sequoia capital",
+        "sc us",  # Sequoia Capital US
+    ],
+    "founders_fund": [
+        "founders fund",
+        "ff angel",
+    ],
+    "index": [
+        "index ventures",
+    ],
+    "insight": [
+        "insight partners",
+        "insight venture partners",
+    ],
+    "bessemer": [
+        "bessemer venture partners",
+        "bvp",
+    ],
+    "gv": [
+        "google ventures",
+        "gv ",
+    ],
+    "felicis": [
+        "felicis ventures",
+    ],
+    "general_catalyst": [
+        "general catalyst",
+    ],
+    "khosla": [
+        "khosla ventures",
+    ],
+    "menlo": [
+        "menlo ventures",
+    ],
+    "usv": [
+        "union square ventures",
+    ],
+    "accel": [
+        "accel partners",
+    ],
+}
+
+
+def match_sec_entity(entity_name: str) -> Optional[str]:
+    """
+    Match SEC legal entity name to fund slug.
+
+    SEC Form D filings list legal entity names like "Benchmark Capital Management V, L.P."
+    instead of public names like "Benchmark". This function maps those entities.
+
+    Args:
+        entity_name: The SEC entity name to match
+
+    Returns:
+        Fund slug if matched, None otherwise
+    """
+    if not entity_name:
+        return None
+    name_lower = entity_name.lower()
+    for slug, patterns in SEC_ENTITY_PATTERNS.items():
+        if any(p in name_lower for p in patterns):
+            return slug
+    return None
 
 
 def match_fund_name(investor_name: str) -> Optional[str]:

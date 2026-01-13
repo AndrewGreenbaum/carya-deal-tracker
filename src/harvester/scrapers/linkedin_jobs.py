@@ -35,13 +35,27 @@ STEALTH_JOB_QUERIES = [
     '"stealth startup" founding team AI',
     '"well-funded startup" hiring "AI"',
 
-    # VC-backed stealth (most valuable signals)
+    # VC-backed stealth (most valuable signals) - ALL 18 TRACKED FUNDS
     '"backed by Sequoia" stealth',
     '"backed by a16z" stealth',
     '"backed by Andreessen Horowitz" stealth',
     '"backed by Founders Fund" stealth',
     '"backed by Benchmark" stealth',
     '"backed by Greylock" stealth',
+    '"backed by Thrive" stealth',
+    '"backed by Thrive Capital" stealth',
+    '"backed by Redpoint" stealth',
+    '"backed by First Round" stealth',
+    '"backed by Index Ventures" stealth',
+    '"backed by Insight Partners" stealth',
+    '"backed by Bessemer" stealth',
+    '"backed by Felicis" stealth',
+    '"backed by General Catalyst" stealth',
+    '"backed by Khosla" stealth',
+    '"backed by Menlo Ventures" stealth',
+    '"backed by USV" stealth',
+    '"backed by GV" stealth',
+    '"backed by Accel" stealth',
 
     # Stealth funding announcements
     '"emerges from stealth" funding',
