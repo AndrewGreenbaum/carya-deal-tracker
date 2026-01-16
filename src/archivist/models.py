@@ -87,9 +87,10 @@ class Deal(SQLModel, table=True):
     lead_partner_name: Optional[str] = None  # Partner who led the deal
     verification_snippet: Optional[str] = None  # Exact quote proving lead status
 
-    # Enterprise AI classification
-    enterprise_category: Optional[str] = None  # infrastructure, security, vertical_saas, agentic, data_intelligence
+    # AI classification
+    enterprise_category: Optional[str] = None  # infrastructure, security, vertical_saas, agentic, data_intelligence, consumer_ai, gaming_ai, social_ai, not_ai
     is_enterprise_ai: bool = Field(default=False, index=True)  # True if B2B Enterprise AI (not consumer)
+    is_ai_deal: bool = Field(default=False, index=True)  # True if AI company (enterprise OR consumer)
 
     # Founders (stored as JSON list)
     founders_json: Optional[str] = None  # JSON: [{"name": "...", "title": "...", "linkedin_url": "..."}]

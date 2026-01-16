@@ -67,12 +67,25 @@ CACHED_SYSTEM_MESSAGE = [
 SYSTEM_PROMPT = """You are a VC analyst extracting funding deals from articles. Extract:
 1. Deal details (company, round, amount, date)
 2. Lead vs participating investors (with proof snippet)
-3. Whether company is Enterprise AI (B2B, not consumer)
+3. AI classification (enterprise, consumer, or not AI)
 4. If any TRACKED FUND led the round
 
-ENTERPRISE AI CLASSIFICATION
-INCLUDE (is_enterprise_ai=True): Infrastructure (LLMOps, MLOps, vector DBs), Security, Vertical SaaS (Healthcare/Finance/Legal/HR), Agentic (workflow automation), Data Intelligence (enterprise search)
-EXCLUDE (is_enterprise_ai=False): Consumer AI, gaming, crypto/blockchain/Web3/DeFi/NFT, social/dating apps. If unsure or crypto-related, default to NOT_ENTERPRISE.
+AI CLASSIFICATION (set is_ai_deal=True for ALL AI companies)
+
+ENTERPRISE AI (is_enterprise_ai=True, is_ai_deal=True):
+- infrastructure: LLMOps, MLOps, vector DBs, AI chips
+- security: AI-powered cybersecurity, threat detection
+- vertical_saas: AI for Healthcare/Finance/Legal/HR (B2B)
+- agentic: Workflow automation, AI agents for business
+- data_intelligence: Enterprise search, analytics
+
+CONSUMER AI (is_enterprise_ai=False, is_ai_deal=True):
+- consumer_ai: Consumer-facing AI apps, personal assistants, AI photo editors
+- gaming_ai: AI for games, game engines, AI-powered NPCs
+- social_ai: AI for social/dating apps, AI content creation for consumers
+
+NOT AI (is_enterprise_ai=False, is_ai_deal=False):
+- not_ai: Crypto/blockchain/Web3/DeFi/NFT, non-AI startups
 
 LEAD VERIFICATION (STRICT)
 LEAD phrases: "led by", "led the", "leads", "co-led", "headed by", "spearheaded"
@@ -205,15 +218,20 @@ async def log_token_usage(
                 estimated_cost_usd=cost
             )
             session.add(usage)
-            # Session commits on exit
+            await session.commit()  # Explicit commit to ensure data is saved
 
-        logger.debug(
-            f"Token usage logged: source={source}, input={input_tokens}, "
+        logger.info(
+            f"Token usage saved: source={source}, input={input_tokens}, "
             f"output={output_tokens}, cost=${cost:.4f}"
         )
     except Exception as e:
-        # Don't fail extraction if logging fails
-        logger.warning(f"Failed to log token usage: {e}")
+        # Don't fail extraction if logging fails, but log details for debugging
+        logger.error(f"Failed to log token usage: {e}", exc_info=True)
+        logger.error(
+            f"  Token logging params: source={source}, input={input_tokens}, "
+            f"output={output_tokens}, cache_read={cache_read_tokens}, "
+            f"cache_write={cache_write_tokens}, cost=${cost:.4f}"
+        )
 
 
 # Keywords that indicate funding content (for early exit optimization)
@@ -315,13 +333,13 @@ def is_likely_crypto_article(text: str) -> bool:
     PRE-CHECK: Detect if article is crypto-focused BEFORE calling Claude.
 
     Saves tokens by skipping crypto articles that would be rejected anyway.
-    Only triggers on HIGH crypto signal (4+ keywords) to avoid false positives.
+    Lowered threshold from 4 to 3 to catch more crypto articles earlier.
     """
     text_lower = text.lower()
     crypto_count = sum(1 for kw in CRYPTO_KEYWORDS if kw in text_lower)
 
-    # High threshold to avoid rejecting enterprise blockchain companies
-    if crypto_count >= 4:
+    # Lowered from 4 to 3 for more aggressive crypto filtering (saves ~10% tokens)
+    if crypto_count >= 3:
         logger.debug(f"Pre-check: Skipping crypto article ({crypto_count} keywords)")
         return True
 
@@ -561,8 +579,9 @@ async def extract_deal(
             tracked_fund_name=None,
             tracked_fund_role=None,
             tracked_fund_partner=None,
-            enterprise_category=EnterpriseCategory.NOT_ENTERPRISE,
+            enterprise_category=EnterpriseCategory.NOT_AI,
             is_enterprise_ai=False,
+            is_ai_deal=False,
             verification_snippet=None,
             confidence_score=0.1,
             thesis_drift_score=0.0,
@@ -595,14 +614,15 @@ async def extract_deal(
             tracked_fund_name=None,
             tracked_fund_role=None,
             tracked_fund_partner=None,
-            enterprise_category=EnterpriseCategory.NOT_ENTERPRISE,
+            enterprise_category=EnterpriseCategory.NOT_AI,
             is_enterprise_ai=False,
+            is_ai_deal=False,
             verification_snippet=None,
             confidence_score=0.1,
             thesis_drift_score=0.0,
             is_new_announcement=False,
             announcement_evidence=None,
-            announcement_rejection_reason="Crypto/blockchain article - not Enterprise AI",
+            announcement_rejection_reason="Crypto/blockchain article - not an AI company",
             reasoning=ChainOfThought(
                 verb_analysis="Crypto keywords detected",
                 lead_signals=[],
@@ -637,6 +657,7 @@ async def extract_deal(
                 # Extract cache tokens if available (Anthropic-specific)
                 cache_read = getattr(usage, 'cache_read_input_tokens', 0) or 0
                 cache_write = getattr(usage, 'cache_creation_input_tokens', 0) or 0
+                logger.info(f"Claude call tokens: in={usage.input_tokens}, out={usage.output_tokens}")
                 await log_token_usage(
                     input_tokens=usage.input_tokens,
                     output_tokens=usage.output_tokens,
@@ -645,18 +666,25 @@ async def extract_deal(
                     cache_read_tokens=cache_read,
                     cache_write_tokens=cache_write
                 )
+            else:
+                # Debug: log when completion doesn't have usage
+                logger.warning(
+                    f"No usage data in completion: type={type(completion)}, "
+                    f"has_usage={hasattr(completion, 'usage') if completion else 'N/A'}"
+                )
 
             # Post-process: verify tracked fund identification
             response = _verify_tracked_fund(response)
 
             # Post-process: detect and reclassify crypto deals
-            if response and response.is_enterprise_ai and _is_crypto_deal(response, article_text):
+            if response and response.is_ai_deal and _is_crypto_deal(response, article_text):
                 logger.info(
-                    f"Reclassifying {response.startup_name} as NOT_ENTERPRISE: "
+                    f"Reclassifying {response.startup_name} as NOT_AI: "
                     f"crypto/blockchain detected"
                 )
                 response.is_enterprise_ai = False
-                response.enterprise_category = EnterpriseCategory.NOT_ENTERPRISE
+                response.is_ai_deal = False
+                response.enterprise_category = EnterpriseCategory.NOT_AI
 
             # Post-process: validate company name isn't an article title
             if response and _looks_like_article_title(response.startup_name):
@@ -829,6 +857,7 @@ async def extract_article(
                 usage = completion.usage
                 cache_read = getattr(usage, 'cache_read_input_tokens', 0) or 0
                 cache_write = getattr(usage, 'cache_creation_input_tokens', 0) or 0
+                logger.info(f"Claude article tokens: in={usage.input_tokens}, out={usage.output_tokens}")
                 await log_token_usage(
                     input_tokens=usage.input_tokens,
                     output_tokens=usage.output_tokens,
@@ -837,6 +866,8 @@ async def extract_article(
                     cache_read_tokens=cache_read,
                     cache_write_tokens=cache_write
                 )
+            else:
+                logger.warning(f"No usage data in article completion: type={type(completion)}")
 
             # Post-process each deal
             for deal in response.deals:

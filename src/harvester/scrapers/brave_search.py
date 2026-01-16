@@ -408,17 +408,17 @@ class BraveSearchScraper:
         query_to_fund: Dict[str, Tuple[str, str]] = {}  # query -> (fund_slug, type)
 
         for fund_slug in FUND_SEARCH_NAMES.keys():
-            # Lead query
+            # Lead query (reduced from 20 to 12 for token savings)
             lead_query = self._build_fund_query(fund_slug, "lead")
             if lead_query:
-                queries.append((lead_query, "news", 20, freshness, False))
+                queries.append((lead_query, "news", 12, freshness, False))
                 query_to_fund[lead_query] = (fund_slug, "lead")
 
-            # Participation query
+            # Participation query (reduced from 20 to 12 for token savings)
             if include_participation:
                 part_query = self._build_fund_query(fund_slug, "participation")
                 if part_query:
-                    queries.append((part_query, "news", 20, freshness, False))
+                    queries.append((part_query, "news", 12, freshness, False))
                     query_to_fund[part_query] = (fund_slug, "participation")
 
         # Execute in parallel
@@ -454,7 +454,8 @@ class BraveSearchScraper:
 
         for fund_slug, partner_queries in PARTNER_QUERIES.items():
             for query in partner_queries:
-                queries.append((query, "news", 15, freshness, True))  # use_cache=True
+                # Reduced from 15 to 10 for token savings
+                queries.append((query, "news", 10, freshness, True))  # use_cache=True
                 query_to_fund[query] = fund_slug
 
         # Execute in parallel with caching
@@ -532,7 +533,8 @@ class BraveSearchScraper:
     ) -> List[BraveSearchResult]:
         """Search for Enterprise AI funding news."""
         query = self._build_enterprise_query()
-        return await self.search_news(query, count=50, freshness=freshness)
+        # Reduced from 50 to 30 for token savings
+        return await self.search_news(query, count=30, freshness=freshness)
 
     async def search_stealth(
         self,
@@ -540,7 +542,8 @@ class BraveSearchScraper:
     ) -> List[BraveSearchResult]:
         """Search for stealth startup funding news."""
         query = self._build_stealth_query()
-        return await self.search_news(query, count=30, freshness=freshness)
+        # Reduced from 30 to 20 for token savings
+        return await self.search_news(query, count=20, freshness=freshness)
 
     async def to_normalized_article(
         self,

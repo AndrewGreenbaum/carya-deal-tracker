@@ -535,6 +535,7 @@ async def save_deal(
         verification_snippet=extraction.verification_snippet,
         enterprise_category=extraction.enterprise_category.value if extraction.enterprise_category else None,
         is_enterprise_ai=extraction.is_enterprise_ai,
+        is_ai_deal=getattr(extraction, 'is_ai_deal', extraction.is_enterprise_ai),  # Fallback for backwards compat
         founders_json=founders_json,
         confidence_score=extraction.confidence_score,
         thesis_drift_score=extraction.thesis_drift_score,
@@ -625,6 +626,7 @@ async def get_deals(
     stage: Optional[str] = None,
     is_lead: Optional[bool] = None,
     is_enterprise_ai: Optional[bool] = None,
+    is_ai_deal: Optional[bool] = None,
     enterprise_category: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
@@ -637,6 +639,7 @@ async def get_deals(
         stage: Filter by round type (seed, series_a, etc.)
         is_lead: Filter by lead status (True = tracked fund led)
         is_enterprise_ai: Filter for Enterprise AI only (True = B2B AI)
+        is_ai_deal: Filter for all AI deals (True = any AI, enterprise or consumer)
         enterprise_category: Filter by category (infrastructure, security, etc.)
         limit: Max results
         offset: Pagination offset
@@ -648,6 +651,9 @@ async def get_deals(
 
     if is_lead is not None:
         stmt = stmt.where(Deal.is_lead_confirmed == is_lead)
+
+    if is_ai_deal is not None:
+        stmt = stmt.where(Deal.is_ai_deal == is_ai_deal)
 
     if is_enterprise_ai is not None:
         stmt = stmt.where(Deal.is_enterprise_ai == is_enterprise_ai)

@@ -30,28 +30,35 @@ logger = logging.getLogger(__name__)
 # TOKEN OPTIMIZATION CONSTANTS
 # =============================================================================
 
-MAX_ARTICLES_PER_SOURCE = 25  # Cap articles per source to reduce token usage
+MAX_ARTICLES_PER_SOURCE = 15  # Reduced from 25 to save ~340K tokens/run
 
 
 def is_likely_funding_from_title(title: str) -> bool:
     """
-    Quick check if article title suggests funding news.
+    Check if article title suggests funding news.
 
     Used as pre-filter to skip non-funding articles BEFORE Claude call.
-    This saves 10-15% tokens by avoiding obviously irrelevant articles.
-
-    Uses loose matching - any funding keyword passes.
+    Requires strong signal OR 2+ weak signals to reduce false positives.
     """
     if not title:
         return True  # Don't filter out articles with no title
 
     title_lower = title.lower()
-    funding_signals = [
-        'raises', 'raised', 'funding', 'series', 'seed', 'million', 'billion',
-        'led by', 'backed', 'investment', 'round', 'capital', 'vc', 'venture',
-        'announces', 'secures', 'closes', 'valuation', 'pre-seed'
+
+    # Strong signals (1 is enough)
+    strong_signals = [
+        'series a', 'series b', 'series c', 'series d', 'seed round',
+        'raises $', 'raised $', 'led by', 'funding round', 'pre-seed'
     ]
-    return any(signal in title_lower for signal in funding_signals)
+    if any(signal in title_lower for signal in strong_signals):
+        return True
+
+    # Weak signals (need 2+)
+    weak_signals = [
+        'funding', 'investment', 'venture', 'capital',
+        'million', 'billion', 'backed', 'round', 'investor'
+    ]
+    return sum(1 for signal in weak_signals if signal in title_lower) >= 2
 
 
 async def enrich_new_deals(limit: int = 25):
@@ -806,8 +813,8 @@ async def scheduled_scrape_job():
         # ===== PHASE 3: Enrich new deals =====
         # Always run enrichment to catch up on any missing data
         logger.info(f"[{job_id}] Phase 3: Starting automatic enrichment (website + LinkedIn)")
-        # Increased limit to 100 for aggressive coverage (was 50)
-        enriched = await enrich_new_deals(limit=200)
+        # Reduced from 200 to 50 to save Brave Search queries (150 fewer/run)
+        enriched = await enrich_new_deals(limit=50)
         logger.info(f"[{job_id}] Enrichment complete: {enriched} companies updated")
 
         # Send notification

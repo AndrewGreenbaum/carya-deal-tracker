@@ -309,9 +309,10 @@ class DealResponse(BaseModel):
     amount_invested: str
     date: str
     next_steps: Optional[str] = None
-    # Enterprise AI fields
+    # AI classification fields
     enterprise_category: Optional[str] = None
     is_enterprise_ai: bool = False
+    is_ai_deal: bool = False
     lead_investor: Optional[str] = None
     lead_partner: Optional[str] = None
     verification_snippet: Optional[str] = None
@@ -516,8 +517,9 @@ async def list_deals(
     fund_slug: Optional[str] = Query(None, description="Filter by fund slug"),
     stage: Optional[str] = Query(None, description="Filter by investment stage"),
     is_lead: Optional[bool] = Query(None, description="Filter by lead status (True = tracked fund led)"),
+    is_ai_deal: Optional[bool] = Query(None, description="Filter for all AI deals (True = any AI, enterprise or consumer)"),
     is_enterprise_ai: Optional[bool] = Query(None, description="Filter for Enterprise AI only (True = B2B AI)"),
-    enterprise_category: Optional[str] = Query(None, description="Filter by category (infrastructure, security, vertical_saas, agentic, data_intelligence)"),
+    enterprise_category: Optional[str] = Query(None, description="Filter by category (infrastructure, security, vertical_saas, agentic, data_intelligence, consumer_ai, gaming_ai, social_ai)"),
     search: Optional[str] = Query(None, description="Search by company name"),
     sort_direction: str = Query("desc", description="Sort by announced date: 'asc' or 'desc'"),
     limit: int = Query(50, ge=1, le=200, description="Max results to return"),
@@ -526,7 +528,8 @@ async def list_deals(
     """
     List tracked deals with pagination.
 
-    ENTERPRISE AI FILTER:
+    AI FILTERS:
+    - is_ai_deal=true: All AI deals (enterprise + consumer)
     - is_enterprise_ai=true: Only B2B Enterprise AI deals
     - enterprise_category: Filter by specific category
 
@@ -543,6 +546,8 @@ async def list_deals(
                 base_stmt = base_stmt.where(Deal.round_type == stage)
             if is_lead is not None:
                 base_stmt = base_stmt.where(Deal.is_lead_confirmed == is_lead)
+            if is_ai_deal is not None:
+                base_stmt = base_stmt.where(Deal.is_ai_deal == is_ai_deal)
             if is_enterprise_ai is not None:
                 base_stmt = base_stmt.where(Deal.is_enterprise_ai == is_enterprise_ai)
             if enterprise_category:
@@ -652,9 +657,10 @@ async def list_deals(
                     amount_invested=deal.amount or "Undisclosed",
                     date=deal.announced_date.isoformat() if deal.announced_date else "",
                     next_steps=None,
-                    # Enterprise AI fields
+                    # AI classification fields
                     enterprise_category=deal.enterprise_category,
                     is_enterprise_ai=deal.is_enterprise_ai,
+                    is_ai_deal=getattr(deal, 'is_ai_deal', deal.is_enterprise_ai),  # Fallback for older deals
                     lead_investor=lead_investor_name,
                     lead_partner=deal.lead_partner_name,
                     verification_snippet=deal.verification_snippet,
@@ -690,6 +696,7 @@ async def export_deals_csv(
     fund_slug: Optional[str] = Query(None, description="Filter by fund slug"),
     stage: Optional[str] = Query(None, description="Filter by investment stage"),
     is_lead: Optional[bool] = Query(None, description="Filter by lead status"),
+    is_ai_deal: Optional[bool] = Query(None, description="Filter for all AI deals"),
     is_enterprise_ai: Optional[bool] = Query(None, description="Filter for Enterprise AI only"),
     enterprise_category: Optional[str] = Query(None, description="Filter by category"),
 ):
@@ -718,6 +725,8 @@ async def export_deals_csv(
                 stmt = stmt.where(Deal.round_type == stage)
             if is_lead is not None:
                 stmt = stmt.where(Deal.is_lead_confirmed == is_lead)
+            if is_ai_deal is not None:
+                stmt = stmt.where(Deal.is_ai_deal == is_ai_deal)
             if is_enterprise_ai is not None:
                 stmt = stmt.where(Deal.is_enterprise_ai == is_enterprise_ai)
             if enterprise_category:
@@ -1117,6 +1126,7 @@ class SECEdgarResponse(BaseModel):
     filings_found: int
     filings_with_tracked_funds: int
     articles_generated: int
+    deals_saved: int = 0
 
 
 @app.post("/scrapers/sec-edgar", response_model=SECEdgarResponse)
@@ -1132,6 +1142,7 @@ async def run_sec_edgar_scraper(
     No API key required (public SEC data).
     """
     from .harvester.scrapers.sec_edgar import SECEdgarScraper
+    from .scheduler.jobs import process_external_articles
 
     try:
         async with SECEdgarScraper() as scraper:
@@ -1148,8 +1159,11 @@ async def run_sec_edgar_scraper(
                 seen_ciks.add(filing.cik)
 
                 # Fetch filing details (amount, industry, state, investors)
-                filing = await scraper.fetch_filing_details(filing)
-                await asyncio.sleep(0.2)  # Rate limit
+                # Note: fetch_filing_details has 1s rate limit built-in
+                result = await scraper.fetch_filing_details(filing)
+                if result is None:
+                    continue  # Skip filings with missing required data
+                filing = result
 
                 fund_slug = scraper.match_tracked_fund(filing)
                 if fund_slug:
@@ -1157,12 +1171,15 @@ async def run_sec_edgar_scraper(
                 article = await scraper.to_normalized_article(filing, fund_slug)
                 articles.append(article)
 
+        # Save articles to database (was missing - articles were discarded)
+        stats = await process_external_articles(articles, "sec_edgar")
         cache.invalidate("deals")
 
         return SECEdgarResponse(
             filings_found=len(filings),
             filings_with_tracked_funds=tracked_count,
             articles_generated=len(articles),
+            deals_saved=stats.get("deals_saved", 0),
         )
 
     except Exception as e:

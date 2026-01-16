@@ -36,13 +36,19 @@ class LeadStatus(str, Enum):
 
 
 class EnterpriseCategory(str, Enum):
-    """Enterprise AI categories for filtering B2B deals."""
+    """AI categories for filtering deals (both enterprise and consumer)."""
+    # Enterprise AI (B2B)
     INFRASTRUCTURE = "infrastructure"      # LLMOps, AI chips, MLOps, vector DBs
     SECURITY = "security"                  # AI-powered cybersecurity, threat detection
     VERTICAL_SAAS = "vertical_saas"        # AI for Healthcare, Finance, Legal, HR
     AGENTIC = "agentic"                    # Workflow automation, AI agents for teams
     DATA_INTELLIGENCE = "data_intelligence" # Enterprise search, analytics, knowledge mgmt
-    NOT_ENTERPRISE = "not_enterprise"      # Consumer AI - EXCLUDE from tracking
+    # Consumer AI (B2C)
+    CONSUMER_AI = "consumer_ai"            # Consumer-facing AI apps, personal assistants
+    GAMING_AI = "gaming_ai"                # AI for gaming, game engines, NPCs
+    SOCIAL_AI = "social_ai"                # AI for social/dating apps, content creation
+    # Non-AI
+    NOT_AI = "not_ai"                      # Not an AI company (crypto, non-AI startups)
 
 
 class FounderInfo(BaseModel):
@@ -196,14 +202,18 @@ class DealExtraction(BaseModel):
         description="Chain-of-thought reasoning for the extraction"
     )
 
-    # Enterprise AI Classification
+    # AI Classification
     enterprise_category: EnterpriseCategory = Field(
-        default=EnterpriseCategory.NOT_ENTERPRISE,
-        description="Category of enterprise AI (or NOT_ENTERPRISE for consumer)"
+        default=EnterpriseCategory.NOT_AI,
+        description="Category of AI deal (enterprise, consumer, or not_ai)"
     )
     is_enterprise_ai: bool = Field(
         default=False,
         description="True if B2B Enterprise AI company (not consumer)"
+    )
+    is_ai_deal: bool = Field(
+        default=False,
+        description="True if this is an AI company (enterprise OR consumer)"
     )
     verification_snippet: Optional[str] = Field(
         default=None,
