@@ -317,6 +317,13 @@ async def process_external_articles(
                             f"[{source_name}] Saved deal: {extraction.startup_name} "
                             f"(fund: {article.fund_slug or 'unknown'})"
                         )
+                    else:
+                        # FIX: Log when save_deal returns None (duplicate or validation failure)
+                        logger.warning(
+                            f"[{source_name}] save_deal returned None for {extraction.startup_name} "
+                            f"(confidence={extraction.confidence_score:.2f}, "
+                            f"is_new={extraction.is_new_announcement})"
+                        )
 
                 # Send alert AFTER transaction commits
                 if alert_info:
@@ -335,7 +342,11 @@ async def process_external_articles(
             except Exception as e:
                 async with results_lock:
                     stats["errors"] += 1
-                logger.warning(f"[{source_name}] Error processing article {article.url}: {e}")
+                # FIX: Changed to ERROR with stack trace for visibility
+                logger.error(
+                    f"[{source_name}] FAILED to save deal from {article.url}: {e}",
+                    exc_info=True
+                )
                 return None
 
     # Process all articles concurrently (limited by semaphore)

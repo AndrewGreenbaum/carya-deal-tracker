@@ -15,11 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 # Create async engine with connection pooling optimizations
+# FIX: Increased pool size to handle concurrent scraping (was 5/10, caused exhaustion)
 engine = create_async_engine(
     settings.database_url,
     echo=False,
-    pool_size=5,
-    max_overflow=10,
+    pool_size=20,         # Increased from 5 to handle concurrent operations
+    max_overflow=30,      # Increased from 10 (total max: 50 connections)
     pool_pre_ping=True,   # Detect stale connections before use
     pool_recycle=3600,    # Recycle connections every hour
     pool_timeout=30,      # Wait max 30s for connection from pool
