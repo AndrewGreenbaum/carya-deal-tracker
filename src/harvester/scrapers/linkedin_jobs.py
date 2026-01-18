@@ -185,22 +185,61 @@ class LinkedInJobsScraper:
                 return None
 
             # Extract company name from title or description
-            # Try common patterns in job titles
+            # FIX: Improved parsing with location filtering and better heuristics
             company_name = ""
+
+            # Common location keywords that appear after "at" (not company names)
+            location_keywords = {
+                'remote', 'hybrid', 'onsite', 'on-site', 'usa', 'us', 'uk',
+                'san francisco', 'new york', 'nyc', 'los angeles', 'la',
+                'seattle', 'austin', 'boston', 'chicago', 'denver', 'miami',
+                'london', 'berlin', 'paris', 'singapore', 'tokyo',
+                'california', 'texas', 'washington', 'massachusetts',
+            }
+
+            def is_likely_location(text: str) -> bool:
+                """Check if text is likely a location, not a company name."""
+                text_lower = text.lower().strip()
+                return any(loc in text_lower for loc in location_keywords)
+
             if " at " in title:
                 parts = title.split(" at ")
                 if len(parts) >= 2:
-                    company_name = parts[-1].split(" | ")[0].strip()
-            elif " - " in title:
+                    # Get last part, but skip if it looks like a location
+                    candidate = parts[-1].split(" | ")[0].strip()
+                    if is_likely_location(candidate) and len(parts) > 2:
+                        # Try second-to-last part instead
+                        candidate = parts[-2].split(" | ")[0].strip()
+                    if not is_likely_location(candidate):
+                        company_name = candidate
+
+            # Fallback to " - " pattern
+            if not company_name and " - " in title:
                 parts = title.split(" - ")
                 if len(parts) >= 2:
-                    company_name = parts[1].split(" | ")[0].strip()
-            elif ":" in title:
-                # FIX: Get part AFTER colon (company name), not before (job title)
-                # "ML Engineer: TechCorp" → "TechCorp" not "ML Engineer"
-                company_name = title.split(":")[-1].strip()
+                    # Second part is usually company, but check if first part is job title
+                    # "Software Engineer - TechCorp - Remote" → "TechCorp"
+                    for i in range(1, len(parts)):
+                        candidate = parts[i].split(" | ")[0].strip()
+                        if not is_likely_location(candidate):
+                            company_name = candidate
+                            break
 
-            # Fallback: use truncated title if no pattern matched
+            # Fallback to ":" pattern
+            if not company_name and ":" in title:
+                # "Hiring: DevOps at TechCorp" → check after colon
+                after_colon = title.split(":")[-1].strip()
+                # If "at" is in the part after colon, parse it
+                if " at " in after_colon:
+                    parts = after_colon.split(" at ")
+                    if len(parts) >= 2:
+                        candidate = parts[-1].split(" | ")[0].strip()
+                        if not is_likely_location(candidate):
+                            company_name = candidate
+                else:
+                    company_name = after_colon
+
+            # Final fallback: use truncated title if no pattern matched
             if not company_name and title:
                 company_name = title[:50] + "..." if len(title) > 50 else title
 

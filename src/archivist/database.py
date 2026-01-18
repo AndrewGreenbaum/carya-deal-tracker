@@ -2,6 +2,7 @@
 Database session management for async SQLAlchemy operations.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -12,6 +13,9 @@ from sqlmodel import SQLModel
 from ..config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Timeout for database commit operations (prevents hung transactions)
+COMMIT_TIMEOUT_SECONDS = 30
 
 
 # Create async engine with connection pooling optimizations
@@ -53,11 +57,18 @@ async def close_db():
 
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get an async database session."""
+    """Get an async database session with commit timeout protection."""
     async with async_session_factory() as session:
         try:
             yield session
-            await session.commit()
+            # FIX: Add timeout to commit to prevent hung transactions
+            # This protects against network issues or PostgreSQL unresponsiveness
+            try:
+                await asyncio.wait_for(session.commit(), timeout=COMMIT_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                logger.error(f"Database commit timeout after {COMMIT_TIMEOUT_SECONDS}s, rolling back")
+                await session.rollback()
+                raise
         except Exception as e:
             logger.error(f"Database session error, rolling back: {e}")
             await session.rollback()
@@ -73,7 +84,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_factory() as session:
         try:
             yield session
-            await session.commit()
+            # FIX: Add timeout to commit to prevent hung transactions
+            try:
+                await asyncio.wait_for(session.commit(), timeout=COMMIT_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                logger.error(f"Database commit timeout after {COMMIT_TIMEOUT_SECONDS}s, rolling back")
+                await session.rollback()
+                raise
         except Exception as e:
             logger.error(f"Database session error, rolling back: {e}")
             await session.rollback()
