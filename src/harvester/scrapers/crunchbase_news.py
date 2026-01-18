@@ -172,15 +172,23 @@ class CrunchbaseNewsScraper:
         return []
 
     async def fetch_all_feeds(self, hours_back: int = 168) -> List[CrunchbaseArticle]:
-        """Fetch all configured RSS feeds."""
+        """Fetch all configured RSS feeds in parallel."""
         all_articles = []
         seen_urls = set()
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
 
-        for category, feed_url in self.feeds.items():
-            articles = await self.fetch_feed(feed_url, category)
+        # OPTIMIZATION: Fetch all feeds in parallel instead of sequentially
+        tasks = [
+            self.fetch_feed(feed_url, category)
+            for category, feed_url in self.feeds.items()
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for article in articles:
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Feed fetch failed: {result}")
+                continue
+            for article in result:
                 if article.url in seen_urls:
                     continue
                 if article.published and article.published < cutoff:
@@ -188,8 +196,6 @@ class CrunchbaseNewsScraper:
 
                 seen_urls.add(article.url)
                 all_articles.append(article)
-
-            await asyncio.sleep(0.3)  # Rate limit
 
         logger.info(f"Fetched {len(all_articles)} unique articles from Crunchbase News")
         return all_articles

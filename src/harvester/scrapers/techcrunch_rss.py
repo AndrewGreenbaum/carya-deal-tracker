@@ -144,15 +144,22 @@ class TechCrunchScraper:
         return []
 
     async def fetch_all_feeds(self, hours_back: int = 168) -> List[TechCrunchArticle]:
-        """Fetch all configured RSS feeds."""
+        """Fetch all configured RSS feeds in parallel."""
         all_items = []
         seen_urls = set()
         # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
 
-        for feed_url in self.feeds:
-            items = await self.fetch_feed(feed_url)
-            for item in items:
+        # OPTIMIZATION: Fetch all feeds in parallel instead of sequentially
+        # (was: sequential with 0.5s delay = 1.5s minimum for 3 feeds)
+        tasks = [self.fetch_feed(feed_url) for feed_url in self.feeds]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Feed fetch failed: {result}")
+                continue
+            for item in result:
                 # Skip duplicates and old articles
                 if item.url in seen_urls:
                     continue
@@ -161,8 +168,6 @@ class TechCrunchScraper:
 
                 seen_urls.add(item.url)
                 all_items.append(item)
-
-            await asyncio.sleep(0.5)
 
         return all_items
 

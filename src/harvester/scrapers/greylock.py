@@ -13,7 +13,6 @@ This scraper extracts inline investment announcements and creates
 virtual article entries from the page content.
 """
 
-from datetime import date
 from typing import List, Optional
 import hashlib
 from bs4 import BeautifulSoup
@@ -115,11 +114,14 @@ class GreylockScraper(PlaywrightScraper):
                 author = author_el.get_text(strip=True)
 
             # Create article from inline content
+            # FIX: Use None for published_date instead of date.today()
+            # date.today() caused duplicate detection issues when same content
+            # was scraped on different days. Storage layer handles None dates.
             articles.append(RawArticle(
                 url=virtual_url,
                 title=title,
                 html=str(item),
-                published_date=date.today(),  # No dates on inline content
+                published_date=None,  # Inline content has no date - let storage handle
                 author=author,
                 tags=["greylock", "investment", company_name.lower()] if company_name else ["greylock", "investment"],
             ))

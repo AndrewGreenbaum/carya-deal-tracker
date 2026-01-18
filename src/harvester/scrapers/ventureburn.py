@@ -154,33 +154,27 @@ class VentureburnScraper:
         return []
 
     async def fetch_all_feeds(self, hours_back: int = 168) -> List[VentureburnArticle]:
-        """Fetch main feed and category feeds."""
+        """Fetch main feed and category feeds in parallel."""
         all_articles = []
         seen_urls = set()
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
 
-        # Main feed
-        main_articles = await self.fetch_feed(VENTUREBURN_FEEDS["main"])
-        for article in main_articles:
-            if article.url not in seen_urls:
-                if article.published and article.published < cutoff:
-                    continue
-                seen_urls.add(article.url)
-                all_articles.append(article)
+        # OPTIMIZATION: Fetch all feeds in parallel (main + categories)
+        all_feed_urls = [VENTUREBURN_FEEDS["main"]] + VENTUREBURN_CATEGORIES
+        tasks = [self.fetch_feed(url) for url in all_feed_urls]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Try category feeds (may not all exist)
-        for feed_url in VENTUREBURN_CATEGORIES:
-            await asyncio.sleep(0.3)
-            try:
-                articles = await self.fetch_feed(feed_url)
-                for article in articles:
-                    if article.url not in seen_urls:
-                        if article.published and article.published < cutoff:
-                            continue
-                        seen_urls.add(article.url)
-                        all_articles.append(article)
-            except Exception:
-                continue  # Category feed may not exist
+        for result in results:
+            if isinstance(result, Exception):
+                # Category feeds may not exist - log at debug level
+                logger.debug(f"Feed fetch failed (may not exist): {result}")
+                continue
+            for article in result:
+                if article.url not in seen_urls:
+                    if article.published and article.published < cutoff:
+                        continue
+                    seen_urls.add(article.url)
+                    all_articles.append(article)
 
         return all_articles
 
