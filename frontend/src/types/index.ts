@@ -21,7 +21,12 @@ export type EnterpriseCategory =
   | 'vertical_saas'
   | 'agentic'
   | 'data_intelligence'
-  | 'not_enterprise';
+  // Consumer AI categories
+  | 'consumer_ai'
+  | 'gaming_ai'
+  | 'social_ai'
+  // Non-AI
+  | 'not_ai';
 
 export type ScraperType = 'html' | 'rss' | 'playwright' | 'external' | 'dom_diff';
 
@@ -47,9 +52,10 @@ export interface Deal {
   amountInvested: string;
   date: string;
   nextSteps?: string;
-  // Enterprise AI fields
+  // AI classification fields
   enterpriseCategory?: EnterpriseCategory;
   isEnterpriseAi: boolean;
+  isAiDeal: boolean;
   leadInvestor?: string;
   leadPartner?: string;
   verificationSnippet?: string;
@@ -77,6 +83,7 @@ export interface DealFilters {
   fund_slug?: string;
   stage?: InvestmentStage;
   is_lead?: boolean;
+  is_ai_deal?: boolean;
   is_enterprise_ai?: boolean;
   enterprise_category?: EnterpriseCategory;
   search?: string;
@@ -255,7 +262,8 @@ export interface DashboardStats {
 }
 
 export interface FilterState {
-  enterpriseAiOnly: boolean;
+  aiDealsOnly: boolean;        // Show all AI deals (enterprise + consumer)
+  enterpriseAiOnly: boolean;   // Show only enterprise AI (B2B)
   leadOnly: boolean;
   showRejected: boolean;
   selectedFund?: string;
@@ -323,12 +331,18 @@ export interface ApiError {
 
 // Category display helpers
 export const CATEGORY_LABELS: Record<EnterpriseCategory, string> = {
+  // Enterprise AI
   infrastructure: 'Infrastructure',
   security: 'Security',
   vertical_saas: 'Vertical SaaS',
   agentic: 'Agentic',
   data_intelligence: 'Data Intelligence',
-  not_enterprise: 'Not Enterprise',
+  // Consumer AI
+  consumer_ai: 'Consumer AI',
+  gaming_ai: 'Gaming AI',
+  social_ai: 'Social AI',
+  // Non-AI
+  not_ai: 'Not AI',
 };
 
 export const STAGE_LABELS: Record<InvestmentStage, string> = {

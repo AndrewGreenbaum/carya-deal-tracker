@@ -180,7 +180,8 @@ interface DealRowProps {
 }
 
 const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
-  const isRejected = !deal.isEnterpriseAi || !deal.investorRoles.includes('lead');
+  // A deal is "rejected" if it's not an AI deal OR not led by a tracked fund
+  const isRejected = !deal.isAiDeal || !deal.investorRoles.includes('lead');
 
   return (
     <tr
@@ -260,12 +261,18 @@ function StageBadge({ stage, isRejected }: { stage: InvestmentStage; isRejected:
 }
 
 const CATEGORY_ICONS: Record<EnterpriseCategory, React.ReactNode> = {
+  // Enterprise AI
   infrastructure: <Cpu className="w-3 h-3 text-slate-400" />,
   security: <Shield className="w-3 h-3 text-slate-400" />,
   vertical_saas: <Building2 className="w-3 h-3 text-slate-400" />,
   agentic: <Bot className="w-3 h-3 text-slate-400" />,
   data_intelligence: <Database className="w-3 h-3 text-slate-400" />,
-  not_enterprise: <XCircle className="w-3 h-3 text-red-900" />,
+  // Consumer AI
+  consumer_ai: <Bot className="w-3 h-3 text-blue-400" />,
+  gaming_ai: <Bot className="w-3 h-3 text-purple-400" />,
+  social_ai: <Bot className="w-3 h-3 text-pink-400" />,
+  // Non-AI
+  not_ai: <XCircle className="w-3 h-3 text-red-900" />,
 };
 
 function CategoryBadge({
@@ -275,14 +282,27 @@ function CategoryBadge({
   category?: EnterpriseCategory;
   isRejected: boolean;
 }) {
-  const cat = category || 'not_enterprise';
-  const icon = CATEGORY_ICONS[cat];
+  const cat = category || 'not_ai';
+  const icon = CATEGORY_ICONS[cat] || CATEGORY_ICONS['not_ai'];
 
-  if (isRejected || cat === 'not_enterprise') {
+  // Check if it's a consumer AI category
+  const isConsumerAi = cat === 'consumer_ai' || cat === 'gaming_ai' || cat === 'social_ai';
+
+  if (isRejected || cat === 'not_ai') {
     return (
-      <div className="category-badge category-not_enterprise">
+      <div className="category-badge category-not_ai">
         {icon}
-        {category || 'consumer'}
+        {category || 'not ai'}
+      </div>
+    );
+  }
+
+  // Consumer AI gets a different style
+  if (isConsumerAi) {
+    return (
+      <div className={`category-badge category-consumer`}>
+        {icon}
+        {cat.replace('_', ' ')}
       </div>
     );
   }

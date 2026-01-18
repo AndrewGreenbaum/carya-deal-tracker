@@ -59,6 +59,7 @@ const sampleDeals: Deal[] = [
     date: '2025-01-15',
     enterpriseCategory: 'infrastructure',
     isEnterpriseAi: true,
+    isAiDeal: true,
     leadInvestor: 'Sequoia Capital',
     leadPartner: 'Roelof Botha',
     verificationSnippet: 'led by Sequoia Capital',
@@ -73,6 +74,7 @@ const sampleDeals: Deal[] = [
     date: '2025-02-20',
     enterpriseCategory: 'security',
     isEnterpriseAi: true,
+    isAiDeal: true,
     leadInvestor: 'a16z',
     verificationSnippet: 'Series B led by Andreessen Horowitz',
     sourceName: 'Fortune',
@@ -86,6 +88,7 @@ const sampleDeals: Deal[] = [
     date: '2025-03-01',
     enterpriseCategory: 'agentic',
     isEnterpriseAi: true,
+    isAiDeal: true,
     leadInvestor: 'Founders Fund',
     leadPartner: 'Keith Rabois',
     verificationSnippet: 'Founders Fund led the round',
@@ -122,9 +125,10 @@ function App() {
     hasMore: false,
   });
 
-  // Filter state - default to Enterprise AI + Lead only
+  // Filter state - default to All AI + Lead only
   const [filters, setFilters] = useState<FilterState>({
-    enterpriseAiOnly: true,
+    aiDealsOnly: true,        // Show all AI deals by default
+    enterpriseAiOnly: false,  // Don't restrict to enterprise only by default
     leadOnly: true,
     showRejected: false,
     selectedFund: undefined,
@@ -215,11 +219,12 @@ function App() {
       setLoading(true);
       try {
         // When showRejected is true, don't apply filters - show everything
-        // Otherwise, apply Enterprise AI and Lead filters to API call
+        // Otherwise, apply AI and Lead filters to API call
         const result = await fetchDeals({
           limit: PAGE_SIZE,
           offset,
           is_lead: filters.showRejected ? undefined : (filters.leadOnly ? true : undefined),
+          is_ai_deal: filters.showRejected ? undefined : (filters.aiDealsOnly ? true : undefined),
           is_enterprise_ai: filters.showRejected ? undefined : (filters.enterpriseAiOnly ? true : undefined),
           enterprise_category: filters.selectedCategory,
           fund_slug: filters.selectedFund,
@@ -282,7 +287,7 @@ function App() {
         setLoading(false);
       }
     },
-    [filters.enterpriseAiOnly, filters.leadOnly, filters.showRejected, filters.selectedCategory, filters.selectedFund, filters.sortDirection, debouncedSearch]
+    [filters.aiDealsOnly, filters.enterpriseAiOnly, filters.leadOnly, filters.showRejected, filters.selectedCategory, filters.selectedFund, filters.sortDirection, debouncedSearch]
   );
 
   // Initial load and reload on filter change
@@ -311,6 +316,7 @@ function App() {
   const handleExport = () => {
     const url = getExportUrl({
       is_lead: filters.leadOnly ? true : undefined,
+      is_ai_deal: filters.aiDealsOnly ? true : undefined,
       is_enterprise_ai: filters.enterpriseAiOnly ? true : undefined,
       enterprise_category: filters.selectedCategory,
       fund_slug: filters.selectedFund,

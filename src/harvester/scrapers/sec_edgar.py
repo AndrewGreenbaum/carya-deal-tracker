@@ -36,9 +36,6 @@ SEC_RETRY_BACKOFF = 2.0  # Exponential backoff multiplier
 # SEC EDGAR Atom feed for recent Form D filings
 SEC_FORM_D_FEED = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=D&output=atom"
 
-# Alternative: RSS feed for all recent filings
-SEC_RECENT_FILINGS = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=D&company=&dateb=&owner=include&count=100&output=atom"
-
 # FIX #47: Fund patterns now consolidated in fund_matcher.py
 
 # Industries likely to be VC-backed (for stealth detection)
@@ -150,6 +147,10 @@ class SECEdgarScraper:
 
                 # Parse Atom feed
                 feed = feedparser.parse(response.text)
+
+                # Check for malformed feed
+                if feed.bozo and feed.bozo_exception:
+                    logger.warning(f"SEC EDGAR malformed feed: {feed.bozo_exception}")
 
                 filings = []
                 # FIX: Use timezone-aware datetime (utcnow() is deprecated in Python 3.12+)

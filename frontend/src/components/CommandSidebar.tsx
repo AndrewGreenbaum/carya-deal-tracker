@@ -36,10 +36,28 @@ export function CommandSidebar({
 
   const toggleFilter = (key: keyof FilterState) => {
     if (key === 'selectedFund' || key === 'selectedCategory' || key === 'searchQuery' || key === 'sortDirection') return;
-    onFiltersChange({
-      ...filters,
-      [key]: !filters[key],
-    });
+
+    // Handle mutual exclusivity between aiDealsOnly and enterpriseAiOnly
+    if (key === 'enterpriseAiOnly' && !filters.enterpriseAiOnly) {
+      // Turning on Enterprise AI Only implies All AI
+      onFiltersChange({
+        ...filters,
+        aiDealsOnly: true,
+        enterpriseAiOnly: true,
+      });
+    } else if (key === 'aiDealsOnly' && filters.aiDealsOnly) {
+      // Turning off All AI also turns off Enterprise AI Only
+      onFiltersChange({
+        ...filters,
+        aiDealsOnly: false,
+        enterpriseAiOnly: false,
+      });
+    } else {
+      onFiltersChange({
+        ...filters,
+        [key]: !filters[key],
+      });
+    }
   };
 
   const setCategory = (category: EnterpriseCategory | undefined) => {
@@ -119,6 +137,11 @@ export function CommandSidebar({
         </div>
         <div className="space-y-2">
           <FilterCheckbox
+            label="All AI Deals"
+            checked={filters.aiDealsOnly}
+            onChange={() => toggleFilter('aiDealsOnly')}
+          />
+          <FilterCheckbox
             label="Enterprise AI Only"
             checked={filters.enterpriseAiOnly}
             onChange={() => toggleFilter('enterpriseAiOnly')}
@@ -163,7 +186,7 @@ export function CommandSidebar({
                   All Categories
                 </button>
                 {(Object.keys(CATEGORY_LABELS) as EnterpriseCategory[])
-                  .filter((c) => c !== 'not_enterprise')
+                  .filter((c) => c !== 'not_ai')
                   .map((category) => (
                     <button
                       key={category}

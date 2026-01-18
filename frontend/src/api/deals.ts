@@ -166,6 +166,7 @@ interface DealApiResponse {
   next_steps?: string;
   enterprise_category?: string;
   is_enterprise_ai: boolean;
+  is_ai_deal: boolean;
   lead_investor?: string;
   lead_partner?: string;
   verification_snippet?: string;
@@ -205,6 +206,7 @@ function mapDeal(api: DealApiResponse): Deal {
     nextSteps: api.next_steps,
     enterpriseCategory: api.enterprise_category as EnterpriseCategory | undefined,
     isEnterpriseAi: api.is_enterprise_ai ?? false,
+    isAiDeal: api.is_ai_deal ?? api.is_enterprise_ai ?? false,  // Fallback for backwards compat
     leadInvestor: api.lead_investor,
     leadPartner: api.lead_partner,
     verificationSnippet: api.verification_snippet,
@@ -320,6 +322,7 @@ export async function fetchDeals(filters: DealFilters = {}): Promise<PaginatedDe
   if (filters.stage) params.set('stage', filters.stage);
   if (filters.is_lead !== undefined) params.set('is_lead', filters.is_lead.toString());
   if (filters.fund_slug) params.set('fund_slug', filters.fund_slug);
+  if (filters.is_ai_deal !== undefined) params.set('is_ai_deal', filters.is_ai_deal.toString());
   if (filters.is_enterprise_ai !== undefined) params.set('is_enterprise_ai', filters.is_enterprise_ai.toString());
   if (filters.enterprise_category) params.set('enterprise_category', filters.enterprise_category);
   if (filters.search) params.set('search', filters.search);
@@ -341,6 +344,7 @@ export function getExportUrl(filters: Omit<DealFilters, 'limit' | 'offset'> = {}
   if (filters.stage) params.set('stage', filters.stage);
   if (filters.is_lead !== undefined) params.set('is_lead', filters.is_lead.toString());
   if (filters.fund_slug) params.set('fund_slug', filters.fund_slug);
+  if (filters.is_ai_deal !== undefined) params.set('is_ai_deal', filters.is_ai_deal.toString());
   if (filters.is_enterprise_ai !== undefined) params.set('is_enterprise_ai', filters.is_enterprise_ai.toString());
   if (filters.enterprise_category) params.set('enterprise_category', filters.enterprise_category);
 

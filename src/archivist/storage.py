@@ -311,28 +311,30 @@ async def find_duplicate_deal(
     )
 
     # Date filter with fallback for missing dates - 1-year window
+    # FIX: Use timezone-aware datetimes to match database (asyncpg requires consistency)
     if announced_date:
         # Look within 30 days of the announced date
         date_start = announced_date - timedelta(days=30)
         date_end = announced_date + timedelta(days=30)
         # Include deals with matching date OR deals with NULL date (recent ones)
-        recent_cutoff = date.today() - timedelta(days=365)  # 1 year
+        recent_cutoff_dt = datetime.now(timezone.utc) - timedelta(days=365)  # 1 year, timezone-aware
         stmt = stmt.where(
             or_(
                 Deal.announced_date.between(date_start, date_end),
                 # Also check deals with NULL date created recently
-                (Deal.announced_date.is_(None) & (Deal.created_at >= datetime.combine(recent_cutoff, datetime.min.time())))
+                (Deal.announced_date.is_(None) & (Deal.created_at >= recent_cutoff_dt))
             )
         )
     else:
         # No date provided: only look at recent deals (last 1 year / 365 days)
         # This prevents matching against ancient deals
         recent_cutoff = date.today() - timedelta(days=365)
+        recent_cutoff_dt = datetime.now(timezone.utc) - timedelta(days=365)  # timezone-aware
         stmt = stmt.where(
             or_(
                 Deal.announced_date >= recent_cutoff,
                 # Also include NULL dates created recently
-                (Deal.announced_date.is_(None) & (Deal.created_at >= datetime.combine(recent_cutoff, datetime.min.time())))
+                (Deal.announced_date.is_(None) & (Deal.created_at >= recent_cutoff_dt))
             )
         )
 
