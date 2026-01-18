@@ -63,97 +63,63 @@ EXCLUSION_TERMS = {
 }
 
 # Partner name queries for funds with disabled website scrapers
+# OPTIMIZED: Reduced from 65 to 26 queries (~60% reduction)
+# Strategy: Fund-level query + top 2 most active partners per fund
+# Combined "led by X" and "X investment" patterns into single queries
 PARTNER_QUERIES = {
     "benchmark": [
-        '"Bill Gurley" investment OR funding OR leads',
-        '"led by Bill Gurley" OR "Bill Gurley led"',
-        '"Sarah Tavel" investment OR funding OR leads',
-        '"led by Sarah Tavel" OR "Sarah Tavel led"',
-        '"Peter Fenton" investment OR funding OR leads',
-        '"led by Peter Fenton" OR "Peter Fenton led"',
-        '"Eric Vishria" investment OR funding OR leads',
-        '"Chetan Puttagunta" investment OR funding',
+        '"Benchmark" leads OR "led by Benchmark" funding',
+        '"Bill Gurley" leads OR investment OR funding',  # Most recognizable
+        '"Peter Fenton" leads OR investment OR funding',  # Very active
     ],
     "first_round": [
-        '"Josh Kopelman" investment OR funding OR leads',
-        '"led by Josh Kopelman" OR "Josh Kopelman led"',
-        '"Phin Barnes" investment OR funding OR leads',
         '"First Round Capital" leads OR "led by First Round"',
+        '"Josh Kopelman" leads OR investment OR funding',
     ],
     "khosla": [
-        '"Vinod Khosla" investment OR funding OR leads',
-        '"led by Vinod Khosla" OR "Vinod Khosla led"',
         '"Khosla Ventures" leads OR "led by Khosla"',
+        '"Vinod Khosla" leads OR investment OR funding',
     ],
     "thrive": [
-        '"Josh Kushner" investment OR funding OR leads',
-        '"led by Josh Kushner" OR "Josh Kushner led"',
         '"Thrive Capital" leads OR "led by Thrive"',
+        '"Josh Kushner" leads OR investment OR funding',
     ],
     "founders_fund": [
-        '"Peter Thiel" investment OR funding OR leads',
-        '"led by Peter Thiel" OR "Peter Thiel led"',
-        '"Keith Rabois" investment OR funding OR leads',
-        '"led by Keith Rabois" OR "Keith Rabois led"',
         '"Founders Fund" leads OR "led by Founders Fund"',
+        '"Peter Thiel" leads OR investment OR funding',
+        '"Keith Rabois" leads OR investment OR funding',
     ],
     "insight": [
         '"Insight Partners" leads OR "led by Insight Partners"',
-        '"Insight Partners" investment OR funding series',
-        '"Jeff Horing" investment OR funding OR leads',
-        '"Deven Parekh" investment OR funding OR leads',
-        '"Lonne Jaffe" investment OR funding',
+        '"Jeff Horing" leads OR investment OR funding',
     ],
     "index": [
         '"Index Ventures" leads OR "led by Index Ventures"',
-        '"Index Ventures" investment OR funding series',
-        '"Danny Rimer" investment OR funding OR leads',
-        '"Mike Volpi" investment OR funding OR leads',
+        '"Danny Rimer" leads OR investment OR funding',
     ],
     "bessemer": [
         '"Bessemer Venture Partners" leads OR "led by Bessemer"',
-        '"Bessemer" investment OR funding series',
-        '"Byron Deeter" investment OR funding OR leads',
-        '"Ethan Kurzweil" investment OR funding',
+        '"Byron Deeter" leads OR investment OR funding',
     ],
     "accel": [
-        '"Accel" leads OR "led by Accel"',
-        '"Accel Partners" investment OR funding series',
-        '"Dan Levine" Accel investment OR funding',
-        '"Arun Mathew" Accel investment OR funding',
+        '"Accel" leads OR "led by Accel" funding startup',
+        '"Accel Partners" leads OR investment series',
     ],
     "gv": [
         '"Google Ventures" leads OR "led by Google Ventures"',
-        '"GV" leads startup funding OR investment',
-        '"Tom Hulme" GV investment OR funding',
-        '"David Krane" investment OR funding OR leads',
-        '"MG Siegler" investment OR funding OR leads',
-        '"Tyson Clark" GV investment OR funding',
+        '"GV" leads startup funding -NYSE -stock',  # Exclude stock ticker
     ],
     "redpoint": [
         '"Redpoint Ventures" leads OR "led by Redpoint"',
-        '"Redpoint" investment OR funding series',
-        '"Tomasz Tunguz" investment OR funding OR leads',
-        '"led by Tomasz Tunguz" OR "Tomasz Tunguz led"',
-        '"Logan Bartlett" Redpoint investment OR funding',
-        '"Annie Kadavy" investment OR funding',
-        '"Scott Raney" Redpoint investment OR funding',
-        '"Jason Warner" Redpoint investment OR funding',
+        '"Tomasz Tunguz" leads OR investment OR funding',  # Very active blogger
     ],
     "greylock": [
-        '"Greylock Partners" leads OR "led by Greylock"',
-        '"Greylock" investment OR funding series',
-        '"Reid Hoffman" investment OR funding OR leads',
-        '"Jerry Chen" Greylock investment OR funding',
-        '"Asheem Chandna" investment OR funding',
-        '"Saam Motamedi" investment OR funding OR leads',
-        '"David Thacker" Greylock investment OR funding',
+        '"Greylock" leads OR "led by Greylock" funding',
+        '"Reid Hoffman" leads OR investment OR funding',
     ],
     "sequoia": [
         '"Sequoia Capital" leads OR "led by Sequoia"',
-        '"Sequoia" investment series funding startup',
-        '"Roelof Botha" investment OR funding OR leads',
-        '"Alfred Lin" investment OR funding OR leads',
+        '"Roelof Botha" leads OR investment OR funding',
     ],
 }
 

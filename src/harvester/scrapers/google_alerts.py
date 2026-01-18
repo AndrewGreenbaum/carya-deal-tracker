@@ -135,12 +135,21 @@ class GoogleAlertsScraper:
             for f in feeds_str.split(','):
                 url = f.strip()
                 if url:
-                    # FIX #16: Use urlparse to validate URL has scheme and netloc (domain)
+                    # FIX: Validate URL format and domain
                     parsed = urlparse(url)
-                    if parsed.scheme in ('http', 'https') and parsed.netloc:
-                        feeds.append(url)
-                    else:
+                    if not (parsed.scheme in ('http', 'https') and parsed.netloc):
                         logger.warning(f"Invalid Google Alerts feed URL (missing scheme or domain): {url}")
+                        continue
+
+                    # FIX: Verify it's a Google Alerts feed URL
+                    # Valid formats: google.com/alerts, google.*/alerts
+                    if 'google' not in parsed.netloc.lower() or '/alerts' not in url.lower():
+                        logger.warning(
+                            f"URL may not be a Google Alerts feed (expected google.com/alerts): {url}"
+                        )
+                        # Still add it but warn - could be intentional
+
+                    feeds.append(url)
             return feeds
         return []
 

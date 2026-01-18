@@ -152,6 +152,8 @@ class TwitterMonitor:
                 return []
 
             if user_response.status_code != 200:
+                # FIX: Log unexpected status codes instead of silent failure
+                logger.warning(f"Twitter API: Unexpected status {user_response.status_code} for @{username}")
                 return []
 
             # FIX: Handle JSON parse errors
@@ -162,6 +164,8 @@ class TwitterMonitor:
                 return []
 
             if "data" not in user_data:
+                # FIX: Log when user not found instead of silent failure
+                logger.warning(f"Twitter API: User @{username} not found or suspended")
                 return []
 
             # FIX: Use .get() to prevent KeyError
@@ -188,6 +192,8 @@ class TwitterMonitor:
             )
 
             if tweets_response.status_code != 200:
+                # FIX: Log status code instead of silent failure
+                logger.warning(f"Twitter API: Failed to fetch tweets for @{username} (status {tweets_response.status_code})")
                 return []
 
             self._request_count += 1

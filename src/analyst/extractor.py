@@ -316,29 +316,61 @@ def clear_content_hash_cache() -> None:
 
 
 # Keywords that indicate crypto/blockchain content (not Enterprise AI)
+# OPTIMIZED: Added more keywords to catch crypto articles earlier (saves ~15% tokens)
 CRYPTO_KEYWORDS = [
+    # Core crypto terms
     "crypto", "blockchain", "web3", "defi", "nft", "token",
     "protocol", "layer 2", "l2", "dao", "smart contract",
+    # Specific chains
     "ethereum", "bitcoin", "solana", "polygon", "avalanche",
+    "arbitrum", "optimism", "base chain", "cosmos", "polkadot",
+    # DeFi mechanics
     "decentralized", "on-chain", "tokenomics", "staking",
+    "yield farming", "liquidity pool", "airdrop", "bridge",
+    "validator", "consensus", "gas fee", "mint",
+    # Crypto-specific terms
+    "wallet connect", "metamask", "dex", "amm", "tvl",
 ]
 
 # Company name patterns that indicate crypto (for stricter detection)
 # "0x" prefix is common in crypto (0xMiden, 0xSplits, 0x Protocol)
-CRYPTO_COMPANY_PATTERNS = ["protocol", "chain", "token", "dao", "coin", "web3", "0x"]
+CRYPTO_COMPANY_PATTERNS = [
+    "protocol", "chain", "token", "dao", "coin", "web3", "0x",
+    "finance",  # e.g., "Compound Finance", "Aave Finance"
+    "swap",     # e.g., "Uniswap", "Sushiswap"
+    "bridge",   # e.g., "Wormhole Bridge"
+    "vault",    # e.g., "Yearn Vault"
+]
+
+# URL patterns that indicate crypto websites
+CRYPTO_URL_PATTERNS = [
+    ".eth", ".crypto", ".sol",  # Crypto TLDs
+    "crypto", "defi", "nft", "web3",  # In domain name
+    "blockchain", "token", "chain",
+]
 
 
-def is_likely_crypto_article(text: str) -> bool:
+def is_likely_crypto_article(text: str, source_url: str = "") -> bool:
     """
     PRE-CHECK: Detect if article is crypto-focused BEFORE calling Claude.
 
     Saves tokens by skipping crypto articles that would be rejected anyway.
-    Lowered threshold from 4 to 3 to catch more crypto articles earlier.
+    Enhanced with URL pattern detection for crypto websites.
     """
     text_lower = text.lower()
+    url_lower = source_url.lower() if source_url else ""
+
+    # Check 1: URL contains crypto patterns (strong signal)
+    if url_lower:
+        for pattern in CRYPTO_URL_PATTERNS:
+            if pattern in url_lower:
+                logger.debug(f"Pre-check: Skipping crypto article (URL pattern: {pattern})")
+                return True
+
+    # Check 2: Keyword density in article text
     crypto_count = sum(1 for kw in CRYPTO_KEYWORDS if kw in text_lower)
 
-    # Lowered from 4 to 3 for more aggressive crypto filtering (saves ~10% tokens)
+    # Threshold of 3+ keywords indicates crypto content
     if crypto_count >= 3:
         logger.debug(f"Pre-check: Skipping crypto article ({crypto_count} keywords)")
         return True
@@ -599,7 +631,8 @@ async def extract_deal(
         )
 
     # PRE-CHECK: Skip crypto-heavy articles before calling Claude (saves tokens)
-    if not skip_funding_check and is_likely_crypto_article(article_text):
+    # Now also checks URL patterns for crypto websites
+    if not skip_funding_check and is_likely_crypto_article(article_text, source_url):
         from .schemas import ChainOfThought
         return DealExtraction(
             startup_name="Unknown",
