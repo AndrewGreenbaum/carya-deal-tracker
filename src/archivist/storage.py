@@ -319,7 +319,8 @@ async def find_duplicate_deal(
         date_start = announced_date - timedelta(days=365)
         date_end = announced_date + timedelta(days=365)
         # Include deals with matching date OR deals with NULL date (recent ones)
-        recent_cutoff_dt = datetime.now(timezone.utc) - timedelta(days=365)  # 1 year, timezone-aware
+        # FIX: Strip timezone to match TIMESTAMP WITHOUT TIME ZONE column
+        recent_cutoff_dt = (datetime.now(timezone.utc) - timedelta(days=365)).replace(tzinfo=None)
         stmt = stmt.where(
             or_(
                 Deal.announced_date.between(date_start, date_end),
@@ -331,7 +332,8 @@ async def find_duplicate_deal(
         # No date provided: only look at recent deals (last 1 year / 365 days)
         # This prevents matching against ancient deals
         recent_cutoff = date.today() - timedelta(days=365)
-        recent_cutoff_dt = datetime.now(timezone.utc) - timedelta(days=365)  # timezone-aware
+        # FIX: Strip timezone to match TIMESTAMP WITHOUT TIME ZONE column
+        recent_cutoff_dt = (datetime.now(timezone.utc) - timedelta(days=365)).replace(tzinfo=None)
         stmt = stmt.where(
             or_(
                 Deal.announced_date >= recent_cutoff,
