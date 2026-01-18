@@ -310,7 +310,11 @@ class TokenUsage(SQLModel, table=True):
     __tablename__ = "token_usage"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # FIX: Use sa_column with timezone=True to match the database schema
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    )
 
     # Source identification
     source_name: str = Field(index=True)  # "brave_search", "techcrunch", "a16z", etc.
