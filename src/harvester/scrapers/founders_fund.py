@@ -119,11 +119,22 @@ class FoundersFundScraper(PlaywrightScraper):
 
     async def normalize(self, raw: RawArticle) -> NormalizedArticle:
         """Fetch and extract content from individual blog post."""
+        # OPTIMIZATION: Check if card HTML already has sufficient content
+        # Skip expensive Playwright fetch if we already have 1500+ chars
+        card_text = self._extract_text(raw.html)
+        if len(card_text) >= 1500:
+            return NormalizedArticle(
+                url=raw.url,
+                title=raw.title,
+                text=card_text,
+                published_date=raw.published_date,
+            )
+
         try:
             full_html = await self.fetch_rendered(
                 raw.url,
                 wait_selector="article, .post-content, .entry-content, main, .content",
-                wait_ms=3000
+                wait_ms=2000  # Reduced from 3000ms - content loads fast
             )
             soup = BeautifulSoup(full_html, "lxml")
 
@@ -141,12 +152,12 @@ class FoundersFundScraper(PlaywrightScraper):
                 text = self._extract_text(full_html)
 
         except Exception:
-            text = self._extract_text(raw.html)
+            text = card_text  # Fall back to card text on error
 
         return NormalizedArticle(
             url=raw.url,
             title=raw.title,
-            text=text,
+            text=text or card_text,
             published_date=raw.published_date,
         )
 

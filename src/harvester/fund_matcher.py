@@ -88,7 +88,7 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     ],
     "gv": [
         "google ventures",
-        "gv ",  # Note the space to avoid matching "GV" in other contexts
+        "gv",  # Word boundary regex handles disambiguation (no trailing space needed)
         "david krane",  # GV CEO
         "mg siegler",
     ],
@@ -241,7 +241,7 @@ SEC_ENTITY_PATTERNS: dict[str, list[str]] = {
     ],
     "gv": [
         "google ventures",
-        "gv ",
+        "gv",  # Word boundary used in matcher
     ],
     "felicis": [
         "felicis ventures",

@@ -115,36 +115,44 @@ class A16ZScraper(SimpleHTMLScraper):
         return articles
 
     async def normalize(self, raw: RawArticle) -> NormalizedArticle:
-        try:
-            full_html = await self.fetch(raw.url)
-            soup = BeautifulSoup(full_html, "lxml")
+        author = None
+        text = None
 
-            # Find main content
-            content_el = soup.select_one(
-                "article, .post-content, .entry-content, [class*='ArticleContent'], [class*='PostContent'], main"
-            )
+        # OPTIMIZATION: Check if card HTML already has sufficient content
+        # Skip full fetch if we already have 1500+ chars of text (saves HTTP request)
+        card_text = self._extract_text(raw.html)
+        if len(card_text) >= 1500:
+            text = card_text
+        else:
+            # Need to fetch full article for complete content
+            try:
+                full_html = await self.fetch(raw.url)
+                soup = BeautifulSoup(full_html, "lxml")
 
-            if content_el:
-                for el in content_el.select("nav, header, footer, .share, .related, script, style"):
-                    el.decompose()
-                text = content_el.get_text(separator="\n", strip=True)
-            else:
-                text = self._extract_text(full_html)
+                # Find main content
+                content_el = soup.select_one(
+                    "article, .post-content, .entry-content, [class*='ArticleContent'], [class*='PostContent'], main"
+                )
 
-            # Extract author
-            author = None
-            author_el = soup.select_one(".author, [class*='author'], [class*='Author'], [rel='author']")
-            if author_el:
-                author = author_el.get_text(strip=True)
+                if content_el:
+                    for el in content_el.select("nav, header, footer, .share, .related, script, style"):
+                        el.decompose()
+                    text = content_el.get_text(separator="\n", strip=True)
+                else:
+                    text = self._extract_text(full_html)
 
-        except Exception:
-            text = self._extract_text(raw.html)
-            author = None
+                # Extract author
+                author_el = soup.select_one(".author, [class*='author'], [class*='Author'], [rel='author']")
+                if author_el:
+                    author = author_el.get_text(strip=True)
+
+            except Exception:
+                text = card_text  # Fall back to card text on fetch error
 
         return NormalizedArticle(
             url=raw.url,
             title=raw.title,
-            text=text,
+            text=text or card_text,
             published_date=raw.published_date,
             author=author,
             tags=raw.tags

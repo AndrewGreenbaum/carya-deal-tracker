@@ -138,6 +138,8 @@ async def check_url_exists(url: str) -> bool:
     Check if an article URL already exists in the database.
 
     OPTIMIZATION: Avoids expensive Claude calls for duplicate articles.
+
+    NOTE: For batch operations, use check_urls_exist_batch() instead.
     """
     try:
         async with get_session() as session:
@@ -147,6 +149,31 @@ async def check_url_exists(url: str) -> bool:
     except Exception as e:
         logger.warning(f"Error checking URL existence: {e}")
         return False  # Assume not exists on error
+
+
+async def check_urls_exist_batch(urls: List[str]) -> set:
+    """
+    Batch check which URLs already exist in the database.
+
+    OPTIMIZATION: Single query instead of N queries (saves ~50 DB round-trips per scrape).
+
+    Args:
+        urls: List of URLs to check
+
+    Returns:
+        Set of URLs that already exist in database
+    """
+    if not urls:
+        return set()
+
+    try:
+        async with get_session() as session:
+            stmt = select(Article.url).where(Article.url.in_(urls))
+            result = await session.execute(stmt)
+            return {row[0] for row in result.fetchall()}
+    except Exception as e:
+        logger.warning(f"Error batch checking URL existence: {e}")
+        return set()  # Assume none exist on error
 
 
 async def process_article(
@@ -292,10 +319,13 @@ async def scrape_fund(fund_slug: str) -> ScrapingResult:
 
             logger.info(f"Found {len(articles)} articles for {fund_config.name}")
 
-            # Pre-extraction deduplication
+            # Pre-extraction deduplication (OPTIMIZED: batch query instead of N queries)
+            article_urls = [a.url for a in articles]
+            existing_urls = await check_urls_exist_batch(article_urls)
+
             unique_articles: List[NormalizedArticle] = []
             for article in articles:
-                if await check_url_exists(article.url):
+                if article.url in existing_urls:
                     result.articles_skipped_duplicate += 1
                     logger.debug(f"Skipping duplicate: {article.url}")
                 else:
