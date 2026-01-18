@@ -2720,6 +2720,11 @@ class SchedulerJobStatus(BaseModel):
 class SchedulerStatusResponse(BaseModel):
     status: str
     jobs: List[SchedulerJobStatus]
+    # Job execution tracking
+    last_run: Optional[str] = None
+    last_status: Optional[str] = None
+    last_error: Optional[str] = None
+    last_duration_seconds: Optional[float] = None
 
 
 @app.get("/scheduler/status", response_model=SchedulerStatusResponse)
@@ -2737,9 +2742,19 @@ async def get_scheduler_status():
             next_run=job.next_run_time.isoformat() if job.next_run_time else None,
         ))
 
+    # Get job execution tracking from scheduler module
+    last_run = getattr(scheduler_module, '_last_job_run', None)
+    last_status = getattr(scheduler_module, '_last_job_status', None)
+    last_error = getattr(scheduler_module, '_last_job_error', None)
+    last_duration = getattr(scheduler_module, '_last_job_duration', None)
+
     return SchedulerStatusResponse(
         status="running" if sched.running else "stopped",
-        jobs=jobs
+        jobs=jobs,
+        last_run=last_run.isoformat() if last_run else None,
+        last_status=last_status,
+        last_error=last_error,
+        last_duration_seconds=last_duration,
     )
 
 

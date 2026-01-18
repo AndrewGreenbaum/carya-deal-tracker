@@ -343,6 +343,12 @@ async def enrich_new_deals(limit: int = 25):
 # Global scheduler instance
 scheduler: Optional[AsyncIOScheduler] = None
 
+# Job execution tracking (for observability)
+_last_job_run: Optional[datetime] = None
+_last_job_status: Optional[str] = None
+_last_job_error: Optional[str] = None
+_last_job_duration: Optional[float] = None
+
 
 async def process_external_articles(
     articles: List[NormalizedArticle],
@@ -1018,8 +1024,15 @@ async def scheduled_scrape_job():
     which contain partner name queries for funds like Benchmark,
     Khosla, and First Round that don't have useful website scrapers.
     """
+    global _last_job_run, _last_job_status, _last_job_error, _last_job_duration
+
     job_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     logger.info(f"[{job_id}] Starting scheduled scrape job")
+
+    # Track job execution
+    _last_job_run = datetime.now(timezone.utc)
+    _last_job_status = "running"
+    _last_job_error = None
 
     # CRITICAL FIX: Clear content hash cache at start of each run
     # Without this, duplicate detection prevents processing the same article
@@ -1092,9 +1105,20 @@ async def scheduled_scrape_job():
             external_results=external_results,
         )
 
+        # Track job success
+        _last_job_status = "success"
+        _last_job_duration = duration
+        logger.info(f"[{job_id}] Job completed successfully in {duration:.1f}s")
+
     except Exception as e:
         logger.error(f"[{job_id}] Scrape job failed: {e}", exc_info=True)
         duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+
+        # Track job failure
+        _last_job_status = "failed"
+        _last_job_error = str(e)
+        _last_job_duration = duration
+
         # Still try to send error notification
         await send_scrape_summary(
             job_id=job_id,

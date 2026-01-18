@@ -198,12 +198,14 @@ async def log_token_usage(
     job_id = scan_id or _current_scan_id
 
     cost = _calculate_cost(input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+    logger.info(f"[TOKEN DEBUG] log_token_usage called: source={source}, in={input_tokens}, out={output_tokens}")
 
     try:
         # Import here to avoid circular imports
         from ..archivist.database import get_session
         from ..archivist.models import TokenUsage
 
+        logger.info(f"[TOKEN DEBUG] About to create TokenUsage object")
         async with get_session() as session:
             usage = TokenUsage(
                 timestamp=datetime.now(timezone.utc),
@@ -217,8 +219,11 @@ async def log_token_usage(
                 model=model,
                 estimated_cost_usd=cost
             )
+            logger.info(f"[TOKEN DEBUG] TokenUsage created, adding to session")
             session.add(usage)
+            logger.info(f"[TOKEN DEBUG] Committing...")
             await session.commit()  # Explicit commit to ensure data is saved
+            logger.info(f"[TOKEN DEBUG] Commit complete!")
 
         logger.info(
             f"Token usage saved: source={source}, input={input_tokens}, "
@@ -685,20 +690,26 @@ async def extract_deal(
             )
 
             # Log token usage from the completion
+            # DEBUG: Log completion object details
+            logger.info(f"[TOKEN DEBUG] completion type={type(completion)}, has_usage={hasattr(completion, 'usage') if completion else 'None'}")
             if completion and hasattr(completion, 'usage'):
                 usage = completion.usage
                 # Extract cache tokens if available (Anthropic-specific)
                 cache_read = getattr(usage, 'cache_read_input_tokens', 0) or 0
                 cache_write = getattr(usage, 'cache_creation_input_tokens', 0) or 0
                 logger.info(f"Claude call tokens: in={usage.input_tokens}, out={usage.output_tokens}")
-                await log_token_usage(
-                    input_tokens=usage.input_tokens,
-                    output_tokens=usage.output_tokens,
-                    article_url=source_url,
-                    model=settings.llm_model,
-                    cache_read_tokens=cache_read,
-                    cache_write_tokens=cache_write
-                )
+                try:
+                    await log_token_usage(
+                        input_tokens=usage.input_tokens,
+                        output_tokens=usage.output_tokens,
+                        article_url=source_url,
+                        model=settings.llm_model,
+                        cache_read_tokens=cache_read,
+                        cache_write_tokens=cache_write
+                    )
+                    logger.info(f"[TOKEN DEBUG] log_token_usage completed successfully")
+                except Exception as e:
+                    logger.error(f"[TOKEN DEBUG] log_token_usage raised: {e}", exc_info=True)
             else:
                 # Debug: log when completion doesn't have usage
                 logger.warning(
