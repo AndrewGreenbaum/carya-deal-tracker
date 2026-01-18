@@ -12,8 +12,10 @@ Runs scraping every 4 hours of all 18 VC funds with:
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -25,6 +27,93 @@ from ..config.funds import FUND_REGISTRY
 from .notifications import send_scrape_summary
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# GLOBAL URL DEDUPLICATION (Phase 5)
+# =============================================================================
+
+# Global set to track URLs seen across ALL sources within a single run
+# Cleared at the start of each scheduled job
+_global_seen_urls: Set[str] = set()
+_global_urls_lock = asyncio.Lock()
+
+# Tracking parameters to strip from URLs for normalization
+TRACKING_PARAMS = {
+    'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+    'fbclid', 'gclid', 'gclsrc', 'dclid', 'msclkid',
+    'ref', 'source', 'mc_cid', 'mc_eid',
+    '_ga', '_gl', '_hsenc', '_hsmi',
+    'ncid', 'sr_share', 'vero_id',
+}
+
+
+def normalize_url(url: str) -> str:
+    """
+    Normalize URL for deduplication by stripping tracking parameters.
+
+    Examples:
+        "https://example.com/article?utm_source=twitter&id=123"
+        → "https://example.com/article?id=123"
+
+    This catches more duplicates from different sources that link to
+    the same article with different tracking params.
+    """
+    if not url:
+        return url
+
+    try:
+        parsed = urlparse(url)
+
+        # Parse query params and filter out tracking ones
+        query_params = parse_qs(parsed.query, keep_blank_values=True)
+        filtered_params = {
+            k: v for k, v in query_params.items()
+            if k.lower() not in TRACKING_PARAMS
+        }
+
+        # Rebuild query string (sorted for consistency)
+        new_query = urlencode(filtered_params, doseq=True) if filtered_params else ""
+
+        # Rebuild URL without tracking params
+        normalized = urlunparse((
+            parsed.scheme,
+            parsed.netloc.lower(),  # Lowercase domain
+            parsed.path.rstrip('/'),  # Remove trailing slash
+            parsed.params,
+            new_query,
+            '',  # Remove fragment
+        ))
+
+        return normalized
+    except Exception:
+        # If parsing fails, return original URL
+        return url
+
+
+async def check_global_url_seen(url: str) -> bool:
+    """
+    Check if URL has been seen in this run (cross-source dedup).
+
+    Returns True if URL was already seen (should skip).
+    Adds URL to global set if not seen.
+    """
+    normalized = normalize_url(url)
+
+    async with _global_urls_lock:
+        if normalized in _global_seen_urls:
+            return True
+        _global_seen_urls.add(normalized)
+        return False
+
+
+def clear_global_seen_urls() -> None:
+    """Clear global URL set. Called at start of each scheduled run."""
+    global _global_seen_urls
+    size = len(_global_seen_urls)
+    _global_seen_urls.clear()
+    if size > 0:
+        logger.info(f"Global URL dedup cache cleared ({size} entries)")
 
 # =============================================================================
 # TOKEN OPTIMIZATION CONSTANTS
@@ -285,7 +374,8 @@ async def process_external_articles(
     stats = {
         "articles_received": len(articles),
         "articles_skipped_duplicate": 0,
-        "articles_skipped_title": 0,  # NEW: Title pre-filter
+        "articles_skipped_cross_source": 0,  # Phase 5: Cross-source dedup
+        "articles_skipped_title": 0,  # Title pre-filter
         "deals_extracted": 0,
         "deals_saved": 0,
         "errors": 0,
@@ -302,16 +392,39 @@ async def process_external_articles(
 
     logger.info(f"[{source_name}] Processing {len(articles)} articles through extraction pipeline")
 
+    # Phase 5: Cross-source URL dedup (catches same article from different sources)
+    # This runs BEFORE database check for efficiency
+    cross_source_new = []
+    for article in articles:
+        if await check_global_url_seen(article.url):
+            stats["articles_skipped_cross_source"] += 1
+        else:
+            cross_source_new.append(article)
+
+    if stats["articles_skipped_cross_source"] > 0:
+        logger.info(f"[{source_name}] Skipped {stats['articles_skipped_cross_source']} cross-source duplicates")
+
+    articles = cross_source_new
+    if not articles:
+        logger.info(f"[{source_name}] All articles were cross-source duplicates")
+        return stats
+
     # OPTIMIZATION: Batch check for duplicate URLs in single query (avoids N sessions)
     article_urls = [a.url for a in articles]
     existing_urls: set[str] = set()
     async with get_session() as session:
-        stmt = select(Article.url).where(Article.url.in_(article_urls))
+        # Also check normalized URLs to catch tracking param variants
+        normalized_urls = [normalize_url(url) for url in article_urls]
+        all_urls = set(article_urls) | set(normalized_urls)
+        stmt = select(Article.url).where(Article.url.in_(all_urls))
         result = await session.execute(stmt)
         existing_urls = {row[0] for row in result.fetchall()}
 
-    # Filter out duplicates
-    new_articles = [a for a in articles if a.url not in existing_urls]
+    # Filter out duplicates (check both original and normalized)
+    new_articles = []
+    for a in articles:
+        if a.url not in existing_urls and normalize_url(a.url) not in existing_urls:
+            new_articles.append(a)
     stats["articles_skipped_duplicate"] = len(articles) - len(new_articles)
 
     if not new_articles:
@@ -454,7 +567,8 @@ async def process_external_articles(
     logger.info(
         f"[{source_name}] Extraction complete: "
         f"received={stats['articles_received']}, "
-        f"duplicates={stats['articles_skipped_duplicate']}, "
+        f"cross_source={stats['articles_skipped_cross_source']}, "
+        f"db_duplicates={stats['articles_skipped_duplicate']}, "
         f"title_filtered={stats['articles_skipped_title']}, "
         f"extracted={stats['deals_extracted']}, "
         f"saved={stats['deals_saved']}, "
@@ -842,6 +956,51 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         results["ventureburn"] = {"error": str(e)}
 
     results["total_deals_saved"] = total_deals_saved
+
+    # Phase 5: Calculate scraper health metrics
+    total_sources = 0
+    successful_sources = 0
+    failed_sources = []
+    total_articles_received = 0
+    total_cross_source_skipped = 0
+
+    for source_name, stats in results.items():
+        if source_name == "total_deals_saved":
+            continue
+        total_sources += 1
+        if isinstance(stats, dict) and "error" in stats:
+            failed_sources.append(source_name)
+        else:
+            successful_sources += 1
+            if isinstance(stats, dict):
+                total_articles_received += stats.get("articles_received", 0)
+                total_cross_source_skipped += stats.get("articles_skipped_cross_source", 0)
+
+    # Calculate health rate
+    health_rate = (successful_sources / total_sources * 100) if total_sources > 0 else 0
+
+    # Add health metrics to results
+    results["_health_metrics"] = {
+        "total_sources": total_sources,
+        "successful_sources": successful_sources,
+        "failed_sources": failed_sources,
+        "health_rate_pct": round(health_rate, 1),
+        "total_articles_received": total_articles_received,
+        "cross_source_duplicates_caught": total_cross_source_skipped,
+    }
+
+    # Log health summary
+    if failed_sources:
+        logger.warning(
+            f"External sources health: {successful_sources}/{total_sources} sources succeeded "
+            f"({health_rate:.0f}%), FAILED: {', '.join(failed_sources)}"
+        )
+    else:
+        logger.info(
+            f"External sources health: {successful_sources}/{total_sources} sources succeeded (100%), "
+            f"total_articles={total_articles_received}, cross_source_dedup={total_cross_source_skipped}"
+        )
+
     logger.info(f"External sources complete: {total_deals_saved} total deals saved")
 
     return results
@@ -868,6 +1027,10 @@ async def scheduled_scrape_job():
     from ..analyst.extractor import clear_content_hash_cache
     clear_content_hash_cache()
     logger.info(f"[{job_id}] Content hash cache cleared for fresh run")
+
+    # Phase 5: Clear global URL dedup cache for cross-source deduplication
+    clear_global_seen_urls()
+    logger.info(f"[{job_id}] Global URL dedup cache cleared for fresh run")
 
     start_time = datetime.now(timezone.utc)
 
