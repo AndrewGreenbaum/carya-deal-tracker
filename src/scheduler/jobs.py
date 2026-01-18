@@ -33,6 +33,52 @@ logger = logging.getLogger(__name__)
 MAX_ARTICLES_PER_SOURCE = 15  # Reduced from 25 to save ~340K tokens/run
 
 
+def is_non_announcement_title(title: str) -> bool:
+    """
+    Check if article title is clearly NOT a funding announcement.
+
+    Used as pre-filter to skip non-announcements BEFORE Claude call.
+    Saves ~$3.75/month in token costs.
+
+    Returns True if article should be SKIPPED.
+    """
+    if not title:
+        return False  # Don't skip articles with no title
+
+    title_lower = title.lower()
+
+    # Skip patterns - these are almost never funding announcements
+    skip_patterns = [
+        # Year-end content
+        'year in review', 'year-in-review', 'yearinreview',
+        '2024 recap', '2025 recap', 'annual review', 'year end',
+        'looking back at', 'best of 2024', 'best of 2025',
+        # Portfolio updates without funding
+        'portfolio update', 'portfolio spotlight', 'portfolio news',
+        'company update:', 'quarterly update',
+        # Interviews and Q&A (unless about funding)
+        'interview with', 'q&a with', 'q&a:', 'in conversation with',
+        'fireside chat', 'podcast:', 'episode:',
+        # Events and conferences
+        'demo day recap', 'conference recap', 'event recap',
+        'webinar:', 'live event:', 'summit recap',
+        # Opinion and analysis (not announcements)
+        'opinion:', 'analysis:', 'predictions for', 'trends in',
+        'what we learned', 'lessons from', 'how to',
+        # Job postings and hiring (not funding)
+        'we\'re hiring', 'join our team', 'career opportunities',
+        'job opening', 'now hiring',
+        # Exits and acquisitions (different from funding)
+        'acquired by', 'acquisition of', 'merger with', 'ipo:',
+    ]
+
+    for pattern in skip_patterns:
+        if pattern in title_lower:
+            return True
+
+    return False
+
+
 def is_likely_funding_from_title(title: str) -> bool:
     """
     Check if article title suggests funding news.
@@ -272,16 +318,26 @@ async def process_external_articles(
         logger.info(f"[{source_name}] All {len(articles)} articles already processed")
         return stats
 
-    # OPTIMIZATION: Title pre-filter - skip articles with non-funding titles
+    # OPTIMIZATION: Title pre-filters - skip articles BEFORE Claude call
+    # Filter 1: Skip non-announcement titles (year-in-review, interviews, etc.)
+    # Filter 2: Skip titles without funding signals
     filtered_articles = []
+    skipped_non_announcement = 0
     for article in new_articles:
+        # First check: Is this clearly NOT an announcement?
+        if is_non_announcement_title(article.title):
+            skipped_non_announcement += 1
+            continue
+        # Second check: Does it have funding signals?
         if is_likely_funding_from_title(article.title):
             filtered_articles.append(article)
         else:
             stats["articles_skipped_title"] += 1
 
+    if skipped_non_announcement > 0:
+        logger.info(f"[{source_name}] Skipped {skipped_non_announcement} non-announcement articles (year-in-review, interviews, etc.)")
     if stats["articles_skipped_title"] > 0:
-        logger.info(f"[{source_name}] Skipped {stats['articles_skipped_title']} articles by title filter")
+        logger.info(f"[{source_name}] Skipped {stats['articles_skipped_title']} articles without funding signals")
 
     new_articles = filtered_articles
 
@@ -295,6 +351,9 @@ async def process_external_articles(
     MAX_CONCURRENT = 5
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
     results_lock = asyncio.Lock()
+    # FIX: Collect alerts to send OUTSIDE semaphore (was blocking 15s per alert)
+    pending_alerts = []
+    alerts_lock = asyncio.Lock()
 
     async def process_article(article):
         async with semaphore:
@@ -341,39 +400,23 @@ async def process_external_articles(
                             f"(fund: {article.fund_slug or 'unknown'})"
                         )
                     else:
-                        # FIX: Log when save_deal returns None (duplicate or validation failure)
                         logger.warning(
                             f"[{source_name}] save_deal returned None for {extraction.startup_name} "
                             f"(confidence={extraction.confidence_score:.2f}, "
                             f"is_new={extraction.is_new_announcement})"
                         )
 
-                # FIX: Send alert AFTER transaction commits, with error handling
-                # Alert failure should NOT affect deal saving or return value
+                # FIX: Queue alert for sending OUTSIDE semaphore scope
+                # This prevents 15s alert timeouts from blocking concurrent processing
                 if alert_info:
-                    try:
-                        from .notifications import send_lead_deal_alert
-                        await send_lead_deal_alert(
-                            company_name=alert_info.company_name,
-                            amount=alert_info.amount,
-                            round_type=alert_info.round_type,
-                            lead_investor=alert_info.lead_investor,
-                            enterprise_category=alert_info.enterprise_category,
-                            verification_snippet=alert_info.verification_snippet,
-                        )
-                    except Exception as alert_err:
-                        # Log but don't fail - deal is already saved
-                        logger.error(
-                            f"[{source_name}] Alert sending failed for {alert_info.company_name}: {alert_err}",
-                            exc_info=True
-                        )
+                    async with alerts_lock:
+                        pending_alerts.append(alert_info)
 
                 return extraction
 
             except Exception as e:
                 async with results_lock:
                     stats["errors"] += 1
-                # FIX: Changed to ERROR with stack trace for visibility
                 logger.error(
                     f"[{source_name}] FAILED to save deal from {article.url}: {e}",
                     exc_info=True
@@ -387,8 +430,26 @@ async def process_external_articles(
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             logger.error(f"[{source_name}] Unhandled exception processing article {i}: {result}")
-            async with results_lock:
-                stats["errors"] += 1
+
+    # FIX: Send alerts AFTER all processing completes (outside semaphore)
+    # This allows full concurrency during extraction while still sending alerts
+    if pending_alerts:
+        from .notifications import send_lead_deal_alert
+        for alert_info in pending_alerts:
+            try:
+                await send_lead_deal_alert(
+                    company_name=alert_info.company_name,
+                    amount=alert_info.amount,
+                    round_type=alert_info.round_type,
+                    lead_investor=alert_info.lead_investor,
+                    enterprise_category=alert_info.enterprise_category,
+                    verification_snippet=alert_info.verification_snippet,
+                )
+            except Exception as alert_err:
+                logger.error(
+                    f"[{source_name}] Alert sending failed for {alert_info.company_name}: {alert_err}",
+                    exc_info=True
+                )
 
     logger.info(
         f"[{source_name}] Extraction complete: "

@@ -362,14 +362,15 @@ async def find_duplicate_deal(
         if not company_names_match(company_name, company.name):
             continue
 
-        # Amount match: within 10% tolerance (reduced from 20% to prevent false positives)
-        # 20% was too broad: $50M and $60M would match, causing separate deals to merge
+        # Amount match: within 15% tolerance (balanced to catch duplicates while avoiding false positives)
+        # 20% was too broad: $50M and $60M would match
+        # 10% was too tight: $45M and $50M wouldn't match (same deal, different sources)
+        # 15% is the sweet spot: catches rounding differences while avoiding false merges
         # If either amount is missing, we still consider it a potential match
-        # (articles sometimes don't mention the amount)
         if normalized_amount and deal.amount:
             existing_amount = normalize_amount(deal.amount)
             if existing_amount:
-                tolerance = max(normalized_amount, existing_amount) * 0.1  # 10% tolerance
+                tolerance = max(normalized_amount, existing_amount) * 0.15  # 15% tolerance
                 if abs(normalized_amount - existing_amount) > tolerance:
                     continue
 

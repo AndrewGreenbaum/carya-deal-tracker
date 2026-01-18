@@ -518,8 +518,14 @@ class SECEdgarScraper:
             if fetch_details:
                 result = await self.fetch_filing_details(filing)
                 # FIX: Handle None returns from fetch_filing_details
+                # Changed from debug to warning for visibility into data loss
                 if result is None:
-                    logger.debug(f"Skipping filing due to missing details: {filing.company_name}")
+                    skipped_count = getattr(self, '_skipped_filings', 0) + 1
+                    self._skipped_filings = skipped_count
+                    logger.warning(
+                        f"SEC EDGAR: Skipping filing #{skipped_count} due to missing details: "
+                        f"{filing.company_name} (CIK: {filing.cik}, URL: {filing.filing_url})"
+                    )
                     continue
                 filing = result
                 # Note: Rate limiting is already applied in fetch_filing_details()
