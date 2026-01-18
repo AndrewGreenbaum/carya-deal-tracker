@@ -67,6 +67,8 @@ async def enrich_new_deals(limit: int = 25):
 
     Uses deal context (investor, founders, category) for accurate enrichment.
     Runs after each scrape job to populate company links.
+
+    FIX: Uses per-deal transactions to prevent data loss if one enrichment fails.
     """
     try:
         from ..enrichment import enrich_company_with_context, DealContext
@@ -75,8 +77,8 @@ async def enrich_new_deals(limit: int = 25):
         from sqlalchemy.orm import selectinload
         import json
 
+        # First, fetch all deals needing enrichment (read-only query)
         async with get_session() as db:
-            # Find deals missing company website
             query = (
                 select(Deal)
                 .options(
@@ -98,85 +100,106 @@ async def enrich_new_deals(limit: int = 25):
                 logger.info("No deals needing enrichment")
                 return 0
 
-            enriched_count = 0
+            # Build list of (deal_id, company_id, company_name, context) for processing
+            deals_to_enrich = []
             for deal in deals:
                 company_name = deal.company.name if deal.company else None
                 if not company_name or company_name.startswith("No "):
                     continue
-
-                # Skip invalid names
                 if company_name.lower() in ("unknown", "n/a", "<unknown>"):
                     continue
 
-                try:
-                    # Build context from deal for accurate enrichment
-                    founders = []
-                    if deal.founders_json:
-                        try:
-                            founders = json.loads(deal.founders_json)
-                        except (json.JSONDecodeError, TypeError, ValueError):
-                            founders = []
-
-                    # Get lead investor from deal_investors
-                    lead_investor = None
-                    for inv in deal.investors:
-                        if inv.is_lead:
-                            lead_investor = inv.investor_name
-                            break
-
-                    context = DealContext(
-                        company_name=company_name,
-                        lead_investor=lead_investor,
-                        founders=founders,
-                        source_url=None,  # Not stored in deal model
-                        enterprise_category=deal.enterprise_category,
-                    )
-
+                founders = []
+                if deal.founders_json:
                     try:
-                        enrichment = await asyncio.wait_for(
-                            enrich_company_with_context(context),
-                            timeout=15.0  # 15 second timeout per enrichment
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning(f"Enrichment timeout for {company_name}")
-                        continue
+                        founders = json.loads(deal.founders_json)
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        founders = []
 
-                    if deal.company and enrichment.website:
-                        deal.company.website = enrichment.website
-                        enriched_count += 1
+                lead_investor = None
+                for inv in deal.investors:
+                    if inv.is_lead:
+                        lead_investor = inv.investor_name
+                        break
 
-                    # Update founders with LinkedIn URLs from enrichment
-                    if enrichment.founder_linkedins or enrichment.ceo_linkedin:
-                        for f in founders:
-                            founder_name = f.get("name", "")
-                            if founder_name in enrichment.founder_linkedins:
-                                if not f.get("linkedin_url"):
-                                    f["linkedin_url"] = enrichment.founder_linkedins[founder_name]
+                context = DealContext(
+                    company_name=company_name,
+                    lead_investor=lead_investor,
+                    founders=founders,
+                    source_url=None,
+                    enterprise_category=deal.enterprise_category,
+                )
 
-                        # Fallback: if no founder matched, add CEO LinkedIn
-                        if enrichment.ceo_linkedin:
-                            ceo_found = any(f.get("linkedin_url") for f in founders)
-                            if not ceo_found:
-                                for f in founders:
-                                    if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
-                                        if not f.get("linkedin_url"):
-                                            f["linkedin_url"] = enrichment.ceo_linkedin
-                                        break
+                deals_to_enrich.append({
+                    "deal_id": deal.id,
+                    "company_id": deal.company.id if deal.company else None,
+                    "company_name": company_name,
+                    "context": context,
+                    "founders": founders,
+                })
 
-                        deal.founders_json = json.dumps(founders)
-
-                    await asyncio.sleep(0.5)  # Rate limit
-
-                except Exception as e:
-                    # FIX #40: Include deal ID and stack trace for debugging
-                    logger.warning(
-                        f"Error enriching {company_name} (deal_id={deal.id}): {e}",
-                        exc_info=True,
+        # FIX: Process each deal in its own transaction (prevents batch rollback)
+        enriched_count = 0
+        for deal_info in deals_to_enrich:
+            try:
+                try:
+                    enrichment = await asyncio.wait_for(
+                        enrich_company_with_context(deal_info["context"]),
+                        timeout=15.0
                     )
+                except asyncio.TimeoutError:
+                    logger.warning(f"Enrichment timeout for {deal_info['company_name']}")
+                    continue
 
-            await db.commit()
-            logger.info(f"Enriched {enriched_count} companies with website/LinkedIn data")
-            return enriched_count
+                if not enrichment.website:
+                    continue
+
+                # Update in separate transaction (per-deal isolation)
+                async with get_session() as db:
+                    # Fetch fresh deal and company objects
+                    deal = await db.get(Deal, deal_info["deal_id"])
+                    if deal and deal.company:
+                        deal.company.website = enrichment.website
+
+                        # Update founders with LinkedIn URLs
+                        founders = deal_info["founders"]
+                        if enrichment.founder_linkedins or enrichment.ceo_linkedin:
+                            for f in founders:
+                                founder_name = f.get("name", "")
+                                if founder_name in enrichment.founder_linkedins:
+                                    if not f.get("linkedin_url"):
+                                        f["linkedin_url"] = enrichment.founder_linkedins[founder_name]
+
+                            if enrichment.ceo_linkedin:
+                                ceo_found = any(f.get("linkedin_url") for f in founders)
+                                if not ceo_found:
+                                    for f in founders:
+                                        if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
+                                            if not f.get("linkedin_url"):
+                                                f["linkedin_url"] = enrichment.ceo_linkedin
+                                            break
+
+                            deal.founders_json = json.dumps(founders)
+
+                        # Commit with timeout to prevent hanging
+                        try:
+                            await asyncio.wait_for(db.commit(), timeout=30.0)
+                            enriched_count += 1
+                        except asyncio.TimeoutError:
+                            logger.error(f"Database commit timeout for {deal_info['company_name']}")
+                            await db.rollback()
+
+                await asyncio.sleep(0.5)  # Rate limit
+
+            except Exception as e:
+                logger.warning(
+                    f"Error enriching {deal_info['company_name']} (deal_id={deal_info['deal_id']}): {e}",
+                    exc_info=True,
+                )
+                # Continue to next deal - don't let one failure stop others
+
+        logger.info(f"Enriched {enriched_count} companies with website/LinkedIn data")
+        return enriched_count
 
     except Exception as e:
         logger.error("Enrichment job failed: %s", e, exc_info=True)
@@ -325,17 +348,25 @@ async def process_external_articles(
                             f"is_new={extraction.is_new_announcement})"
                         )
 
-                # Send alert AFTER transaction commits
+                # FIX: Send alert AFTER transaction commits, with error handling
+                # Alert failure should NOT affect deal saving or return value
                 if alert_info:
-                    from .notifications import send_lead_deal_alert
-                    await send_lead_deal_alert(
-                        company_name=alert_info.company_name,
-                        amount=alert_info.amount,
-                        round_type=alert_info.round_type,
-                        lead_investor=alert_info.lead_investor,
-                        enterprise_category=alert_info.enterprise_category,
-                        verification_snippet=alert_info.verification_snippet,
-                    )
+                    try:
+                        from .notifications import send_lead_deal_alert
+                        await send_lead_deal_alert(
+                            company_name=alert_info.company_name,
+                            amount=alert_info.amount,
+                            round_type=alert_info.round_type,
+                            lead_investor=alert_info.lead_investor,
+                            enterprise_category=alert_info.enterprise_category,
+                            verification_snippet=alert_info.verification_snippet,
+                        )
+                    except Exception as alert_err:
+                        # Log but don't fail - deal is already saved
+                        logger.error(
+                            f"[{source_name}] Alert sending failed for {alert_info.company_name}: {alert_err}",
+                            exc_info=True
+                        )
 
                 return extraction
 
@@ -554,11 +585,12 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         async with PortfolioDiffScraper() as scraper:
             articles = await scraper.scrape_all()
 
-        # Save stealth detections (portfolio diff doesn't go through deal extraction)
+        # FIX: Save stealth detections with per-article transactions
+        # (prevents batch rollback if one article fails)
         stealth_saved = 0
-        async with get_session() as session:
-            for article in articles:
-                try:
+        for article in articles:
+            try:
+                async with get_session() as session:
                     await save_stealth_detection(
                         session=session,
                         fund_slug=article.fund_slug,
@@ -566,9 +598,9 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
                         company_name=article.title.split(":")[1].strip() if ":" in article.title else None,
                         notes=f"Source: Portfolio Diff | Tags: {', '.join(article.tags)}",
                     )
-                    stealth_saved += 1
-                except Exception as e:
-                    logger.warning(f"Failed to save stealth detection: {e}")
+                stealth_saved += 1
+            except Exception as e:
+                logger.warning(f"Failed to save stealth detection for {article.url}: {e}")
 
         results["portfolio_diff"] = {
             "articles_found": len(articles),

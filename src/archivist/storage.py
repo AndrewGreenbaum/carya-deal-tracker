@@ -282,7 +282,7 @@ async def find_duplicate_deal(
     - Company names match (using smart fuzzy matching)
     - Same round type
     - Same normalized amount (within 20% tolerance) OR one/both amounts missing
-    - Date within 30 days OR deals from last 365 days (1 year) if no date
+    - Date within 365 days (1 year) OR deals from last 365 days if no date
 
     TIER 2 - Same-Day Match (catches same-day duplicates from multiple sources):
     - Company names match exactly (case-insensitive)
@@ -312,10 +312,12 @@ async def find_duplicate_deal(
 
     # Date filter with fallback for missing dates - 1-year window
     # FIX: Use timezone-aware datetimes to match database (asyncpg requires consistency)
+    # FIX: Expanded from 30 days to 365 days to catch articles about older deals
+    # (e.g., article today about deal announced 3 months ago should still dedupe)
     if announced_date:
-        # Look within 30 days of the announced date
-        date_start = announced_date - timedelta(days=30)
-        date_end = announced_date + timedelta(days=30)
+        # Look within 365 days of the announced date (was 30 days - too narrow)
+        date_start = announced_date - timedelta(days=365)
+        date_end = announced_date + timedelta(days=365)
         # Include deals with matching date OR deals with NULL date (recent ones)
         recent_cutoff_dt = datetime.now(timezone.utc) - timedelta(days=365)  # 1 year, timezone-aware
         stmt = stmt.where(

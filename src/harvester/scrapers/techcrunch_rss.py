@@ -234,11 +234,15 @@ class TechCrunchScraper:
             if not self.is_funding_article(article):
                 continue
 
-            # FIX: Skip articles without publication dates
-            # (defaulting to today corrupts data and defeats hours_back filter)
-            if not article.published:
-                logger.debug(f"Skipping article without date: {article.title}")
-                continue
+            # FIX: Use today as fallback for articles without publication dates
+            # (was skipping these articles, losing 5-10% of content)
+            # Since we're fetching fresh from RSS, missing date likely means today
+            published_date = None
+            if article.published:
+                published_date = article.published.date()
+            else:
+                published_date = date.today()
+                logger.warning(f"Article missing date, using today: {article.title[:60]}...")
 
             # Check for tracked fund mentions
             fund_slug = self.match_tracked_fund(article)
@@ -251,7 +255,7 @@ class TechCrunchScraper:
                 url=article.url,
                 title=article.title,
                 text=text,
-                published_date=article.published.date(),
+                published_date=published_date,
                 author=article.author,
                 tags=['techcrunch'] + article.categories,
                 fund_slug=fund_slug or "",

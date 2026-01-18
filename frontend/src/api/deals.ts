@@ -84,7 +84,11 @@ async function apiGet<T>(path: string, useCache = true): Promise<T> {
     if (cached) return cached;
   }
 
-  const response = await fetch(`${API_BASE}${path}`);
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      'X-API-Key': API_KEY,
+    },
+  });
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }));
