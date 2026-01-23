@@ -6,13 +6,54 @@ Uses Brave Search to find:
 - CEO/Founder LinkedIn profiles
 
 OPTIMIZED: Uses shared BraveClient (no duplicate HTTP client or retry logic).
+FIX #7: Added cache for failed LinkedIn lookups to avoid redundant API calls.
 """
 
 import asyncio
 import logging
 import re
+from time import time
 
 logger = logging.getLogger(__name__)
+
+# FIX #7: Cache for failed LinkedIn lookups (saves Brave API queries)
+# Key: "founder_name|company_name" -> timestamp of failed lookup
+# Skip re-searching if failed within LINKEDIN_CACHE_TTL_SECONDS
+_failed_linkedin_cache: dict[str, float] = {}
+LINKEDIN_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60  # 7 days
+
+
+def _get_linkedin_cache_key(founder_name: str, company_name: str) -> str:
+    """Generate cache key for LinkedIn lookup."""
+    return f"{founder_name.lower().strip()}|{company_name.lower().strip()}"
+
+
+def _is_linkedin_cached_failure(founder_name: str, company_name: str) -> bool:
+    """Check if this founder+company combo recently failed."""
+    key = _get_linkedin_cache_key(founder_name, company_name)
+    if key not in _failed_linkedin_cache:
+        return False
+    # Check if TTL expired
+    cached_time = _failed_linkedin_cache[key]
+    if time() - cached_time > LINKEDIN_CACHE_TTL_SECONDS:
+        del _failed_linkedin_cache[key]
+        return False
+    return True
+
+
+def _mark_linkedin_failure(founder_name: str, company_name: str):
+    """Mark this founder+company combo as failed."""
+    key = _get_linkedin_cache_key(founder_name, company_name)
+    _failed_linkedin_cache[key] = time()
+
+
+def clear_linkedin_cache():
+    """Clear the failed LinkedIn cache (called at start of scheduled jobs)."""
+    global _failed_linkedin_cache
+    count = len(_failed_linkedin_cache)
+    _failed_linkedin_cache = {}
+    if count > 0:
+        logger.info(f"Cleared LinkedIn cache ({count} entries)")
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 from urllib.parse import urlparse
@@ -257,24 +298,33 @@ class BraveEnrichmentClient:
         if founder_name.lower() in ("ceo", "founder", "unknown"):
             return None
 
-        # Search for specific founder + company
-        query = f'"{founder_name}" "{company_name}" LinkedIn'
+        # FIX #7: Check cache for recent failures
+        if _is_linkedin_cached_failure(founder_name, company_name):
+            logger.debug(f"Skipping LinkedIn search for {founder_name} (cached failure)")
+            return None
+
+        # FIX #2: Target LinkedIn domain directly for better precision
+        query = f'site:linkedin.com/in "{founder_name}" "{company_name}"'
         results = await self._search(query, count=5)
 
         for result in results:
             url = result.get("url", "")
-            title = result.get("title", "").lower()
+            title = result.get("title", "")
+            description = result.get("description", "")
 
             # Must be a LinkedIn profile URL
             linkedin_url = self._extract_linkedin_url(url)
             if linkedin_url:
-                # Verify founder name appears in result
-                founder_first = founder_name.split()[0].lower()
-                if founder_first in title:
+                # FIX #3 & #5: Check both first AND last name in title OR description
+                name_parts = founder_name.lower().split()
+                text_to_check = f"{title} {description}".lower()
+
+                # Require at least one name part to match
+                if any(part in text_to_check for part in name_parts if len(part) >= 2):
                     return linkedin_url
 
-        # Fallback: search without company name
-        query = f'"{founder_name}" LinkedIn founder'
+        # Fallback: search without company name but still target LinkedIn
+        query = f'site:linkedin.com/in "{founder_name}" founder startup'
         results = await self._search(query, count=3)
 
         for result in results:
@@ -283,6 +333,8 @@ class BraveEnrichmentClient:
             if linkedin_url:
                 return linkedin_url
 
+        # FIX #7: Mark this as a failed search to avoid redundant future calls
+        _mark_linkedin_failure(founder_name, company_name)
         return None
 
     async def find_ceo_linkedin(self, company_name: str) -> tuple[Optional[str], Optional[str]]:
@@ -290,7 +342,8 @@ class BraveEnrichmentClient:
         if not company_name or company_name.lower() in ("<unknown>", "unknown", "n/a"):
             return (None, None)
 
-        query = f'"{company_name}" startup CEO founder LinkedIn'
+        # FIX #2: Target LinkedIn domain directly for better precision
+        query = f'site:linkedin.com/in "{company_name}" CEO founder startup'
         results = await self._search(query, count=5)
 
         for result in results:
@@ -360,8 +413,24 @@ class BraveEnrichmentClient:
 
                 await asyncio.sleep(self.rate_limit_delay)
 
-        # Fallback: if still no LinkedIn found, try generic CEO search
-        if not result.ceo_linkedin:
+        # FIX #4: Fallback CEO search when NO founders were extracted
+        # This catches cases where Claude failed to extract founder names
+        if not context.founders and not result.ceo_linkedin:
+            logger.info(f"No founders extracted for {context.company_name}, trying CEO fallback search")
+            ceo_name, linkedin_url = await self.find_ceo_linkedin(context.company_name)
+            if linkedin_url:
+                result.ceo_name = ceo_name
+                result.ceo_linkedin = linkedin_url
+                # Add to founder_linkedins with special key
+                if ceo_name:
+                    result.founder_linkedins[ceo_name] = linkedin_url
+                else:
+                    result.founder_linkedins["CEO (discovered)"] = linkedin_url
+                logger.info(f"Found CEO for {context.company_name} via fallback: {ceo_name}")
+            await asyncio.sleep(self.rate_limit_delay)
+
+        # Original fallback: if still no LinkedIn found after processing founders
+        elif not result.ceo_linkedin:
             ceo_name, linkedin_url = await self.find_ceo_linkedin(context.company_name)
             if linkedin_url:
                 result.ceo_name = ceo_name

@@ -94,6 +94,13 @@ NOT LEAD: "backed by", "participated in", "invested in", "joined"
 CRITICAL: Only set tracked_fund_is_lead=True if verification_snippet contains ACTUAL lead language.
 If no lead phrase exists → put in participating_investors with role=participant, NOT lead_investors.
 
+FOUNDERS (EXTRACT ALL MENTIONED)
+- CEO/Founder (REQUIRED if mentioned in article)
+- Co-founders, CTO, COO, etc. (if mentioned)
+- For each founder include: name (full name), title (CEO, CTO, Co-founder, etc.)
+- LinkedIn URL: ONLY extract if explicitly mentioned in article text. Never guess/construct URLs.
+- If no founders mentioned → leave founders list empty
+
 TRACKED FUNDS: Founders Fund, Benchmark, Sequoia, Khosla, Index, a16z, Insight Partners, Bessemer, Redpoint, Greylock, GV, Menlo, USV, Thrive, Accel, Felicis, General Catalyst, First Round
 
 DISAMBIGUATION: Benchmark≠Benchmark International/Electronics, GV≠NYSE:GV, Thrive≠Thrive IT/Global, Sequoia=US only (not HongShan/Peak XV)

@@ -1093,8 +1093,8 @@ async def scheduled_scrape_job():
         # ===== PHASE 3: Enrich new deals =====
         # Always run enrichment to catch up on any missing data
         logger.info(f"[{job_id}] Phase 3: Starting automatic enrichment (website + LinkedIn)")
-        # Reduced from 200 to 50 to save Brave Search queries (150 fewer/run)
-        enriched = await enrich_new_deals(limit=50)
+        # FIX #6: Increased from 50 to 100 to improve coverage (was taking weeks at 50)
+        enriched = await enrich_new_deals(limit=100)
         logger.info(f"[{job_id}] Enrichment complete: {enriched} companies updated")
 
         # Send notification
