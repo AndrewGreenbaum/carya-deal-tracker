@@ -21,6 +21,8 @@ from enum import Enum
 from typing import List, Optional, Dict, Type, Set, Tuple
 from datetime import datetime, timezone
 
+import httpx
+
 
 # FIX #24: Define consistent status values for extraction results
 class ExtractionStatus(str, Enum):
@@ -92,6 +94,11 @@ SCRAPER_REGISTRY: Dict[str, Type[BaseScraper]] = {
 # Concurrency settings
 MAX_CONCURRENT_EXTRACTIONS = 5
 RATE_LIMIT_DELAY = 0.5  # Reduced from 1.0s
+
+# Retry and timeout settings
+MAX_SCRAPER_RETRIES = 3
+SCRAPER_RETRY_BACKOFF = 2.0  # Exponential backoff base
+SCRAPER_TIMEOUT = 300  # 5 minutes max per fund scraper
 
 
 class ScrapingResult:
@@ -310,17 +317,28 @@ async def scrape_fund(fund_slug: str) -> ScrapingResult:
     # Set extraction context for token logging (tracks which fund is being processed)
     set_extraction_context(source_name=fund_slug)
 
-    try:
-        async with scraper_class() as scraper:
-            logger.info(f"Starting scrape for {fund_config.name}")
+    # Retry loop for transient failures
+    for attempt in range(MAX_SCRAPER_RETRIES):
+        try:
+            async with scraper_class() as scraper:
+                logger.info(f"Starting scrape for {fund_config.name} (attempt {attempt + 1}/{MAX_SCRAPER_RETRIES})")
 
-            # Collect all articles first
-            articles: List[NormalizedArticle] = []
-            async for article in scraper.scrape():
-                result.articles_found += 1
-                articles.append(article)
+                # Collect all articles with timeout protection
+                articles: List[NormalizedArticle] = []
 
-            logger.info(f"Found {len(articles)} articles for {fund_config.name}")
+                async def collect_articles():
+                    async for article in scraper.scrape():
+                        articles.append(article)
+
+                try:
+                    await asyncio.wait_for(collect_articles(), timeout=SCRAPER_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logger.error(f"Scraper timeout for {fund_config.name} after {SCRAPER_TIMEOUT}s")
+                    result.errors.append(f"Timeout after {SCRAPER_TIMEOUT}s")
+                    # Continue with articles collected so far
+
+                result.articles_found = len(articles)
+                logger.info(f"Found {len(articles)} articles for {fund_config.name}")
 
             # Pre-extraction deduplication (OPTIMIZED: batch query instead of N queries)
             article_urls = [a.url for a in articles]
@@ -372,13 +390,31 @@ async def scrape_fund(fund_slug: str) -> ScrapingResult:
                         elif status.startswith("error:"):
                             result.errors.append(status)
 
-    except Exception as e:
-        error_msg = f"Error scraping {fund_slug}: {e}"
-        logger.error(error_msg)
-        result.errors.append(error_msg)
-    finally:
-        # Clear extraction context after processing this fund
-        clear_extraction_context()
+                # If we get here, scraping succeeded - break retry loop
+                break
+
+        except (asyncio.TimeoutError, ConnectionError, TimeoutError, httpx.TimeoutException, httpx.ConnectError) as e:
+            # Transient errors - retry with backoff
+            if attempt < MAX_SCRAPER_RETRIES - 1:
+                wait_time = SCRAPER_RETRY_BACKOFF ** attempt
+                logger.warning(f"Transient error scraping {fund_slug} (attempt {attempt + 1}): {e}. Retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+                continue
+            else:
+                error_msg = f"Failed after {MAX_SCRAPER_RETRIES} attempts: {e}"
+                logger.error(error_msg)
+                result.errors.append(error_msg)
+                break
+
+        except Exception as e:
+            # Non-transient errors - don't retry
+            error_msg = f"Error scraping {fund_slug}: {e}"
+            logger.error(error_msg)
+            result.errors.append(error_msg)
+            break
+
+    # Clear extraction context after processing this fund
+    clear_extraction_context()
 
     result.complete()
     result.log_metrics()

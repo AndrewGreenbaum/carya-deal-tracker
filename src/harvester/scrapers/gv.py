@@ -7,10 +7,13 @@ Format: HTML
 CRITICAL: Exclude 'Visionary Holdings' (Ticker: GV).
 """
 
+import logging
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from ..base_scraper import SimpleHTMLScraper, RawArticle, NormalizedArticle
+
+logger = logging.getLogger(__name__)
 from ...config.funds import FUND_REGISTRY
 
 
@@ -105,7 +108,8 @@ class GVScraper(SimpleHTMLScraper):
             if self._is_visionary_holdings(raw.title, text):
                 text = ""  # Will be filtered as empty
 
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error fetching {raw.url}: {e}")
             text = self._extract_text(raw.html)
 
         return NormalizedArticle(

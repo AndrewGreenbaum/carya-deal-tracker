@@ -7,11 +7,17 @@ Format: HTML (converted from Playwright - simpler HTTP approach)
 a16z news page with investment announcements.
 """
 
+import logging
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from ..base_scraper import SimpleHTMLScraper, RawArticle, NormalizedArticle
 from ...config.funds import FUND_REGISTRY
+
+logger = logging.getLogger(__name__)
+
+# Verticals to exclude (not Enterprise AI)
+EXCLUDED_VERTICALS = {"crypto", "web3", "bio", "games", "gaming", "consumer", "nft", "defi"}
 
 
 class A16ZScraper(SimpleHTMLScraper):
@@ -104,6 +110,12 @@ class A16ZScraper(SimpleHTMLScraper):
                     if tag_text:
                         tags.append(tag_text)
 
+                # Filter out excluded verticals (crypto, bio, games, etc.)
+                title_lower = title.lower()
+                if any(v in tags or v in title_lower for v in EXCLUDED_VERTICALS):
+                    logger.debug(f"Skipping a16z article with excluded vertical: {title[:50]}")
+                    continue
+
                 articles.append(RawArticle(
                     url=url,
                     title=title,
@@ -146,7 +158,8 @@ class A16ZScraper(SimpleHTMLScraper):
                 if author_el:
                     author = author_el.get_text(strip=True)
 
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Error fetching {raw.url}: {e}")
                 text = card_text  # Fall back to card text on fetch error
 
         return NormalizedArticle(

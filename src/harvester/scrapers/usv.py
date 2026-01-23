@@ -7,11 +7,14 @@ Format: HTML
 NLP must read body for 'We are leading...' phrasing.
 """
 
+import logging
 from typing import List, Optional
 from bs4 import BeautifulSoup
 import re
 
 from ..base_scraper import SimpleHTMLScraper, RawArticle, NormalizedArticle
+
+logger = logging.getLogger(__name__)
 from ...config.funds import FUND_REGISTRY
 
 
@@ -125,7 +128,8 @@ class USVScraper(SimpleHTMLScraper):
             if is_leading:
                 text = f"[USV IS LEADING]\n{text}"
 
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error fetching {raw.url}: {e}")
             text = self._extract_text(raw.html)
 
         return NormalizedArticle(

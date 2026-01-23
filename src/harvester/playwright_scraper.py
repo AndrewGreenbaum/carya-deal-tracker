@@ -8,6 +8,7 @@ OPTIMIZED: Page pooling for reuse, faster wait strategies.
 """
 
 import asyncio
+import logging
 from abc import abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, date
@@ -17,6 +18,8 @@ from playwright.async_api import async_playwright, Browser, Page, Playwright, Br
 from bs4 import BeautifulSoup
 
 from .base_scraper import RawArticle, NormalizedArticle
+
+logger = logging.getLogger(__name__)
 from ..config.funds import FundConfig
 from ..config.settings import settings
 
@@ -189,8 +192,8 @@ class PlaywrightScraper:
             if wait_selector:
                 try:
                     await page.wait_for_selector(wait_selector, timeout=5000)
-                except Exception:
-                    pass  # Continue even if selector not found
+                except Exception as e:
+                    logger.warning(f"Selector '{wait_selector}' not found on {url}: {e}")
 
             # Reduced wait for lazy-loaded content
             if wait_ms > 0:
@@ -226,8 +229,8 @@ class PlaywrightScraper:
             if wait_selector:
                 try:
                     await page.wait_for_selector(wait_selector, timeout=5000)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Selector '{wait_selector}' not found during scroll on {url}: {e}")
 
             # Scroll to load more content (reduced wait between scrolls)
             for _ in range(scroll_count):

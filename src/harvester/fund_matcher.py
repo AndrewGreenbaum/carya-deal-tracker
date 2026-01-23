@@ -45,11 +45,15 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
         "greylock partners",
         "greylock",
         "reid hoffman",  # Co-founder LinkedIn, Greylock partner
-        "jerry chen",
+        "david sze",
+        "josh elman",
+        "sarah guo",
         "saam motamedi",
-        "david thacker",
         "seth rosenberg",
+        "jerry chen",
         "asheem chandna",
+        "mike duboe",
+        "corinne riley",
     ],
     "accel": [
         "accel partners",

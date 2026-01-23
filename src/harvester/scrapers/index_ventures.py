@@ -7,10 +7,13 @@ Format: HTML
 Distinguish 'Double Down' (follow-on) from new Leads.
 """
 
+import logging
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from ..base_scraper import SimpleHTMLScraper, RawArticle, NormalizedArticle
+
+logger = logging.getLogger(__name__)
 from ...config.funds import FUND_REGISTRY
 
 
@@ -103,7 +106,8 @@ class IndexVenturesScraper(SimpleHTMLScraper):
             if is_follow_on:
                 text = f"[FOLLOW-ON INVESTMENT]\n{text}"
 
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error fetching {raw.url}: {e}")
             text = self._extract_text(raw.html)
 
         return NormalizedArticle(
@@ -117,6 +121,8 @@ class IndexVenturesScraper(SimpleHTMLScraper):
     def _is_follow_on(self, title: str, text: str) -> bool:
         """Detect if this is a follow-on investment vs. new lead."""
         combined = f"{title} {text}".lower()
+        # NOTE: Removed "series b/c/d" - these are often NEW leads, not follow-ons
+        # The extractor will verify lead status separately
         follow_on_signals = [
             "double down",
             "follow-on",
@@ -124,11 +130,6 @@ class IndexVenturesScraper(SimpleHTMLScraper):
             "additional investment",
             "continued support",
             "expanding our investment",
-            # Series B/C are always potential follow-on signals
-            # (the extractor will verify lead status separately)
-            "series b",
-            "series c",
-            "series d",
         ]
         return any(signal in combined for signal in follow_on_signals)
 

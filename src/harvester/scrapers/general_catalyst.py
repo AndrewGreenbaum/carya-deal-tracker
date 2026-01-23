@@ -7,10 +7,13 @@ Format: HTML
 Stories page for news; watch for 'Hatching/Co-creation' (Incubations).
 """
 
+import logging
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from ..base_scraper import SimpleHTMLScraper, RawArticle, NormalizedArticle
+
+logger = logging.getLogger(__name__)
 from ...config.funds import FUND_REGISTRY
 
 
@@ -120,7 +123,8 @@ class GeneralCatalystScraper(SimpleHTMLScraper):
             if self._is_incubation(raw.title, text):
                 text = f"[GC INCUBATION/CO-CREATION]\n{text}"
 
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error fetching {raw.url}: {e}")
             text = self._extract_text(raw.html)
 
         return NormalizedArticle(

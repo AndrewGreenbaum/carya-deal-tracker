@@ -13,9 +13,12 @@ This scraper extracts inline investment announcements and creates
 virtual article entries from the page content.
 """
 
+import logging
 from typing import List, Optional
 import hashlib
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 from ..playwright_scraper import PlaywrightScraper
 from ..base_scraper import RawArticle, NormalizedArticle

@@ -7,10 +7,13 @@ Format: HTML
 Look for 'Welcome to the family' keywords.
 """
 
+import logging
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from ..base_scraper import SimpleHTMLScraper, RawArticle, NormalizedArticle
+
+logger = logging.getLogger(__name__)
 from ...config.funds import FUND_REGISTRY
 
 
@@ -121,7 +124,8 @@ class FelicisScraper(SimpleHTMLScraper):
             if self._has_welcome_signal(raw.title, text):
                 text = f"[NEW PORTFOLIO COMPANY]\n{text}"
 
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error fetching {raw.url}: {e}")
             text = self._extract_text(raw.html)
 
         return NormalizedArticle(

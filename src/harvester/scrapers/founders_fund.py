@@ -13,9 +13,12 @@ This scraper monitors the homepage for blog post links and the
 portfolio page for new company additions (stealth detection).
 """
 
+import logging
 from datetime import date
 from typing import List, Optional
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 from ..playwright_scraper import PlaywrightScraper
 from ..base_scraper import RawArticle, NormalizedArticle
@@ -151,7 +154,8 @@ class FoundersFundScraper(PlaywrightScraper):
             else:
                 text = self._extract_text(full_html)
 
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error fetching {raw.url}: {e}")
             text = card_text  # Fall back to card text on error
 
         return NormalizedArticle(
@@ -194,7 +198,8 @@ class FoundersFundScraper(PlaywrightScraper):
                         companies.append(alt)
 
             return list(set(companies))  # Dedupe
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error fetching portfolio: {e}")
             return []
 
 

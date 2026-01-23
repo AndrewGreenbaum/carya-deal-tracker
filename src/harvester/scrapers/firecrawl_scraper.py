@@ -30,6 +30,8 @@ from ...config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# Memory safety limit
+MAX_BATCH_RESULTS = 500
 
 # Firecrawl API endpoints
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v1/scrape"
@@ -169,6 +171,11 @@ class FirecrawlScraper:
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for result in raw_results:
+            # Memory safety check
+            if len(results) >= MAX_BATCH_RESULTS:
+                logger.warning(f"Hit max batch results limit ({MAX_BATCH_RESULTS})")
+                break
+
             if isinstance(result, FirecrawlResult):
                 results.append(result)
             elif isinstance(result, Exception):

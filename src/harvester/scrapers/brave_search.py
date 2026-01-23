@@ -23,6 +23,8 @@ from ...config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# Memory safety limit
+MAX_RESULTS_PER_QUERY = 500
 
 # Fund name variations for search queries (primary name + alternates)
 # Core 18 tracked funds
@@ -298,6 +300,11 @@ class BraveSearchScraper:
             return []
 
         for item in raw_results:
+            # Memory safety check
+            if len(results) >= MAX_RESULTS_PER_QUERY:
+                logger.warning(f"Hit max results limit ({MAX_RESULTS_PER_QUERY})")
+                break
+
             try:
                 url = item.get("url", "")
                 if not url:

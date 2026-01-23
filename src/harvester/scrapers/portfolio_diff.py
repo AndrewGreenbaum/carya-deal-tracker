@@ -33,6 +33,8 @@ from ...archivist.models import PortfolioSnapshot
 
 logger = logging.getLogger(__name__)
 
+# Memory safety limit
+MAX_COMPANIES_PER_FUND = 500
 
 # Portfolio page URLs for tracked funds
 PORTFOLIO_URLS = {
@@ -270,6 +272,11 @@ class PortfolioDiffScraper:
                                 continue
 
                             seen_names.add(name.lower())
+
+                            # Memory safety check
+                            if len(companies) >= MAX_COMPANIES_PER_FUND:
+                                logger.warning(f"Hit max companies limit ({MAX_COMPANIES_PER_FUND}) for {fund_slug}")
+                                break
 
                             # Extract URL if available
                             url = None
