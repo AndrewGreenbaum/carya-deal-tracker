@@ -31,6 +31,7 @@ import {
   fetchHealth,
   fetchScraperStatus,
   fetchSchedulerStatus,
+  fetchTokenUsage,
   invalidateCache,
   getExportUrl,
 } from './api/deals';
@@ -256,11 +257,20 @@ function App() {
           ? Math.round((verifiedDeals / result.deals.length) * 100)
           : 0;
 
-        // Estimate tokens used (rough estimate: ~500 tokens per deal extraction)
-        const estimatedTokens = result.total * 500;
-        const tokensFormatted = estimatedTokens > 1000
-          ? `${(estimatedTokens / 1000).toFixed(1)}K`
-          : estimatedTokens.toString();
+        // Fetch real token usage from API (last 7 days)
+        let tokensFormatted = '0';
+        try {
+          const tokenData = await fetchTokenUsage(7);
+          const totalTokens = tokenData.totalTokens;
+          tokensFormatted = totalTokens > 1000000
+            ? `${(totalTokens / 1000000).toFixed(1)}M`
+            : totalTokens > 1000
+            ? `${(totalTokens / 1000).toFixed(1)}K`
+            : totalTokens.toString();
+        } catch (err) {
+          console.warn('Failed to fetch token usage:', err);
+          tokensFormatted = 'N/A';
+        }
 
         setStats((prev) => ({
           ...prev,

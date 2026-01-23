@@ -921,3 +921,48 @@ export async function fetchDealsLegacy(): Promise<Deal[]> {
 
 // Re-export for backwards compatibility
 export type { DealFilters as FetchDealsOptions };
+
+// ============================================
+// Token Usage Endpoints
+// ============================================
+
+export interface TokenUsageResponse {
+  totalTokens: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheWriteTokens: number;
+  totalCostUsd: number;
+  totalCalls: number;
+  period: string;
+  startDate: string;
+  endDate: string;
+}
+
+export async function fetchTokenUsage(days = 7): Promise<TokenUsageResponse> {
+  const data = await apiGet<{
+    total_tokens: number;
+    total_input_tokens: number;
+    total_output_tokens: number;
+    total_cache_read_tokens: number;
+    total_cache_write_tokens: number;
+    total_cost_usd: number;
+    total_calls: number;
+    period: string;
+    start_date: string;
+    end_date: string;
+  }>(`/usage/tokens?days=${days}`, false);
+
+  return {
+    totalTokens: data.total_tokens,
+    totalInputTokens: data.total_input_tokens,
+    totalOutputTokens: data.total_output_tokens,
+    totalCacheReadTokens: data.total_cache_read_tokens,
+    totalCacheWriteTokens: data.total_cache_write_tokens,
+    totalCostUsd: data.total_cost_usd,
+    totalCalls: data.total_calls,
+    period: data.period,
+    startDate: data.start_date,
+    endDate: data.end_date,
+  };
+}
