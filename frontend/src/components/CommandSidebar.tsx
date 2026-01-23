@@ -281,9 +281,6 @@ export function CommandSidebar({
 
       {/* Feedback Section */}
       <div className="p-4 border-t border-slate-800 text-center">
-        <p className="text-xs text-slate-400 mb-3">
-          We fuck up? Help us fix it
-        </p>
         <button
           onClick={onOpenFeedback}
           className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors"
