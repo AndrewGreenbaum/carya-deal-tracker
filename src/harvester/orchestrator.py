@@ -55,7 +55,7 @@ from .scrapers.general_catalyst import GeneralCatalystScraper
 from .scrapers.first_round import FirstRoundScraper
 from ..config.funds import FUND_REGISTRY, FundConfig, ScraperType
 from ..config.settings import settings
-from ..analyst.extractor import extract_deal
+from ..analyst.extractor import extract_deal, set_extraction_context, clear_extraction_context
 from ..archivist.storage import save_deal
 from ..archivist.database import get_session
 from ..archivist.models import Article
@@ -307,6 +307,9 @@ async def scrape_fund(fund_slug: str) -> ScrapingResult:
 
     scraper_class = SCRAPER_REGISTRY[fund_slug]
 
+    # Set extraction context for token logging (tracks which fund is being processed)
+    set_extraction_context(source_name=fund_slug)
+
     try:
         async with scraper_class() as scraper:
             logger.info(f"Starting scrape for {fund_config.name}")
@@ -373,6 +376,9 @@ async def scrape_fund(fund_slug: str) -> ScrapingResult:
         error_msg = f"Error scraping {fund_slug}: {e}"
         logger.error(error_msg)
         result.errors.append(error_msg)
+    finally:
+        # Clear extraction context after processing this fund
+        clear_extraction_context()
 
     result.complete()
     result.log_metrics()

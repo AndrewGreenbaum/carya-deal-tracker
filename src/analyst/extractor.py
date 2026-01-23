@@ -127,11 +127,12 @@ CACHED_SYSTEM_MESSAGE[0]["text"] = SYSTEM_PROMPT
 # TOKEN USAGE LOGGING
 # =============================================================================
 
-# Haiku pricing (December 2024)
-HAIKU_INPUT_COST_PER_MILLION = 0.25  # $0.25 per 1M input tokens
-HAIKU_OUTPUT_COST_PER_MILLION = 1.25  # $1.25 per 1M output tokens
-HAIKU_CACHE_READ_COST_PER_MILLION = 0.025  # $0.025 per 1M cache read tokens
-HAIKU_CACHE_WRITE_COST_PER_MILLION = 0.3125  # $0.3125 per 1M cache write tokens
+# Claude 3.5 Haiku pricing (December 2024 - after 20% price drop)
+# See: https://simonwillison.net/2024/Dec/5/claude-35-haiku-price-drops-by-20/
+HAIKU_INPUT_COST_PER_MILLION = 0.80  # $0.80 per 1M input tokens
+HAIKU_OUTPUT_COST_PER_MILLION = 4.00  # $4.00 per 1M output tokens
+HAIKU_CACHE_READ_COST_PER_MILLION = 0.08  # $0.08 per 1M cache read tokens (10% of input)
+HAIKU_CACHE_WRITE_COST_PER_MILLION = 1.00  # $1.00 per 1M cache write tokens (125% of input)
 
 
 def set_extraction_context(source_name: str, scan_id: Optional[str] = None) -> None:

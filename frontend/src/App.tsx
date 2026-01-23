@@ -259,6 +259,7 @@ function App() {
 
         // Fetch real token usage from API (last 7 days)
         let tokensFormatted = '0';
+        let claudeApiCalls = 0;
         try {
           const tokenData = await fetchTokenUsage(7);
           const totalTokens = tokenData.totalTokens;
@@ -267,6 +268,7 @@ function App() {
             : totalTokens > 1000
             ? `${(totalTokens / 1000).toFixed(1)}K`
             : totalTokens.toString();
+          claudeApiCalls = tokenData.totalCalls;
         } catch (err) {
           console.warn('Failed to fetch token usage:', err);
           tokensFormatted = 'N/A';
@@ -279,7 +281,7 @@ function App() {
           enterpriseAiRatio: ratio,
           verificationRate: verificationRate,
           tokensUsed: tokensFormatted,
-          claudeCalls: result.total,
+          claudeCalls: claudeApiCalls,
         }));
 
         setError(null);
