@@ -829,9 +829,12 @@ class CompanyAliasResponse(BaseModel):
     created_at: str
 
 
+VALID_ALIAS_TYPES = {"rebrand", "dba", "acquired_name", "typo"}
+
+
 class CompanyAliasCreate(BaseModel):
-    alias_name: str
-    alias_type: str = "rebrand"  # rebrand, dba, acquired_name, typo
+    alias_name: str = Field(..., min_length=1, max_length=255)
+    alias_type: str = Field(default="rebrand", pattern="^(rebrand|dba|acquired_name|typo)$")
     effective_date: Optional[str] = None
 
 

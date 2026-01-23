@@ -16,9 +16,10 @@ import re
 import httpx
 from dataclasses import dataclass
 from datetime import date, timedelta, datetime, timezone
-from typing import Optional, List, Tuple
-from xml.etree import ElementTree as ET
 from difflib import SequenceMatcher
+from json import JSONDecodeError
+from typing import Optional, List, Tuple
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -164,8 +165,11 @@ class SECDateMatcher:
         }
 
         try:
+            # URL-encode company name to handle special characters
+            encoded_name = quote(company_name, safe='')
+
             # First try the company search endpoint
-            company_url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={company_name}&type=D&output=json"
+            company_url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={encoded_name}&type=D&output=json"
             response = await self.client.get(company_url)
 
             if response.status_code == 200:
@@ -187,11 +191,11 @@ class SECDateMatcher:
                         if best_match:
                             cik = str(best_match.get("cik", "")).zfill(10)
                             return cik, best_match.get("name")
-                except:
-                    pass
+                except (JSONDecodeError, KeyError, TypeError):
+                    pass  # JSON parsing failed, try fallback
 
             # Fallback: Try atom feed search with company name
-            feed_url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={company_name}&type=D&output=atom"
+            feed_url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={encoded_name}&type=D&output=atom"
             response = await self.client.get(feed_url)
 
             if response.status_code == 200:

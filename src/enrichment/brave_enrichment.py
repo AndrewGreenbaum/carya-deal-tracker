@@ -12,6 +12,7 @@ FIX #7: Added cache for failed LinkedIn lookups to avoid redundant API calls.
 import asyncio
 import logging
 import re
+from difflib import SequenceMatcher
 from time import time
 
 logger = logging.getLogger(__name__)
@@ -550,14 +551,6 @@ LEADERSHIP_TITLES = {
     "managing director", "general partner", "owner", "principal",
 }
 
-# Non-leadership titles (likely extraction errors)
-NON_LEADERSHIP_TITLES = {
-    "vp", "vice president", "director", "head of", "manager",
-    "engineer", "developer", "analyst", "associate", "intern",
-    "consultant", "advisor", "board member",
-}
-
-
 @dataclass
 class LinkedInValidationResult:
     """Result of LinkedIn profile validation."""
@@ -581,15 +574,6 @@ def _is_leadership_title(title: str) -> bool:
     # Check for leadership patterns
     for leader in LEADERSHIP_TITLES:
         if leader in title_lower:
-            return True
-    return False
-
-
-def _is_non_leadership_title(title: str) -> bool:
-    """Check if a title clearly indicates a non-leadership role."""
-    title_lower = title.lower()
-    for non_leader in NON_LEADERSHIP_TITLES:
-        if non_leader in title_lower:
             return True
     return False
 
@@ -623,7 +607,6 @@ def _company_names_match(profile_company: str, expected_company: str) -> bool:
         return True
 
     # Levenshtein-like similarity for typos
-    from difflib import SequenceMatcher
     ratio = SequenceMatcher(None, norm_profile, norm_expected).ratio()
     return ratio > 0.8
 
@@ -697,7 +680,8 @@ async def validate_founder_linkedin(
 
             # Try to extract company from description
             # LinkedIn descriptions often format as: "Title at Company"
-            company_match = re.search(r'(?:at|@)\s+([A-Z][A-Za-z0-9\s&]+)', full_text)
+            # Allow lowercase company names too (some snippets have lowercase)
+            company_match = re.search(r'(?:at|@)\s+([A-Za-z][A-Za-z0-9\s&]+)', full_text)
             if company_match:
                 result.profile_current_company = company_match.group(1).strip()
 

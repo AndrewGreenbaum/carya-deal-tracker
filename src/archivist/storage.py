@@ -220,30 +220,18 @@ async def find_company_by_alias(
     Returns:
         The PortfolioCompany if name is a known alias, None otherwise.
     """
-    # Normalize the search name
-    normalized_name = normalize_company_name(name)
-
-    # First check if there's a direct alias match
-    # Query aliases table (case-insensitive)
+    # Query aliases table with JOIN to get company in single query (avoids N+1)
     stmt = (
-        select(CompanyAlias)
-        .join(PortfolioCompany, CompanyAlias.company_id == PortfolioCompany.id)
+        select(PortfolioCompany)
+        .join(CompanyAlias, CompanyAlias.company_id == PortfolioCompany.id)
         .where(CompanyAlias.alias_name.ilike(name))
     )
     result = await session.execute(stmt)
-    alias = result.scalar_one_or_none()
+    company = result.scalar_one_or_none()
 
-    if alias:
-        # Get the company this alias points to
-        company_stmt = select(PortfolioCompany).where(PortfolioCompany.id == alias.company_id)
-        company_result = await session.execute(company_stmt)
-        company = company_result.scalar_one_or_none()
-        if company:
-            logger.info(
-                f"Found company via alias: '{name}' → '{company.name}' "
-                f"(alias_type={alias.alias_type})"
-            )
-            return company
+    if company:
+        logger.info(f"Found company via alias: '{name}' → '{company.name}'")
+        return company
 
     return None
 
@@ -301,29 +289,25 @@ async def create_company_alias(
     Returns:
         CompanyAlias if created, None if already exists
     """
-    # Check if alias already exists
-    stmt = select(CompanyAlias).where(
-        CompanyAlias.company_id == company_id,
-        CompanyAlias.alias_name == alias_name,
-    )
-    result = await session.execute(stmt)
-    existing = result.scalar_one_or_none()
-
-    if existing:
-        logger.debug(f"Alias already exists: {alias_name} → company #{company_id}")
-        return None
-
-    alias = CompanyAlias(
+    # Use ON CONFLICT to prevent race conditions between check and insert
+    stmt = pg_insert(CompanyAlias).values(
         company_id=company_id,
         alias_name=alias_name,
         alias_type=alias_type,
         effective_date=effective_date,
-    )
-    session.add(alias)
-    await session.flush()
+    ).on_conflict_do_nothing(
+        index_elements=['company_id', 'alias_name']
+    ).returning(CompanyAlias)
 
-    logger.info(f"Created alias: {alias_name} → company #{company_id} (type={alias_type})")
-    return alias
+    result = await session.execute(stmt)
+    alias = result.scalar_one_or_none()
+
+    if alias:
+        logger.info(f"Created alias: {alias_name} → company #{company_id} (type={alias_type})")
+        return alias
+    else:
+        logger.debug(f"Alias already exists: {alias_name} → company #{company_id}")
+        return None
 
 
 async def get_company_aliases(
