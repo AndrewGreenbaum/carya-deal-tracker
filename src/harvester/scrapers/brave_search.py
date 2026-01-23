@@ -23,8 +23,8 @@ from ...config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Memory safety limit
-MAX_RESULTS_PER_QUERY = 500
+# Memory safety limit (Brave API max is 100 per request)
+MAX_RESULTS_PER_QUERY = 100
 
 # Fund name variations for search queries (primary name + alternates)
 # Core 18 tracked funds
@@ -64,73 +64,40 @@ EXCLUSION_TERMS = {
     "first_round": ["-\"first round pick\"", "-\"first round draft\"", "-NFL", "-NBA"],
 }
 
-# Partner name queries for funds with disabled website scrapers
-# OPTIMIZED: Reduced from 65 to 26 queries (~60% reduction)
-# Strategy: Fund-level query + top 2 most active partners per fund
-# Combined "led by X" and "X investment" patterns into single queries
+# Partner name queries for funds that need external source coverage
+# Only include funds with DISABLED scrapers or weak website coverage
+# Funds with working scrapers (a16z, sequoia, etc.) are covered by fund-level queries
+#
+# SYNTAX FIX: Use AND grouping - "Name" AND (term1 OR term2)
+# NOT: "Name" term1 OR term2 (parses as ("Name" term1) OR term2)
 PARTNER_QUERIES = {
+    # DISABLED SCRAPER - needs full partner coverage
     "benchmark": [
-        '"Benchmark" leads OR "led by Benchmark" funding',
-        '"Bill Gurley" leads OR investment OR funding',  # Most recognizable
-        '"Peter Fenton" leads OR investment OR funding',  # Very active
-        '"Matt Cohler" leads OR investment OR funding',  # Ex-Facebook, very active
-        '"Eric Vishria" leads OR investment OR funding',  # Infrastructure focus
-        '"Sarah Tavel" leads OR investment OR funding',  # Consumer/marketplace
-        '"Chetan Puttagunta" leads OR investment OR funding',  # Enterprise
+        '"Benchmark Capital" AND (leads OR "led by" OR investment) AND funding',
+        '"Bill Gurley" AND (leads OR investment OR funding) AND startup',
+        '"Peter Fenton" AND (leads OR investment OR funding) AND startup',
     ],
+    # DISABLED SCRAPER - needs full partner coverage
     "first_round": [
-        '"First Round Capital" leads OR "led by First Round"',
-        '"Josh Kopelman" leads OR investment OR funding',
-        '"Todd Jackson" leads OR investment OR funding',  # Partner, ex-Dropbox VP Product
-        '"Hayley Barna" leads OR investment OR funding',  # Partner, Birchbox co-founder
-        '"Brett Berson" leads OR investment OR funding',  # Talent/culture focus
+        '"First Round Capital" AND (leads OR "led by") AND funding',
+        '"Josh Kopelman" AND (leads OR investment OR funding) AND startup',
+        '"Todd Jackson" AND (leads OR investment OR funding) AND startup',
     ],
+    # DISABLED SCRAPER - needs full partner coverage
     "khosla": [
-        '"Khosla Ventures" leads OR "led by Khosla"',
-        '"Vinod Khosla" leads OR investment OR funding',
+        '"Khosla Ventures" AND (leads OR "led by") AND funding',
+        '"Vinod Khosla" AND (leads OR investment OR funding) AND startup',
     ],
+    # DISABLED SCRAPER - needs full partner coverage
     "thrive": [
-        '"Thrive Capital" leads OR "led by Thrive Capital"',
-        '"Josh Kushner" leads OR investment OR funding',
-        '"Kareem Zaki" leads OR investment OR funding',  # President, very active
-        '"Thrive Capital" AND (series OR seed OR funding) AND million',  # Precise coverage
+        '"Thrive Capital" AND (leads OR "led by") AND funding',
+        '"Josh Kushner" AND (leads OR investment OR funding) AND startup',
+        '"Kareem Zaki" AND (leads OR investment OR funding) AND startup',
     ],
+    # WEAK SCRAPER - needs partner backup
     "founders_fund": [
-        '"Founders Fund" leads OR "led by Founders Fund"',
-        '"Peter Thiel" leads OR investment OR funding',
-        '"Keith Rabois" leads OR investment OR funding',
-    ],
-    "insight": [
-        '"Insight Partners" leads OR "led by Insight Partners"',
-        '"Jeff Horing" leads OR investment OR funding',
-    ],
-    "index": [
-        '"Index Ventures" leads OR "led by Index Ventures"',
-        '"Danny Rimer" leads OR investment OR funding',
-    ],
-    "bessemer": [
-        '"Bessemer Venture Partners" leads OR "led by Bessemer"',
-        '"Byron Deeter" leads OR investment OR funding',
-    ],
-    "accel": [
-        '"Accel" leads OR "led by Accel" funding startup',
-        '"Accel Partners" leads OR investment series',
-    ],
-    "gv": [
-        '"Google Ventures" leads OR "led by Google Ventures"',
-        '"GV" leads startup funding -NYSE -stock',  # Exclude stock ticker
-    ],
-    "redpoint": [
-        '"Redpoint Ventures" leads OR "led by Redpoint"',
-        '"Satish Dharmaraj" leads OR investment OR funding',  # #5 Forbes Midas 2024, Snowflake investor
-    ],
-    "greylock": [
-        '"Greylock" leads OR "led by Greylock" funding',
-        '"Reid Hoffman" leads OR investment OR funding',
-    ],
-    "sequoia": [
-        '"Sequoia Capital" leads OR "led by Sequoia"',
-        '"Roelof Botha" leads OR investment OR funding',
+        '"Founders Fund" AND (leads OR "led by") AND funding',
+        '"Keith Rabois" AND (leads OR investment OR funding) AND startup',
     ],
 }
 
@@ -390,17 +357,17 @@ class BraveSearchScraper:
         query_to_fund: Dict[str, Tuple[str, str]] = {}  # query -> (fund_slug, type)
 
         for fund_slug in FUND_SEARCH_NAMES.keys():
-            # Lead query (reduced from 20 to 12 for token savings)
+            # Lead query - API cost is per-query not per-result, so maximize coverage
             lead_query = self._build_fund_query(fund_slug, "lead")
             if lead_query:
-                queries.append((lead_query, "news", 12, freshness, False))
+                queries.append((lead_query, "news", 25, freshness, True))  # use_cache=True
                 query_to_fund[lead_query] = (fund_slug, "lead")
 
-            # Participation query (reduced from 20 to 12 for token savings)
+            # Participation query
             if include_participation:
                 part_query = self._build_fund_query(fund_slug, "participation")
                 if part_query:
-                    queries.append((part_query, "news", 12, freshness, False))
+                    queries.append((part_query, "news", 25, freshness, True))  # use_cache=True
                     query_to_fund[part_query] = (fund_slug, "participation")
 
         # Execute in parallel
@@ -436,8 +403,8 @@ class BraveSearchScraper:
 
         for fund_slug, partner_queries in PARTNER_QUERIES.items():
             for query in partner_queries:
-                # Reduced from 15 to 10 for token savings
-                queries.append((query, "news", 10, freshness, True))  # use_cache=True
+                # API cost is per-query not per-result, so maximize coverage
+                queries.append((query, "news", 25, freshness, True))  # use_cache=True
                 query_to_fund[query] = fund_slug
 
         # Execute in parallel with caching
@@ -491,7 +458,7 @@ class BraveSearchScraper:
     ) -> List[BraveSearchResult]:
         """Search early signals with PARALLEL execution."""
         queries: List[Tuple[str, str, int, str, bool]] = [
-            (query, "news", 10, freshness, False)
+            (query, "news", 15, freshness, True)  # use_cache=True
             for query in EARLY_SIGNAL_QUERIES
         ]
 
