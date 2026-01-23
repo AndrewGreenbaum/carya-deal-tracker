@@ -66,7 +66,6 @@ function MarkdownContent({ content }: { content: string }) {
   const elements: JSX.Element[] = [];
   let inCodeBlock = false;
   let codeLines: string[] = [];
-  let codeLanguage = '';
   let inTable = false;
   let tableRows: string[][] = [];
 
@@ -163,7 +162,6 @@ function MarkdownContent({ content }: { content: string }) {
       } else {
         flushTable();
         inCodeBlock = true;
-        codeLanguage = line.slice(3);
       }
       continue;
     }
@@ -264,7 +262,6 @@ function SectionCard({ section, defaultOpen = false }: { section: Section; defau
 }
 
 export function ClaudeDocs() {
-  const [content, setContent] = useState<string>('');
   const [updatedAt, setUpdatedAt] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -277,7 +274,6 @@ export function ClaudeDocs() {
         const res = await fetch(`${API_BASE}/docs/claude`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        setContent(data.content);
         setUpdatedAt(data.updated_at);
         setSections(parseMarkdown(data.content));
         setError(null);
