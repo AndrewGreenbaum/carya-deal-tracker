@@ -104,9 +104,20 @@ URLS: Only extract if EXPLICITLY mentioned. Never guess/construct URLs. Set to n
 
 DATE: Extract from article (explicit or relative dates). If not found → round_date=null
 
-NEW ANNOUNCEMENT CHECK
-TRUE (is_new_announcement=True): "X raises $50M Series A", "Y closes seed round" - funding IS the topic
-FALSE: "X, backed by Sequoia, launches product..." - funding is background context
+NEW ANNOUNCEMENT CHECK (CRITICAL - prevents false positives)
+TRUE (is_new_announcement=True): Funding IS the article's primary topic
+FALSE (is_new_announcement=False): Funding mentioned as background/context
+
+ALWAYS SET FALSE FOR:
+- Competitor comparisons: "X competes with Y, which raised $48M..." → Y is background
+- Company profiles: "X, backed by Sequoia, launches..." → historical funding
+- Partnership/product news mentioning past funding
+- Any company that is NOT the article's primary subject
+
+ONLY SET TRUE IF:
+- Article headline/title is about THIS company's funding
+- Direct announcement: "X raises $50M", "X closes Series A"
+- Press release FROM the company raising funds
 
 Set announcement_evidence (if true) or announcement_rejection_reason (if false).
 
@@ -115,6 +126,10 @@ EXAMPLE 1: "BuildOps, backed by Founders Fund, expands integration"
 
 EXAMPLE 2: "Acme raises $50M Series B led by Sequoia"
 → is_new_announcement=True, evidence="raises $50M Series B led by Sequoia"
+
+EXAMPLE 3: "ResolveAI competes with Traversal, which raised $48M Series A led by KP"
+→ For Traversal: is_new_announcement=False, reason="competitor comparison, Traversal is not article subject"
+→ Only extract ResolveAI if the article announces THEIR funding
 
 Return ONE deal per article (the primary/new announcement, not historical mentions).
 Output valid JSON matching the schema."""
@@ -469,6 +484,52 @@ def _looks_like_article_title(text: str) -> bool:
     return False
 
 
+def _is_background_mention(
+    company_name: str,
+    article_text: str,
+    is_new_announcement: bool
+) -> tuple[bool, str]:
+    """
+    Check if extracted company is likely a background mention, not the article's subject.
+
+    Returns:
+        (is_background, reason): True if background mention, with explanation
+
+    Heuristics:
+    - If company name not in first 150 chars (headline/lede), likely background
+    - If is_new_announcement was already False, skip (already rejected)
+    - Exception: Very short articles where everything is "first 150 chars"
+    """
+    if not company_name or not article_text:
+        return False, ""
+
+    # Skip if already marked as not new announcement
+    if not is_new_announcement:
+        return False, ""
+
+    # Get the headline/lede (first 150 chars or first line, whichever is shorter)
+    first_line_end = article_text.find('\n')
+    if first_line_end == -1 or first_line_end > 150:
+        first_line_end = 150
+    headline_area = article_text[:first_line_end].lower()
+
+    company_lower = company_name.lower().strip()
+
+    # Short articles (<500 chars) - skip this check
+    if len(article_text) < 500:
+        return False, ""
+
+    # Check if company name appears in headline/lede
+    if company_lower not in headline_area:
+        # Check for partial match (e.g., "Traversal" in "Traversal AI")
+        company_words = company_lower.split()
+        main_word = company_words[0] if company_words else company_lower
+        if len(main_word) >= 4 and main_word not in headline_area:
+            return True, f"Company '{company_name}' not in article headline - likely background mention"
+
+    return False, ""
+
+
 # =============================================================================
 # ARTICLE TRUNCATION (Token Optimization)
 # =============================================================================
@@ -741,6 +802,21 @@ async def extract_deal(
                 response.announcement_rejection_reason = (
                     f"Company name looks like article title: {response.startup_name}"
                 )
+
+            # Post-process: check if company is background mention (not in headline)
+            if response and response.is_new_announcement:
+                is_background, reason = _is_background_mention(
+                    response.startup_name,
+                    article_text,
+                    response.is_new_announcement
+                )
+                if is_background:
+                    logger.warning(
+                        f"Rejecting background mention: '{response.startup_name}' "
+                        f"from {source_url} - {reason}"
+                    )
+                    response.is_new_announcement = False
+                    response.announcement_rejection_reason = reason
 
             return response
 

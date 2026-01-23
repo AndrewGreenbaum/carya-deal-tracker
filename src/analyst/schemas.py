@@ -17,6 +17,7 @@ class RoundType(str, Enum):
     """Investment round types."""
     PRE_SEED = "pre_seed"
     SEED = "seed"
+    SEED_PLUS_SERIES_A = "seed_plus_series_a"  # Combined Seed + Series A (announced together)
     SERIES_A = "series_a"
     SERIES_B = "series_b"
     SERIES_C = "series_c"
