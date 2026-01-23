@@ -94,6 +94,13 @@ class Deal(SQLModel, table=True):
 
     # Founders (stored as JSON list)
     founders_json: Optional[str] = None  # JSON: [{"name": "...", "title": "...", "linkedin_url": "..."}]
+    founders_validated: bool = Field(default=False)  # True if LinkedIn validation passed
+
+    # Date verification
+    date_confidence: float = Field(default=0.5)  # 0.0-1.0 confidence in announced_date
+    date_source_count: int = Field(default=1)  # Number of sources agreeing on date
+    sec_filing_date: Optional[date] = None  # Official SEC Form D filing date
+    sec_filing_url: Optional[str] = None  # Link to SEC Form D
 
     # Quality scores
     confidence_score: float = 0.0
@@ -332,3 +339,66 @@ class TokenUsage(SQLModel, table=True):
 
     # Calculated cost (USD)
     estimated_cost_usd: float = Field(default=0.0)
+
+
+class CompanyAlias(SQLModel, table=True):
+    """Track company rebrands and alternative names.
+
+    Enables deduplication across name changes (e.g., Bedrock Security → Bedrock Data).
+
+    alias_type:
+    - 'rebrand': Official name change
+    - 'dba': Doing business as
+    - 'acquired_name': Name before acquisition
+    - 'typo': Common misspelling to handle
+    """
+    __tablename__ = "company_aliases"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    company_id: int = Field(foreign_key="portfolio_companies.id", index=True)
+    alias_name: str = Field(index=True)  # The alternative name
+    alias_type: str = Field(default="rebrand")  # rebrand, dba, acquired_name, typo
+    effective_date: Optional[date] = None  # When the change happened
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class DateSource(SQLModel, table=True):
+    """Track dates from multiple sources with confidence scores.
+
+    Enables multi-source verification: SEC Form D (0.95), press releases (0.85),
+    article headlines (0.75), article body (0.60), article published date (0.40).
+
+    When 2+ sources agree on a date, confidence gets a 0.1 bonus.
+    """
+    __tablename__ = "date_sources"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    deal_id: int = Field(foreign_key="deals.id", index=True)
+    source_type: str  # sec_form_d, press_release, article_headline, article_body, article_published
+    source_url: Optional[str] = None
+    extracted_date: date
+    confidence_score: float = Field(default=0.5)
+    is_primary: bool = Field(default=False)  # Currently used as deal.announced_date
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class FounderValidation(SQLModel, table=True):
+    """Track LinkedIn validation results for founders.
+
+    Validates that extracted founders actually work at the company
+    with matching titles. Catches errors like extracting a VP instead of CEO.
+    """
+    __tablename__ = "founder_validations"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    deal_id: int = Field(foreign_key="deals.id", index=True)
+    founder_name: str
+    extracted_title: Optional[str] = None  # Title from article extraction
+    linkedin_url: Optional[str] = None
+    linkedin_current_company: Optional[str] = None  # Company from LinkedIn profile
+    linkedin_current_title: Optional[str] = None  # Title from LinkedIn profile
+    is_match: Optional[bool] = None  # Does LinkedIn match extracted company?
+    title_is_leadership: Optional[bool] = None  # Is the title CEO/founder/CTO?
+    validated_at: Optional[datetime] = None
+    validation_method: str = Field(default="brave_search")  # brave_search, manual
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

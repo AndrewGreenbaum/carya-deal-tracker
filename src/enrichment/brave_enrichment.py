@@ -543,6 +543,253 @@ async def persist_deal_linkedin_enrichment(
         return False
 
 
+# Leadership titles that indicate CEO/founder roles
+LEADERSHIP_TITLES = {
+    "ceo", "chief executive", "founder", "co-founder", "cofounder",
+    "president", "cto", "chief technology", "coo", "chief operating",
+    "managing director", "general partner", "owner", "principal",
+}
+
+# Non-leadership titles (likely extraction errors)
+NON_LEADERSHIP_TITLES = {
+    "vp", "vice president", "director", "head of", "manager",
+    "engineer", "developer", "analyst", "associate", "intern",
+    "consultant", "advisor", "board member",
+}
+
+
+@dataclass
+class LinkedInValidationResult:
+    """Result of LinkedIn profile validation."""
+    founder_name: str
+    linkedin_url: str
+    profile_current_company: Optional[str] = None
+    profile_current_title: Optional[str] = None
+    company_match: bool = False  # Does profile show this company?
+    title_is_leadership: bool = False  # Is title CEO/founder/CTO?
+    validation_method: str = "brave_search"
+
+    @property
+    def is_valid(self) -> bool:
+        """Returns True if the LinkedIn profile validates as a leader at this company."""
+        return self.company_match and self.title_is_leadership
+
+
+def _is_leadership_title(title: str) -> bool:
+    """Check if a title indicates a leadership role."""
+    title_lower = title.lower()
+    # Check for leadership patterns
+    for leader in LEADERSHIP_TITLES:
+        if leader in title_lower:
+            return True
+    return False
+
+
+def _is_non_leadership_title(title: str) -> bool:
+    """Check if a title clearly indicates a non-leadership role."""
+    title_lower = title.lower()
+    for non_leader in NON_LEADERSHIP_TITLES:
+        if non_leader in title_lower:
+            return True
+    return False
+
+
+def _company_names_match(profile_company: str, expected_company: str) -> bool:
+    """Check if two company names refer to the same company."""
+    if not profile_company or not expected_company:
+        return False
+
+    # Normalize both names
+    def normalize(name: str) -> str:
+        name = name.lower()
+        # Remove common suffixes
+        name = re.sub(r'\s*(inc\.?|llc|corp\.?|ltd\.?|co\.?|lp)$', '', name, flags=re.I)
+        # Remove "AI" suffix
+        name = re.sub(r'\s*ai$', '', name, flags=re.I)
+        # Remove punctuation and extra spaces
+        name = re.sub(r'[^\w\s]', '', name)
+        name = ' '.join(name.split())
+        return name.strip()
+
+    norm_profile = normalize(profile_company)
+    norm_expected = normalize(expected_company)
+
+    # Exact match
+    if norm_profile == norm_expected:
+        return True
+
+    # One contains the other (handles "Bedrock" vs "Bedrock Data")
+    if norm_profile in norm_expected or norm_expected in norm_profile:
+        return True
+
+    # Levenshtein-like similarity for typos
+    from difflib import SequenceMatcher
+    ratio = SequenceMatcher(None, norm_profile, norm_expected).ratio()
+    return ratio > 0.8
+
+
+async def validate_founder_linkedin(
+    founder_name: str,
+    company_name: str,
+    linkedin_url: str,
+    extracted_title: Optional[str] = None,
+) -> LinkedInValidationResult:
+    """
+    Validate that a LinkedIn profile matches the expected founder at a company.
+
+    Uses Brave Search to fetch LinkedIn profile data (without requiring LinkedIn API).
+
+    Args:
+        founder_name: Expected founder's name
+        company_name: Expected company name
+        linkedin_url: LinkedIn profile URL to validate
+        extracted_title: Title extracted from article (for comparison)
+
+    Returns:
+        LinkedInValidationResult with validation details
+    """
+    result = LinkedInValidationResult(
+        founder_name=founder_name,
+        linkedin_url=linkedin_url,
+    )
+
+    if not linkedin_url or "linkedin.com/in/" not in linkedin_url:
+        return result
+
+    # Extract profile path for search
+    match = re.search(r'linkedin\.com/in/([a-zA-Z0-9_-]+)', linkedin_url)
+    if not match:
+        return result
+
+    profile_path = match.group(1)
+
+    # Search Brave for this specific LinkedIn profile
+    client = get_brave_client()
+    if not client.validate_api_key():
+        logger.warning("BRAVE_SEARCH_KEY not configured for validation")
+        return result
+
+    try:
+        query = f'site:linkedin.com/in/{profile_path}'
+        data = await asyncio.wait_for(
+            client.search_web(query, count=3),
+            timeout=settings.enrichment_timeout,
+        )
+
+        if data is None:
+            return result
+
+        results = data.get("web", {}).get("results", [])
+
+        for search_result in results:
+            url = search_result.get("url", "")
+            title = search_result.get("title", "")
+            description = search_result.get("description", "")
+
+            # Verify this is the right profile
+            if profile_path.lower() not in url.lower():
+                continue
+
+            # Extract current company and title from LinkedIn snippet
+            # Format: "Name - Title at Company | LinkedIn"
+            # Or: "Name | Title - Company | LinkedIn"
+            full_text = f"{title} {description}"
+
+            # Try to extract company from description
+            # LinkedIn descriptions often format as: "Title at Company"
+            company_match = re.search(r'(?:at|@)\s+([A-Z][A-Za-z0-9\s&]+)', full_text)
+            if company_match:
+                result.profile_current_company = company_match.group(1).strip()
+
+            # Try to extract title
+            # Look for patterns like "CEO at", "Founder,", "CTO |"
+            title_match = re.search(
+                r'\b(CEO|CTO|COO|CFO|Founder|Co-Founder|President|Chief\s+\w+\s+Officer|Managing\s+Director|VP\s+of|Vice\s+President|Director\s+of|Head\s+of)\b',
+                full_text,
+                re.I
+            )
+            if title_match:
+                result.profile_current_title = title_match.group(0).strip()
+
+            # Validate company match
+            if result.profile_current_company:
+                result.company_match = _company_names_match(
+                    result.profile_current_company,
+                    company_name
+                )
+
+            # Validate title
+            if result.profile_current_title:
+                result.title_is_leadership = _is_leadership_title(result.profile_current_title)
+            elif extracted_title:
+                # Fall back to extracted title if we couldn't find one
+                result.title_is_leadership = _is_leadership_title(extracted_title)
+                if result.title_is_leadership:
+                    result.profile_current_title = extracted_title
+
+            # If we found data, break
+            if result.profile_current_company or result.profile_current_title:
+                break
+
+        if result.is_valid:
+            logger.info(
+                f"LinkedIn validation PASSED for {founder_name}: "
+                f"company={result.profile_current_company}, title={result.profile_current_title}"
+            )
+        elif result.company_match and not result.title_is_leadership:
+            logger.warning(
+                f"LinkedIn validation FAILED (non-leadership): {founder_name} at {company_name} "
+                f"has title '{result.profile_current_title}'"
+            )
+        elif not result.company_match:
+            logger.warning(
+                f"LinkedIn validation FAILED (wrong company): {founder_name} expected at {company_name} "
+                f"but profile shows '{result.profile_current_company}'"
+            )
+
+    except asyncio.TimeoutError:
+        logger.warning(f"LinkedIn validation timeout for {linkedin_url}")
+    except Exception as e:
+        logger.error(f"LinkedIn validation error for {linkedin_url}: {e}")
+
+    return result
+
+
+async def validate_all_founders(
+    company_name: str,
+    founders: List[Dict],
+) -> List[LinkedInValidationResult]:
+    """
+    Validate LinkedIn profiles for all founders.
+
+    Args:
+        company_name: Company name for validation
+        founders: List of founder dicts with name, title, linkedin_url
+
+    Returns:
+        List of validation results
+    """
+    results = []
+
+    for founder in founders:
+        linkedin_url = founder.get("linkedin_url")
+        if not linkedin_url:
+            continue
+
+        result = await validate_founder_linkedin(
+            founder_name=founder.get("name", ""),
+            company_name=company_name,
+            linkedin_url=linkedin_url,
+            extracted_title=founder.get("title"),
+        )
+        results.append(result)
+
+        # Rate limiting
+        await asyncio.sleep(0.5)
+
+    return results
+
+
 async def enrich_deal_founders_linkedin(
     deal_id: int,
     company_name: str,

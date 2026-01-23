@@ -33,6 +33,7 @@ from .models import (
     DealInvestor,
     Article,
     StealthDetection,
+    CompanyAlias,
 )
 from .database import get_session
 from ..analyst.schemas import DealExtraction, LeadStatus, EnterpriseCategory
@@ -205,6 +206,138 @@ def company_names_match(name1: str, name2: str) -> bool:
     # NO fuzzy matching - too many false positives
     # If names don't match exactly or with known suffix, they're different companies
     return False
+
+
+async def find_company_by_alias(
+    session: AsyncSession,
+    name: str,
+) -> Optional[PortfolioCompany]:
+    """
+    Check if a company name is an alias for an existing company.
+
+    This handles rebrands like "Bedrock Security" → "Bedrock Data".
+
+    Returns:
+        The PortfolioCompany if name is a known alias, None otherwise.
+    """
+    # Normalize the search name
+    normalized_name = normalize_company_name(name)
+
+    # First check if there's a direct alias match
+    # Query aliases table (case-insensitive)
+    stmt = (
+        select(CompanyAlias)
+        .join(PortfolioCompany, CompanyAlias.company_id == PortfolioCompany.id)
+        .where(CompanyAlias.alias_name.ilike(name))
+    )
+    result = await session.execute(stmt)
+    alias = result.scalar_one_or_none()
+
+    if alias:
+        # Get the company this alias points to
+        company_stmt = select(PortfolioCompany).where(PortfolioCompany.id == alias.company_id)
+        company_result = await session.execute(company_stmt)
+        company = company_result.scalar_one_or_none()
+        if company:
+            logger.info(
+                f"Found company via alias: '{name}' → '{company.name}' "
+                f"(alias_type={alias.alias_type})"
+            )
+            return company
+
+    return None
+
+
+async def company_names_match_with_aliases(
+    session: AsyncSession,
+    name1: str,
+    name2: str,
+) -> bool:
+    """
+    Check if two company names match, including via aliases.
+
+    This extends company_names_match() with alias lookup for rebrands.
+
+    Examples:
+        ("Bedrock Security", "Bedrock Data") → True (if alias exists)
+        ("Ramp", "Ramp AI") → True (known suffix)
+        ("OpenAI", "OpenAPI") → False (different names)
+    """
+    # First try direct match
+    if company_names_match(name1, name2):
+        return True
+
+    # Check if name1 is an alias for the company with name2
+    alias_company = await find_company_by_alias(session, name1)
+    if alias_company:
+        if company_names_match(alias_company.name, name2):
+            return True
+
+    # Check if name2 is an alias for the company with name1
+    alias_company = await find_company_by_alias(session, name2)
+    if alias_company:
+        if company_names_match(alias_company.name, name1):
+            return True
+
+    return False
+
+
+async def create_company_alias(
+    session: AsyncSession,
+    company_id: int,
+    alias_name: str,
+    alias_type: str = "rebrand",
+    effective_date: Optional[date] = None,
+) -> Optional[CompanyAlias]:
+    """
+    Create a new company alias.
+
+    Args:
+        company_id: ID of the company this alias refers to
+        alias_name: The alternative name (e.g., "Bedrock Security")
+        alias_type: Type of alias (rebrand, dba, acquired_name, typo)
+        effective_date: When the change happened (for rebrands)
+
+    Returns:
+        CompanyAlias if created, None if already exists
+    """
+    # Check if alias already exists
+    stmt = select(CompanyAlias).where(
+        CompanyAlias.company_id == company_id,
+        CompanyAlias.alias_name == alias_name,
+    )
+    result = await session.execute(stmt)
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        logger.debug(f"Alias already exists: {alias_name} → company #{company_id}")
+        return None
+
+    alias = CompanyAlias(
+        company_id=company_id,
+        alias_name=alias_name,
+        alias_type=alias_type,
+        effective_date=effective_date,
+    )
+    session.add(alias)
+    await session.flush()
+
+    logger.info(f"Created alias: {alias_name} → company #{company_id} (type={alias_type})")
+    return alias
+
+
+async def get_company_aliases(
+    session: AsyncSession,
+    company_id: int,
+) -> list[CompanyAlias]:
+    """Get all aliases for a company."""
+    stmt = (
+        select(CompanyAlias)
+        .where(CompanyAlias.company_id == company_id)
+        .order_by(CompanyAlias.created_at.desc())
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
 
 
 async def get_or_create_company(

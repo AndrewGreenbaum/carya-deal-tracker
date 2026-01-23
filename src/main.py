@@ -355,6 +355,20 @@ async def health_check():
     return response
 
 
+@app.get("/docs/claude")
+async def get_claude_docs():
+    """Return CLAUDE.md content for documentation page."""
+    import os
+    claude_path = os.path.join(os.path.dirname(__file__), "..", "CLAUDE.md")
+    try:
+        with open(claude_path, "r") as f:
+            content = f.read()
+        updated_at = os.path.getmtime(claude_path)
+        return {"content": content, "updated_at": updated_at}
+    except FileNotFoundError:
+        return {"content": "# Documentation not found", "updated_at": 0}
+
+
 @app.get("/usage/tokens", response_model=TokenUsageResponse)
 async def get_token_usage(
     days: int = Query(7, ge=1, le=90, description="Number of days to look back"),
@@ -793,6 +807,166 @@ async def export_deals_csv(
 
     except Exception as e:
         logger.error("Request failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ==================== Company Aliases ====================
+
+class CompanyAliasResponse(BaseModel):
+    id: int
+    company_id: int
+    alias_name: str
+    alias_type: str
+    effective_date: Optional[str] = None
+    created_at: str
+
+
+class CompanyAliasCreate(BaseModel):
+    alias_name: str
+    alias_type: str = "rebrand"  # rebrand, dba, acquired_name, typo
+    effective_date: Optional[str] = None
+
+
+class CompanyAliasListResponse(BaseModel):
+    company_id: int
+    company_name: str
+    aliases: List[CompanyAliasResponse]
+
+
+@app.get("/companies/{company_id}/aliases", response_model=CompanyAliasListResponse)
+async def get_company_aliases_endpoint(
+    company_id: int,
+):
+    """
+    Get all aliases for a company.
+
+    Aliases track rebrands, DBAs, and alternative names.
+    For example: "Bedrock Security" → "Bedrock Data" (rebrand).
+    """
+    from .archivist.storage import get_company_aliases
+
+    try:
+        async with get_session() as session:
+            # Get company
+            company = await session.get(PortfolioCompany, company_id)
+            if not company:
+                raise HTTPException(status_code=404, detail="Company not found")
+
+            # Get aliases
+            aliases = await get_company_aliases(session, company_id)
+
+            return CompanyAliasListResponse(
+                company_id=company_id,
+                company_name=company.name,
+                aliases=[
+                    CompanyAliasResponse(
+                        id=a.id,
+                        company_id=a.company_id,
+                        alias_name=a.alias_name,
+                        alias_type=a.alias_type,
+                        effective_date=a.effective_date.isoformat() if a.effective_date else None,
+                        created_at=a.created_at.isoformat() if a.created_at else "",
+                    )
+                    for a in aliases
+                ]
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get company aliases: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/companies/{company_id}/aliases", response_model=CompanyAliasResponse)
+async def create_company_alias_endpoint(
+    company_id: int,
+    alias: CompanyAliasCreate,
+):
+    """
+    Create a new alias for a company.
+
+    Alias types:
+    - rebrand: Official name change (e.g., Bedrock Security → Bedrock Data)
+    - dba: Doing business as (legal name differs from brand)
+    - acquired_name: Name before acquisition
+    - typo: Common misspelling to handle
+    """
+    from .archivist.storage import create_company_alias
+    from datetime import date
+
+    try:
+        async with get_session() as session:
+            # Verify company exists
+            company = await session.get(PortfolioCompany, company_id)
+            if not company:
+                raise HTTPException(status_code=404, detail="Company not found")
+
+            # Parse effective date if provided
+            effective_date = None
+            if alias.effective_date:
+                try:
+                    effective_date = date.fromisoformat(alias.effective_date)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+
+            # Create alias
+            new_alias = await create_company_alias(
+                session,
+                company_id=company_id,
+                alias_name=alias.alias_name,
+                alias_type=alias.alias_type,
+                effective_date=effective_date,
+            )
+
+            if not new_alias:
+                raise HTTPException(status_code=409, detail="Alias already exists")
+
+            await session.commit()
+
+            return CompanyAliasResponse(
+                id=new_alias.id,
+                company_id=new_alias.company_id,
+                alias_name=new_alias.alias_name,
+                alias_type=new_alias.alias_type,
+                effective_date=new_alias.effective_date.isoformat() if new_alias.effective_date else None,
+                created_at=new_alias.created_at.isoformat() if new_alias.created_at else "",
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to create company alias: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.delete("/companies/{company_id}/aliases/{alias_id}")
+async def delete_company_alias_endpoint(
+    company_id: int,
+    alias_id: int,
+):
+    """Delete a company alias."""
+    from .archivist.models import CompanyAlias
+
+    try:
+        async with get_session() as session:
+            # Get alias
+            alias = await session.get(CompanyAlias, alias_id)
+            if not alias:
+                raise HTTPException(status_code=404, detail="Alias not found")
+
+            if alias.company_id != company_id:
+                raise HTTPException(status_code=400, detail="Alias does not belong to this company")
+
+            await session.delete(alias)
+            await session.commit()
+
+            return {"status": "deleted", "alias_id": alias_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete company alias: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
