@@ -2,24 +2,32 @@
 Redpoint Ventures Scraper.
 
 Source: https://www.redpoint.com/content-hub/
-Format: HTML (React/Gatsby - requires www. prefix)
+Format: PLAYWRIGHT (Gatsby/React - requires JavaScript rendering)
 
 The content hub has funding news articles with card-module classes.
 Filter for articles linking to /content-hub/category/funding-news/.
+
+NOTE: This is a Gatsby/React site - requires Playwright to render
+the dynamic card content. Simple HTML parsing returns empty results.
 """
 
+import logging
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
-from ..base_scraper import SimpleHTMLScraper, RawArticle, NormalizedArticle
+from ..playwright_scraper import PlaywrightScraper
+from ..base_scraper import RawArticle, NormalizedArticle
 from ...config.funds import FUND_REGISTRY
 
+logger = logging.getLogger(__name__)
 
-class RedpointScraper(SimpleHTMLScraper):
+
+class RedpointScraper(PlaywrightScraper):
     """
     Scraper for Redpoint Ventures content hub.
 
     Key: Uses www.redpoint.com (redirects from non-www).
+    Uses Playwright to render Gatsby/React content.
     Looks for card-module elements with funding news.
     """
 
@@ -30,9 +38,14 @@ class RedpointScraper(SimpleHTMLScraper):
 
     async def fetch(self, url: Optional[str] = None) -> str:
         target_url = url or f"{self.base_url}/content-hub/"
-        response = await self.client.get(target_url, follow_redirects=True)
-        response.raise_for_status()
-        return response.text
+
+        # Use Playwright to render the Gatsby/React content
+        html = await self.fetch_rendered(
+            target_url,
+            wait_selector="[class*='card'], [class*='Card'], article, .content-item",
+            wait_ms=3000  # Give Gatsby time to hydrate
+        )
+        return html
 
     async def parse(self, html: str) -> List[RawArticle]:
         soup = BeautifulSoup(html, "lxml")
@@ -130,10 +143,36 @@ class RedpointScraper(SimpleHTMLScraper):
                     tags=tags,
                 ))
 
+        logger.info(f"Redpoint: Found {len(articles)} articles from content hub")
         return articles
+
+    def _parse_date(self, date_str: str) -> Optional[str]:
+        """Parse date string to ISO format."""
+        if not date_str:
+            return None
+
+        from datetime import datetime
+
+        # Try common date formats
+        formats = [
+            "%Y-%m-%d",
+            "%B %d, %Y",
+            "%b %d, %Y",
+            "%m/%d/%Y",
+        ]
+
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(date_str.strip(), fmt)
+                return dt.date().isoformat()
+            except ValueError:
+                continue
+
+        return None
 
     async def normalize(self, raw: RawArticle) -> NormalizedArticle:
         try:
+            # Fetch full article using Playwright for consistency
             full_html = await self.fetch(raw.url)
             text = self._extract_text(full_html)
 
@@ -141,7 +180,8 @@ class RedpointScraper(SimpleHTMLScraper):
             if "funding_news" in (raw.tags or []):
                 text = f"[FUNDING NEWS]\n{text}"
 
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to fetch full article {raw.url}: {e}")
             text = self._extract_text(raw.html)
 
         return NormalizedArticle(
@@ -151,6 +191,21 @@ class RedpointScraper(SimpleHTMLScraper):
             published_date=raw.published_date,
             tags=raw.tags,
         )
+
+    def _extract_text(self, html: str) -> str:
+        """Extract readable text from HTML."""
+        soup = BeautifulSoup(html, "lxml")
+
+        # Remove script and style elements
+        for element in soup(["script", "style", "nav", "header", "footer"]):
+            element.decompose()
+
+        # Get text
+        text = soup.get_text(separator="\n", strip=True)
+
+        # Clean up whitespace
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
+        return "\n".join(lines)
 
 
 def create_scraper() -> RedpointScraper:

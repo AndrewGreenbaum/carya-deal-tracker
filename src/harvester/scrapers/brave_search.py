@@ -73,10 +73,17 @@ PARTNER_QUERIES = {
         '"Benchmark" leads OR "led by Benchmark" funding',
         '"Bill Gurley" leads OR investment OR funding',  # Most recognizable
         '"Peter Fenton" leads OR investment OR funding',  # Very active
+        '"Matt Cohler" leads OR investment OR funding',  # Ex-Facebook, very active
+        '"Eric Vishria" leads OR investment OR funding',  # Infrastructure focus
+        '"Sarah Tavel" leads OR investment OR funding',  # Consumer/marketplace
+        '"Chetan Puttagunta" leads OR investment OR funding',  # Enterprise
     ],
     "first_round": [
         '"First Round Capital" leads OR "led by First Round"',
         '"Josh Kopelman" leads OR investment OR funding',
+        '"Chris Fralic" leads OR investment OR funding',  # Very active partner
+        '"Phin Barnes" leads OR investment OR funding',  # Active partner
+        '"Brett Berson" leads OR investment OR funding',  # Talent/culture focus
     ],
     "khosla": [
         '"Khosla Ventures" leads OR "led by Khosla"',
@@ -85,6 +92,8 @@ PARTNER_QUERIES = {
     "thrive": [
         '"Thrive Capital" leads OR "led by Thrive"',
         '"Josh Kushner" leads OR investment OR funding',
+        '"Kareem Zaki" leads OR investment OR funding',  # President, very active
+        '"Thrive" funding startup series million',  # Broader coverage
     ],
     "founders_fund": [
         '"Founders Fund" leads OR "led by Founders Fund"',

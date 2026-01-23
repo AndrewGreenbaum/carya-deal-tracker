@@ -118,9 +118,9 @@ FUND_REGISTRY: dict[str, FundConfig] = {
         name="Redpoint",
         slug="redpoint",
         ingestion_url="https://www.redpoint.com/content-hub/",
-        scraper_type=ScraperType.HTML,
+        scraper_type=ScraperType.PLAYWRIGHT,  # Gatsby/React requires JS rendering
         required_keywords=["Funding News"],
-        extraction_notes="MUST use www. prefix. Filter by 'Funding News' tag. Gatsby/React site."
+        extraction_notes="MUST use www. prefix. Filter by 'Funding News' tag. Gatsby/React site - requires Playwright."
     ),
 
     "greylock": FundConfig(
