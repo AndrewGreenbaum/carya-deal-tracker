@@ -25,6 +25,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Tracker } from './components/Tracker';
 import { AdminFeedback } from './components/AdminFeedback';
 import { TokenUsage } from './components/TokenUsage';
+import { ClaudeDocs } from './components/ClaudeDocs';
 import {
   fetchDeals,
   fetchFunds,
@@ -106,6 +107,11 @@ function App() {
   // Check for admin page URL
   if (window.location.pathname === '/admin') {
     return <AdminFeedback />;
+  }
+
+  // Check for claude docs page URL
+  if (window.location.pathname === '/claude') {
+    return <ClaudeDocs />;
   }
 
   // View state

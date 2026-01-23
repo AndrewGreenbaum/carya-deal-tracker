@@ -19,3 +19,6 @@ export { Tracker } from './Tracker';
 export { TrackerColumn } from './TrackerColumn';
 export { TrackerCard } from './TrackerCard';
 export { TrackerModal } from './TrackerModal';
+
+// Documentation
+export { ClaudeDocs } from './ClaudeDocs';
