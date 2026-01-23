@@ -104,6 +104,8 @@ URLS: Only extract if EXPLICITLY mentioned. Never guess/construct URLs. Set to n
 
 DATE: Extract from article (explicit or relative dates). If not found → round_date=null
 
+ROUND TYPES: pre_seed, seed, seed_plus_series_a (when Seed AND Series A announced together as single round), series_a, series_b, series_c, series_d, series_e_plus, growth, debt, unknown
+
 NEW ANNOUNCEMENT CHECK (CRITICAL - prevents false positives)
 TRUE (is_new_announcement=True): Funding IS the article's primary topic
 FALSE (is_new_announcement=False): Funding mentioned as background/context
@@ -127,9 +129,9 @@ EXAMPLE 1: "BuildOps, backed by Founders Fund, expands integration"
 EXAMPLE 2: "Acme raises $50M Series B led by Sequoia"
 → is_new_announcement=True, evidence="raises $50M Series B led by Sequoia"
 
-EXAMPLE 3: "ResolveAI competes with Traversal, which raised $48M Series A led by KP"
-→ For Traversal: is_new_announcement=False, reason="competitor comparison, Traversal is not article subject"
-→ Only extract ResolveAI if the article announces THEIR funding
+EXAMPLE 3: "ResolveAI raises $30M Series A; competes with Traversal, which raised $48M"
+→ Extract ResolveAI (the PRIMARY subject raising funds)
+→ IGNORE Traversal (background mention, not primary subject)
 
 Return ONE deal per article (the primary/new announcement, not historical mentions).
 Output valid JSON matching the schema."""
@@ -487,30 +489,28 @@ def _looks_like_article_title(text: str) -> bool:
 def _is_background_mention(
     company_name: str,
     article_text: str,
-    is_new_announcement: bool
 ) -> tuple[bool, str]:
     """
     Check if extracted company is likely a background mention, not the article's subject.
+
+    Only call this when is_new_announcement=True (already checked at call site).
 
     Returns:
         (is_background, reason): True if background mention, with explanation
 
     Heuristics:
     - If company name not in first 150 chars (headline/lede), likely background
-    - If is_new_announcement was already False, skip (already rejected)
     - Exception: Very short articles where everything is "first 150 chars"
     """
     if not company_name or not article_text:
         return False, ""
 
-    # Skip if already marked as not new announcement
-    if not is_new_announcement:
-        return False, ""
-
-    # Get the headline/lede (first 150 chars or first line, whichever is shorter)
+    # Get the headline/lede (at least 150 chars to catch long company names)
     first_line_end = article_text.find('\n')
-    if first_line_end == -1 or first_line_end > 150:
+    if first_line_end == -1:
         first_line_end = 150
+    else:
+        first_line_end = max(first_line_end, 150)  # At least 150 chars
     headline_area = article_text[:first_line_end].lower()
 
     company_lower = company_name.lower().strip()
@@ -524,7 +524,7 @@ def _is_background_mention(
         # Check for partial match (e.g., "Traversal" in "Traversal AI")
         company_words = company_lower.split()
         main_word = company_words[0] if company_words else company_lower
-        if len(main_word) >= 4 and main_word not in headline_area:
+        if len(main_word) >= 2 and main_word not in headline_area:
             return True, f"Company '{company_name}' not in article headline - likely background mention"
 
     return False, ""
@@ -808,7 +808,6 @@ async def extract_deal(
                 is_background, reason = _is_background_mention(
                     response.startup_name,
                     article_text,
-                    response.is_new_announcement
                 )
                 if is_background:
                     logger.warning(
