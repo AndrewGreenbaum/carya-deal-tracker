@@ -171,18 +171,13 @@ class RedpointScraper(PlaywrightScraper):
         return None
 
     async def normalize(self, raw: RawArticle) -> NormalizedArticle:
-        try:
-            # Fetch full article using Playwright for consistency
-            full_html = await self.fetch(raw.url)
-            text = self._extract_text(full_html)
+        # OPTIMIZED: Use the card HTML we already scraped instead of re-fetching
+        # This reduces runtime from 143s to ~3s (avoids 14 extra Playwright fetches)
+        text = self._extract_text(raw.html)
 
-            # Flag funding news articles
-            if "funding_news" in (raw.tags or []):
-                text = f"[FUNDING NEWS]\n{text}"
-
-        except Exception as e:
-            logger.warning(f"Failed to fetch full article {raw.url}: {e}")
-            text = self._extract_text(raw.html)
+        # Flag funding news articles
+        if "funding_news" in (raw.tags or []):
+            text = f"[FUNDING NEWS]\n{text}"
 
         return NormalizedArticle(
             url=raw.url,

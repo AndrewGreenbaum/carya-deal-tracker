@@ -81,8 +81,8 @@ PARTNER_QUERIES = {
     "first_round": [
         '"First Round Capital" leads OR "led by First Round"',
         '"Josh Kopelman" leads OR investment OR funding',
-        '"Chris Fralic" leads OR investment OR funding',  # Very active partner
-        '"Phin Barnes" leads OR investment OR funding',  # Active partner
+        '"Todd Jackson" leads OR investment OR funding',  # Partner, ex-Dropbox VP Product
+        '"Hayley Barna" leads OR investment OR funding',  # Partner, Birchbox co-founder
         '"Brett Berson" leads OR investment OR funding',  # Talent/culture focus
     ],
     "khosla": [
@@ -90,10 +90,10 @@ PARTNER_QUERIES = {
         '"Vinod Khosla" leads OR investment OR funding',
     ],
     "thrive": [
-        '"Thrive Capital" leads OR "led by Thrive"',
+        '"Thrive Capital" leads OR "led by Thrive Capital"',
         '"Josh Kushner" leads OR investment OR funding',
         '"Kareem Zaki" leads OR investment OR funding',  # President, very active
-        '"Thrive" funding startup series million',  # Broader coverage
+        '"Thrive Capital" AND (series OR seed OR funding) AND million',  # Precise coverage
     ],
     "founders_fund": [
         '"Founders Fund" leads OR "led by Founders Fund"',
@@ -122,7 +122,7 @@ PARTNER_QUERIES = {
     ],
     "redpoint": [
         '"Redpoint Ventures" leads OR "led by Redpoint"',
-        '"Tomasz Tunguz" leads OR investment OR funding',  # Very active blogger
+        '"Satish Dharmaraj" leads OR investment OR funding',  # #5 Forbes Midas 2024, Snowflake investor
     ],
     "greylock": [
         '"Greylock" leads OR "led by Greylock" funding',
