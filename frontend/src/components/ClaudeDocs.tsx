@@ -17,7 +17,7 @@ interface Section {
   content: string;
 }
 
-// Parse markdown into sections
+// Parse markdown into sections (only h1 and h2 create sections, h3 stays as content)
 function parseMarkdown(content: string): Section[] {
   const lines = content.split('\n');
   const sections: Section[] = [];
@@ -27,17 +27,17 @@ function parseMarkdown(content: string): Section[] {
   for (const line of lines) {
     const h1Match = line.match(/^# (.+)$/);
     const h2Match = line.match(/^## (.+)$/);
-    const h3Match = line.match(/^### (.+)$/);
 
-    if (h1Match || h2Match || h3Match) {
+    // Only h1 and h2 create new sections - h3 stays as content
+    if (h1Match || h2Match) {
       // Save previous section
       if (currentSection) {
         currentSection.content = currentContent.join('\n');
         sections.push(currentSection);
       }
 
-      const title = h1Match?.[1] || h2Match?.[1] || h3Match?.[1] || '';
-      const level = h1Match ? 1 : h2Match ? 2 : 3;
+      const title = h1Match?.[1] || h2Match?.[1] || '';
+      const level = h1Match ? 1 : 2;
 
       currentSection = {
         id: title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -215,6 +215,28 @@ function MarkdownContent({ content }: { content: string }) {
         <li key={elements.length} className="text-slate-300 ml-4 my-1 list-decimal">
           {renderInline(line.replace(/^\d+\. /, ''))}
         </li>
+      );
+      continue;
+    }
+
+    // H3 headers (subheadings within sections)
+    const h3Match = line.match(/^### (.+)$/);
+    if (h3Match) {
+      elements.push(
+        <h4 key={elements.length} className="text-lg font-semibold text-white mt-6 mb-2">
+          {h3Match[1]}
+        </h4>
+      );
+      continue;
+    }
+
+    // H4 headers
+    const h4Match = line.match(/^#### (.+)$/);
+    if (h4Match) {
+      elements.push(
+        <h5 key={elements.length} className="text-base font-medium text-slate-200 mt-4 mb-2">
+          {h4Match[1]}
+        </h5>
       );
       continue;
     }
