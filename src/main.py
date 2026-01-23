@@ -359,14 +359,22 @@ async def health_check():
 async def get_claude_docs():
     """Return CLAUDE.md content for documentation page."""
     import os
-    claude_path = os.path.join(os.path.dirname(__file__), "..", "CLAUDE.md")
-    try:
-        with open(claude_path, "r") as f:
-            content = f.read()
-        updated_at = os.path.getmtime(claude_path)
-        return {"content": content, "updated_at": updated_at}
-    except FileNotFoundError:
-        return {"content": "# Documentation not found", "updated_at": 0}
+    # Try multiple paths for local dev and Docker deployment
+    possible_paths = [
+        os.path.join(os.path.dirname(__file__), "..", "CLAUDE.md"),  # Local dev
+        "/app/CLAUDE.md",  # Docker/Railway
+        "CLAUDE.md",  # Current working dir
+    ]
+    for claude_path in possible_paths:
+        if os.path.exists(claude_path):
+            try:
+                with open(claude_path, "r") as f:
+                    content = f.read()
+                updated_at = os.path.getmtime(claude_path)
+                return {"content": content, "updated_at": updated_at}
+            except Exception:
+                continue
+    return {"content": "# Documentation not found", "updated_at": 0}
 
 
 @app.get("/usage/tokens", response_model=TokenUsageResponse)

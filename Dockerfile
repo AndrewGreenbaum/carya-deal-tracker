@@ -57,6 +57,7 @@ RUN playwright install-deps chromium
 COPY src/ ./src/
 COPY alembic/ ./alembic/
 COPY alembic.ini .
+COPY CLAUDE.md .
 
 # Set environment
 ENV PYTHONUNBUFFERED=1
