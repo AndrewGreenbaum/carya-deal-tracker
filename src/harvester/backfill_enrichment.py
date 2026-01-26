@@ -41,9 +41,22 @@ class BackfillStats:
 
 
 async def get_deals_missing_website() -> List[Dict]:
-    """Get all deals where the company is missing a website."""
+    """Get all deals where the company is missing a website.
+
+    FIX: Now includes lead investor via subquery to avoid N+1 query problem.
+    """
     async with get_session() as session:
-        # Join deals with companies that have no website
+        # Subquery to get lead investor for each deal
+        lead_investor_subq = (
+            select(
+                DealInvestor.deal_id,
+                DealInvestor.investor_name,
+            )
+            .where(DealInvestor.is_lead == True)
+            .subquery()
+        )
+
+        # Join deals with companies that have no website, plus lead investor
         stmt = (
             select(
                 Deal.id,
@@ -52,8 +65,10 @@ async def get_deals_missing_website() -> List[Dict]:
                 PortfolioCompany.website,
                 Deal.founders_json,
                 Deal.enterprise_category,
+                lead_investor_subq.c.investor_name.label("lead_investor"),
             )
             .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
+            .outerjoin(lead_investor_subq, Deal.id == lead_investor_subq.c.deal_id)
             .where(
                 or_(
                     PortfolioCompany.website.is_(None),
@@ -79,14 +94,28 @@ async def get_deals_missing_website() -> List[Dict]:
                 "company_name": name,
                 "founders_json": row.founders_json,
                 "enterprise_category": row.enterprise_category,
+                "lead_investor": row.lead_investor,  # FIX: Include in result
             })
 
         return deals
 
 
 async def get_deals_missing_founder_linkedin() -> List[Dict]:
-    """Get all deals that have founders but missing LinkedIn URLs."""
+    """Get all deals that have founders but missing LinkedIn URLs.
+
+    FIX: Now includes lead investor via subquery to avoid N+1 query problem.
+    """
     async with get_session() as session:
+        # Subquery to get lead investor for each deal
+        lead_investor_subq = (
+            select(
+                DealInvestor.deal_id,
+                DealInvestor.investor_name,
+            )
+            .where(DealInvestor.is_lead == True)
+            .subquery()
+        )
+
         # Get deals with founders_json that might be missing LinkedIn
         stmt = (
             select(
@@ -94,8 +123,10 @@ async def get_deals_missing_founder_linkedin() -> List[Dict]:
                 PortfolioCompany.id.label("company_id"),
                 PortfolioCompany.name.label("company_name"),
                 Deal.founders_json,
+                lead_investor_subq.c.investor_name.label("lead_investor"),
             )
             .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
+            .outerjoin(lead_investor_subq, Deal.id == lead_investor_subq.c.deal_id)
             .where(Deal.founders_json.isnot(None))
             .order_by(Deal.created_at.desc())
         )
@@ -129,13 +160,18 @@ async def get_deals_missing_founder_linkedin() -> List[Dict]:
                     "company_name": name,
                     "founders": founders,
                     "founders_missing_linkedin": founders_missing_linkedin,
+                    "lead_investor": row.lead_investor,  # FIX: Include in result
                 })
 
         return deals
 
 
 async def get_lead_investor_for_deal(deal_id: int) -> Optional[str]:
-    """Get the lead investor name for a deal."""
+    """Get the lead investor name for a deal.
+
+    LEGACY: This function is kept for backwards compatibility.
+    New code should use the lead_investor field from get_deals_missing_* functions.
+    """
     async with get_session() as session:
         stmt = (
             select(DealInvestor.investor_name)
@@ -388,8 +424,8 @@ async def backfill_websites(
                 deal_id = deal["deal_id"]
                 category = deal.get("enterprise_category")
 
-                # Get lead investor for context
-                investor = await get_lead_investor_for_deal(deal_id)
+                # FIX: Use lead investor from query result (avoids N+1 query problem)
+                investor = deal.get("lead_investor")
 
                 logger.info(f"[{i+1}/{len(deals)}] Enriching {company_name}...")
 
@@ -426,6 +462,11 @@ async def backfill_websites(
                 if stats.total_processed % 10 == 0:
                     await session.commit()
                     logger.info(f"  -> Committed {stats.total_processed} updates")
+
+            # FIX: Final commit for any remaining uncommitted changes
+            if stats.total_processed % 10 != 0:
+                await session.commit()
+                logger.info(f"  -> Final commit ({stats.total_processed} total updates)")
 
     logger.info(f"Website backfill complete: {stats.websites_found} found, {stats.failed_website} failed")
     return stats
@@ -467,8 +508,8 @@ async def backfill_linkedin(
                 founders = deal["founders"]
                 founders_missing = deal["founders_missing_linkedin"]
 
-                # Get lead investor for context
-                investor = await get_lead_investor_for_deal(deal_id)
+                # FIX: Use lead investor from query result (avoids N+1 query problem)
+                investor = deal.get("lead_investor")
 
                 logger.info(f"[{i+1}/{len(deals)}] Enriching LinkedIn for {company_name} ({len(founders_missing)} founders)...")
 
@@ -515,6 +556,11 @@ async def backfill_linkedin(
                 if stats.total_processed % 10 == 0:
                     await session.commit()
                     logger.info(f"  -> Committed {stats.total_processed} updates")
+
+            # FIX: Final commit for any remaining uncommitted changes
+            if stats.total_processed % 10 != 0:
+                await session.commit()
+                logger.info(f"  -> Final commit ({stats.total_processed} total updates)")
 
     logger.info(f"LinkedIn backfill complete: {stats.linkedins_found} found, {stats.failed_linkedin} deals with no results")
     return stats

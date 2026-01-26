@@ -12,7 +12,7 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Optional, List, Dict, Tuple
 
 from ..common.brave_client import get_brave_client

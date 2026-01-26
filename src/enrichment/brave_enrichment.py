@@ -496,8 +496,10 @@ async def enrich_companies_batch(
             except Exception as e:
                 logger.error(f"Error enriching {name}: {e}")
                 result = BraveEnrichmentResult(company_name=name)
-        # Rate limit delay OUTSIDE semaphore to allow parallel fetching
-        await asyncio.sleep(delay_seconds)
+            finally:
+                # FIX: Rate limit delay INSIDE semaphore to ensure proper spacing
+                # between API calls (previous location caused all requests to fire at once)
+                await asyncio.sleep(delay_seconds)
         return (name, result)
 
     # Run all enrichments in parallel (limited by semaphore)

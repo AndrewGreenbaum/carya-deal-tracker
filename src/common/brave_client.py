@@ -144,7 +144,9 @@ class BraveClient:
                 headers={
                     "X-Subscription-Token": self.api_key,
                     "Accept": "application/json",
-                }
+                },
+                # FIX: Add connection limits to prevent pool exhaustion under load
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             )
         return self._client
 

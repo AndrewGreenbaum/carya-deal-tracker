@@ -1034,6 +1034,11 @@ async def scheduled_scrape_job():
     clear_global_seen_urls()
     logger.info(f"[{job_id}] Global URL dedup cache cleared for fresh run")
 
+    # FIX: Clear LinkedIn failed-lookup cache for fresh enrichment attempts
+    from ..enrichment.brave_enrichment import clear_linkedin_cache
+    clear_linkedin_cache()
+    logger.info(f"[{job_id}] LinkedIn cache cleared for fresh run")
+
     start_time = datetime.now(timezone.utc)
 
     try:
