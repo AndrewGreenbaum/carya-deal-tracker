@@ -65,7 +65,8 @@ class TechCrunchScraper:
         self.feeds = feeds or list(TECHCRUNCH_FEEDS.values())
         self.client = httpx.AsyncClient(
             timeout=30,
-            headers={"User-Agent": "BudTracker/1.0 (Investment Research)"}
+            headers={"User-Agent": "BudTracker/1.0 (Investment Research)"},
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
     async def __aenter__(self):

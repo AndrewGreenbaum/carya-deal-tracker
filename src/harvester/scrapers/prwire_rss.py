@@ -20,7 +20,10 @@ import feedparser
 import httpx
 from dataclasses import dataclass
 
+from bs4 import BeautifulSoup
+
 from ..base_scraper import NormalizedArticle
+from ..fund_matcher import match_fund_name
 from ...config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -83,7 +86,8 @@ class PRWireRSSScraper:
     def __init__(self):
         self.client = httpx.AsyncClient(
             timeout=30,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; BudTracker/1.0)"}
+            headers={"User-Agent": "Mozilla/5.0 (compatible; BudTracker/1.0)"},
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
     async def __aenter__(self):
@@ -124,6 +128,49 @@ class PRWireRSSScraper:
         """Check if article mentions a tracked VC fund or partner."""
         text = f"{title} {description}".lower()
         return any(kw in text for kw in TRACKED_FUND_KEYWORDS)
+
+    async def fetch_full_article(self, url: str) -> Optional[str]:
+        """Fetch full article content from PR wire URL."""
+        try:
+            response = await self.client.get(
+                url,
+                follow_redirects=True,
+                timeout=15,
+            )
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.text, 'lxml')
+
+            # Remove unwanted elements
+            for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'ads']):
+                tag.decompose()
+
+            # PR wire article selectors (PRNewswire, GlobeNewswire, BusinessWire)
+            for selector in [
+                '.release-body',  # PRNewswire
+                '.main-body',  # PRNewswire alt
+                '#content-body',  # GlobeNewswire
+                '.article-body',  # GlobeNewswire alt
+                '.bw-release-story',  # BusinessWire
+                '.entry-content',
+                'article',
+                '.post-content',
+                'main',
+            ]:
+                content = soup.select_one(selector)
+                if content:
+                    text = content.get_text(separator='\n', strip=True)
+                    if len(text) > 200:
+                        return text[:8000]
+
+            return None
+
+        except httpx.HTTPError as e:
+            logger.debug(f"HTTP error fetching PR wire article {url}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error fetching PR wire article {url}: {e}", exc_info=True)
+            return None
 
     def _get_source_name(self, feed_url: str) -> str:
         """Get source name from feed URL."""
@@ -224,19 +271,39 @@ class PRWireRSSScraper:
             logger.info(f"Articles mentioning tracked funds: {len(filtered)}")
             all_articles = filtered
 
-        # Convert to NormalizedArticle
+        # Convert to NormalizedArticle with full content fetch
         normalized: List[NormalizedArticle] = []
         for article in all_articles:
-            # Use description as text since we don't have full content yet
-            # The full content will be fetched via Firecrawl or direct scrape
+            # Skip articles without valid URLs
+            url = (article.url or '').strip()
+            if not url or not url.startswith(('http://', 'https://')):
+                continue
+
+            # Skip articles without publication dates
+            if not article.published_date:
+                logger.debug(f"Skipping article without date: {article.title}")
+                continue
+
+            # Fetch full article content
+            full_text = await self.fetch_full_article(article.url)
+            text = full_text or f"{article.title}\n\n{article.description}"
+
+            # Match fund using centralized matcher
+            fund_slug = match_fund_name(text)
+
             normalized.append(NormalizedArticle(
                 title=article.title,
                 url=article.url,
-                text=f"{article.title}\n\n{article.description}",
-                published_date=article.published_date.date() if article.published_date else None,
-                fund_slug=article.source,  # Use source as fund_slug for tracking
+                text=text,
+                published_date=article.published_date.date(),
+                fund_slug=fund_slug or article.source,  # Use matched fund or source as fallback
+                fetched_at=datetime.now(timezone.utc),
             ))
 
+            # Rate limit between article fetches
+            await asyncio.sleep(0.3)
+
+        logger.info(f"Scraped {len(normalized)} funding articles from PR wires")
         return normalized
 
 

@@ -727,20 +727,9 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         logger.error("TechCrunch scraping failed: %s", e)
         results["techcrunch"] = {"error": str(e)}
 
-    # 6. FORTUNE TERM SHEET (free)
-    try:
-        from ..harvester.scrapers.fortune_term_sheet import FortuneTermSheetScraper
-
-        async with FortuneTermSheetScraper() as scraper:
-            articles = await scraper.scrape_all(hours_back=days * 24)
-
-        stats = await process_external_articles(articles, "fortune")
-        results["fortune"] = stats
-        total_deals_saved += stats["deals_saved"]
-
-    except Exception as e:
-        logger.error("Fortune Term Sheet scraping failed: %s", e)
-        results["fortune"] = {"error": str(e)}
+    # 6. FORTUNE TERM SHEET - DISABLED (Fortune blocked RSS access Dec 2024)
+    # Deal coverage provided by Brave Search and other RSS sources
+    results["fortune"] = {"articles_found": 0, "deals_saved": 0, "status": "disabled"}
 
     # 7. LINKEDIN JOBS / STEALTH DETECTOR (uses Brave Search)
     if settings.brave_search_key:

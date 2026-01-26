@@ -89,7 +89,8 @@ class CrunchbaseNewsScraper:
             headers={
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
                 "Accept": "application/rss+xml, application/xml, text/xml, */*",
-            }
+            },
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
     async def __aenter__(self):

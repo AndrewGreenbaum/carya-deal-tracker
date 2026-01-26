@@ -86,7 +86,8 @@ class VentureburnScraper:
             headers={
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
                 "Accept": "application/rss+xml, application/xml, text/xml, */*",
-            }
+            },
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
     async def __aenter__(self):
@@ -112,10 +113,21 @@ class VentureburnScraper:
                 articles = []
 
                 for entry in feed.entries:
-                    # Parse publication date
+                    # Skip entries without valid URLs
+                    url = (entry.get('link') or '').strip()
+                    if not url or not url.startswith(('http://', 'https://')):
+                        continue
+
+                    # Parse publication date with fallbacks and safety
                     pub_date = None
-                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                        pub_date = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                    for date_field in ['published_parsed', 'updated_parsed', 'created_parsed']:
+                        date_tuple = getattr(entry, date_field, None)
+                        if date_tuple and len(date_tuple) >= 6:
+                            try:
+                                pub_date = datetime(*date_tuple[:6], tzinfo=timezone.utc)
+                                break
+                            except (TypeError, ValueError):
+                                continue
 
                     # Clean description
                     description = entry.get('summary', '') or entry.get('description', '')
@@ -123,14 +135,17 @@ class VentureburnScraper:
                         soup = BeautifulSoup(description, 'lxml')
                         description = soup.get_text(strip=True)[:2000]
 
-                    # Extract categories
+                    # Extract categories with safety
                     categories = []
                     if hasattr(entry, 'tags'):
-                        categories = [tag.term for tag in entry.tags if hasattr(tag, 'term')]
+                        try:
+                            categories = [tag.term for tag in entry.tags if hasattr(tag, 'term')]
+                        except (TypeError, AttributeError):
+                            pass
 
                     articles.append(VentureburnArticle(
                         title=entry.get('title', ''),
-                        url=entry.get('link', ''),
+                        url=url,
                         description=description,
                         published=pub_date,
                         author=entry.get('author', None),
@@ -195,6 +210,39 @@ class VentureburnScraper:
         # FIX #47: Use centralized fund_matcher instead of local patterns
         return match_fund_name(search_text)
 
+    async def fetch_full_article(self, url: str) -> Optional[str]:
+        """Fetch full article content from URL."""
+        try:
+            response = await self.client.get(
+                url,
+                follow_redirects=True,
+                timeout=15,
+            )
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.text, 'lxml')
+
+            # Remove unwanted elements
+            for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'ads']):
+                tag.decompose()
+
+            # Ventureburn article selectors
+            for selector in ['.entry-content', '.post-content', 'article', '.content', 'main']:
+                content = soup.select_one(selector)
+                if content:
+                    text = content.get_text(separator='\n', strip=True)
+                    if len(text) > 200:
+                        return text[:8000]
+
+            return None
+
+        except httpx.HTTPError as e:
+            logger.debug(f"HTTP error fetching Ventureburn article {url}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error fetching Ventureburn article {url}: {e}", exc_info=True)
+            return None
+
     async def scrape_all(self, hours_back: int = 168) -> List[NormalizedArticle]:
         """
         Full scraping pipeline.
@@ -213,6 +261,15 @@ class VentureburnScraper:
             if not self.is_funding_article(article):
                 continue
 
+            # Skip articles without publication dates
+            if not article.published:
+                logger.debug(f"Skipping article without date: {article.title}")
+                continue
+
+            # Fetch full article content
+            full_text = await self.fetch_full_article(article.url)
+            text = full_text or f"{article.title}\n\n{article.description}"
+
             fund_slug = self.match_tracked_fund(article)
 
             # Build tags
@@ -222,14 +279,18 @@ class VentureburnScraper:
             normalized.append(NormalizedArticle(
                 url=article.url,
                 title=article.title,
-                text=f"{article.title}\n\n{article.description}",
-                published_date=article.published.date() if article.published else date.today(),
+                text=text,
+                published_date=article.published.date(),
                 author=article.author or "Ventureburn",
                 tags=tags,
                 fund_slug=fund_slug or "",
                 fetched_at=datetime.now(timezone.utc),
             ))
 
+            # Rate limit between article fetches
+            await asyncio.sleep(0.3)
+
+        logger.info(f"Scraped {len(normalized)} funding articles from Ventureburn")
         return normalized
 
 
