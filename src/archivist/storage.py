@@ -34,6 +34,7 @@ from .models import (
     Article,
     StealthDetection,
     CompanyAlias,
+    DateSource,
 )
 from .database import get_session
 from ..analyst.schemas import DealExtraction, LeadStatus, EnterpriseCategory
@@ -550,7 +551,10 @@ async def save_deal(
 
     # Determine announced_date for duplicate check
     # FIX: Improved date validation to prevent wrong dates
+    # FIX: Track date source for proper confidence scoring
     announced_date = extraction.round_date
+    date_source_type = None  # Will be set based on how we got the date
+    date_confidence = 0.5  # Default confidence
 
     # Cross-validate: warn if LLM date differs significantly from article date
     if announced_date and article_published_date:
@@ -561,6 +565,18 @@ async def save_deal(
                 f"LLM extracted {announced_date}, article published {article_published_date}, "
                 f"diff={diff_days} days - using LLM date but flagging for review"
             )
+            # Lower confidence when there's a mismatch
+            date_source_type = "article_body"
+            date_confidence = 0.55
+        else:
+            # LLM date matches article date - higher confidence
+            date_source_type = "article_body"
+            date_confidence = 0.70
+
+    elif announced_date:
+        # LLM extracted date without article date to validate
+        date_source_type = "article_body"
+        date_confidence = 0.60
 
     # Fallback to article date only if:
     # 1. LLM didn't extract a date
@@ -569,6 +585,8 @@ async def save_deal(
         today = date.today()
         if article_published_date <= today:
             announced_date = article_published_date
+            date_source_type = "article_published"
+            date_confidence = 0.40  # Lowest confidence - just article publish date
         else:
             logger.warning(
                 f"Skipping future article date for {extraction.startup_name}: "
@@ -592,20 +610,43 @@ async def save_deal(
 
         # Cross-reference: Update to earlier date if this article has one
         # This ensures we use the earliest known announcement date
+        # FIX: Also increment date_source_count and update confidence when dates match
         if announced_date and existing_deal.announced_date:
+            date_diff = abs((announced_date - existing_deal.announced_date).days)
+
             if announced_date < existing_deal.announced_date:
                 logger.info(
                     f"Updating deal #{existing_deal.id} date: "
                     f"{existing_deal.announced_date} → {announced_date} (earlier source found)"
                 )
                 existing_deal.announced_date = announced_date
+                existing_deal.date_confidence = max(existing_deal.date_confidence, date_confidence)
+                existing_deal.date_source_count = (existing_deal.date_source_count or 1) + 1
                 existing_deal.updated_at = datetime.now(timezone.utc)
+
+            elif date_diff <= 1:
+                # Dates match (within 1 day tolerance) - this is CONFIRMATION
+                # Increment source count and boost confidence (multi-source bonus)
+                existing_deal.date_source_count = (existing_deal.date_source_count or 1) + 1
+                # Multi-source bonus: +0.1 for each additional confirming source
+                new_confidence = min(0.95, existing_deal.date_confidence + 0.1)
+                if new_confidence > existing_deal.date_confidence:
+                    logger.info(
+                        f"Date confirmed for deal #{existing_deal.id}: "
+                        f"{existing_deal.announced_date} (sources: {existing_deal.date_source_count}, "
+                        f"confidence: {existing_deal.date_confidence:.2f} → {new_confidence:.2f})"
+                    )
+                    existing_deal.date_confidence = new_confidence
+                    existing_deal.updated_at = datetime.now(timezone.utc)
+
         elif announced_date and not existing_deal.announced_date:
             # Deal had no date, now we have one
             logger.info(
                 f"Setting deal #{existing_deal.id} date: {announced_date} (previously null)"
             )
             existing_deal.announced_date = announced_date
+            existing_deal.date_confidence = date_confidence
+            existing_deal.date_source_count = 1
             existing_deal.updated_at = datetime.now(timezone.utc)
 
         # FIX: Use ON CONFLICT DO NOTHING to prevent race condition
@@ -651,12 +692,15 @@ async def save_deal(
     # announced_date was already determined above for duplicate check
 
     # Create deal with enterprise AI classification
+    # FIX: Set date_confidence based on extraction source
     deal = Deal(
         company_id=company.id,
         round_type=extraction.round_label.value,
         amount=extraction.amount,
         valuation=extraction.valuation,
         announced_date=announced_date,
+        date_confidence=date_confidence,  # FIX: Set based on source
+        date_source_count=1 if announced_date else 0,  # FIX: Initialize source count
         is_lead_confirmed=extraction.tracked_fund_is_lead,
         lead_partner_name=extraction.tracked_fund_partner,
         verification_snippet=extraction.verification_snippet,
@@ -669,6 +713,18 @@ async def save_deal(
     )
     session.add(deal)
     await session.flush()
+
+    # FIX: Populate DateSource table for traceability
+    if announced_date and date_source_type:
+        date_source_record = DateSource(
+            deal_id=deal.id,
+            source_type=date_source_type,
+            source_url=article_url,
+            extracted_date=announced_date,
+            confidence_score=date_confidence,
+            is_primary=True,
+        )
+        session.add(date_source_record)
 
     # Add lead investors
     for investor in extraction.lead_investors:

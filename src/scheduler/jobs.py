@@ -370,6 +370,192 @@ async def enrich_new_deals(limit: int = 25):
         logger.error("Enrichment job failed: %s", e, exc_info=True)
         return 0
 
+async def enrich_deal_dates(limit: int = 50) -> int:
+    """
+    Enrich deals with accurate announcement dates.
+
+    FIX: This module existed but was never called - dates were never being enriched!
+
+    Uses two sources:
+    1. Brave Search - finds news articles with page_age metadata
+    2. SEC Form D - official legal filing dates (highest confidence)
+
+    Prioritizes deals:
+    1. Deals with NULL announced_date
+    2. Deals with low date_confidence (<0.7)
+    3. Recent deals (last 90 days) that could benefit from SEC verification
+
+    Returns:
+        Number of deals with dates enriched
+    """
+    try:
+        from ..enrichment.date_enrichment import DateEnrichmentClient, persist_deal_date
+        from ..enrichment.sec_date_matcher import SECDateMatcher, persist_sec_date_match, DATE_CONFIDENCE
+        from ..archivist.database import get_session
+        from ..archivist.models import Deal, PortfolioCompany, DealInvestor, DateSource
+        from sqlalchemy import select, or_
+        from sqlalchemy.orm import selectinload
+        from datetime import date, timedelta
+        import json
+
+        enriched_count = 0
+        today = date.today()
+        recent_cutoff = today - timedelta(days=90)
+
+        # Fetch deals needing date enrichment
+        async with get_session() as db:
+            query = (
+                select(Deal)
+                .options(
+                    selectinload(Deal.company),
+                    selectinload(Deal.investors),
+                )
+                .where(
+                    or_(
+                        Deal.announced_date.is_(None),
+                        Deal.date_confidence < 0.7,
+                    )
+                )
+                .order_by(Deal.created_at.desc())
+                .limit(limit)
+            )
+
+            result = await db.execute(query)
+            deals = result.scalars().all()
+
+            if not deals:
+                logger.info("No deals needing date enrichment")
+                return 0
+
+            # Build list for processing
+            deals_to_enrich = []
+            for deal in deals:
+                company_name = deal.company.name if deal.company else None
+                if not company_name or company_name.lower() in ("unknown", "n/a", "<unknown>"):
+                    continue
+
+                # Get lead investor name
+                lead_investor = None
+                for inv in deal.investors:
+                    if inv.is_lead:
+                        lead_investor = inv.investor_name
+                        break
+
+                deals_to_enrich.append({
+                    "deal_id": deal.id,
+                    "company_name": company_name,
+                    "round_type": deal.round_type,
+                    "lead_investor": lead_investor,
+                    "amount": deal.amount,
+                    "current_date": deal.announced_date,
+                    "current_confidence": deal.date_confidence,
+                })
+
+        logger.info(f"Processing {len(deals_to_enrich)} deals for date enrichment")
+
+        # Process each deal with date enrichment
+        async with DateEnrichmentClient() as date_client:
+            async with SECDateMatcher() as sec_matcher:
+                for deal_info in deals_to_enrich:
+                    try:
+                        found_date = None
+                        date_source = None
+                        confidence = 0.0
+                        source_url = None
+
+                        # Try 1: SEC Form D (highest confidence = 0.95)
+                        try:
+                            sec_match = await sec_matcher.search_company(
+                                company_name=deal_info["company_name"],
+                                amount=deal_info["amount"],
+                                date_hint=deal_info["current_date"],
+                            )
+                            if sec_match and sec_match.is_confident_match:
+                                found_date = sec_match.sec_filing_date
+                                date_source = "sec_form_d"
+                                confidence = DATE_CONFIDENCE["sec_form_d"]
+                                source_url = sec_match.sec_filing_url
+
+                                # Persist SEC match
+                                await persist_sec_date_match(deal_info["deal_id"], sec_match)
+                                logger.info(
+                                    f"SEC match for {deal_info['company_name']}: "
+                                    f"{found_date} (confidence={confidence})"
+                                )
+                        except Exception as e:
+                            logger.debug(f"SEC lookup failed for {deal_info['company_name']}: {e}")
+
+                        # Try 2: Brave Search (if no SEC match)
+                        if not found_date:
+                            try:
+                                brave_result = await date_client.enrich_deal_date(
+                                    deal_id=deal_info["deal_id"],
+                                    company_name=deal_info["company_name"],
+                                    round_type=deal_info["round_type"],
+                                    lead_investor=deal_info["lead_investor"],
+                                )
+                                if brave_result.found_date:
+                                    found_date = brave_result.found_date
+                                    date_source = brave_result.date_source
+                                    source_url = brave_result.search_url
+
+                                    # Set confidence based on source
+                                    if brave_result.confidence == "high":
+                                        confidence = 0.80
+                                    elif brave_result.confidence == "medium":
+                                        confidence = 0.65
+                                    else:
+                                        confidence = 0.50
+
+                            except Exception as e:
+                                logger.debug(f"Brave date lookup failed for {deal_info['company_name']}: {e}")
+
+                        # Update deal if we found a better date
+                        if found_date and confidence > deal_info["current_confidence"]:
+                            async with get_session() as db:
+                                deal = await db.get(Deal, deal_info["deal_id"])
+                                if deal:
+                                    # Update deal with new date info
+                                    deal.announced_date = found_date
+                                    deal.date_confidence = confidence
+                                    deal.date_source_count = (deal.date_source_count or 0) + 1
+
+                                    if date_source == "sec_form_d" and source_url:
+                                        deal.sec_filing_date = found_date
+                                        deal.sec_filing_url = source_url
+
+                                    # Record in DateSource table
+                                    date_record = DateSource(
+                                        deal_id=deal_info["deal_id"],
+                                        source_type=date_source or "brave_search",
+                                        source_url=source_url,
+                                        extracted_date=found_date,
+                                        confidence_score=confidence,
+                                        is_primary=True,
+                                    )
+                                    db.add(date_record)
+
+                                    await db.commit()
+                                    enriched_count += 1
+                                    logger.info(
+                                        f"Updated date for {deal_info['company_name']}: "
+                                        f"{found_date} (source={date_source}, confidence={confidence:.2f})"
+                                    )
+
+                        # Rate limit between deals
+                        await asyncio.sleep(0.5)
+
+                    except Exception as e:
+                        logger.warning(f"Error enriching date for {deal_info['company_name']}: {e}")
+                        continue
+
+        return enriched_count
+
+    except Exception as e:
+        logger.error(f"Date enrichment job failed: {e}", exc_info=True)
+        return 0
+
+
 # Global scheduler instance
 scheduler: Optional[AsyncIOScheduler] = None
 
@@ -1120,6 +1306,12 @@ async def scheduled_scrape_job():
         # FIX #6: Increased from 50 to 100 to improve coverage (was taking weeks at 50)
         enriched = await enrich_new_deals(limit=100)
         logger.info(f"[{job_id}] Enrichment complete: {enriched} companies updated")
+
+        # ===== PHASE 4: Enrich deal dates =====
+        # FIX: Date enrichment was never running - all the code existed but wasn't called
+        logger.info(f"[{job_id}] Phase 4: Starting date enrichment (Brave + SEC verification)")
+        dates_enriched = await enrich_deal_dates(limit=50)
+        logger.info(f"[{job_id}] Date enrichment complete: {dates_enriched} deals updated")
 
         # Send notification
         await send_scrape_summary(

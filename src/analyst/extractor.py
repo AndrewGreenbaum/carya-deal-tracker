@@ -109,7 +109,13 @@ COMPANY NAME: Must be actual company, NOT article titles like "America's Constru
 
 URLS: Only extract if EXPLICITLY mentioned. Never guess/construct URLs. Set to null if not in article.
 
-DATE: Extract from article (explicit or relative dates). If not found → round_date=null
+DATE EXTRACTION (IMPORTANT - affects data accuracy):
+- Extract the ANNOUNCEMENT/CLOSING date of the funding round, NOT the article's publication date
+- Look for phrases like: "announced today", "closed on", "raised on [date]", "as of [date]"
+- Relative dates: "yesterday", "last week", "earlier this month" → calculate actual date
+- If multiple dates in article, prefer the one closest to announcement language
+- If no date can be determined → round_date=null (don't guess)
+- Reject dates >1 year old (likely historical mention, not new announcement)
 
 ROUND TYPES: pre_seed, seed, seed_plus_series_a (when Seed AND Series A announced together as single round), series_a, series_b, series_c, series_d, series_e_plus, growth, debt, unknown
 
