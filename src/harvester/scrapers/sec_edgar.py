@@ -295,22 +295,19 @@ class SECEdgarScraper:
                 )
                 return None  # Don't proceed with incomplete data
 
-            # Parse XML - SEC Form D may use namespace prefixes
+            # Parse XML - SEC Form D uses plain element names (no namespace prefixes)
             root = ET.fromstring(response.text)
 
-            # Extract offering amount (namespace-agnostic search)
-            offering_elem = root.find(".//{*}totalOfferingAmount")
-            if offering_elem is None:
-                offering_elem = root.find(".//totalOfferingAmount")
+            # Extract offering amount
+            offering_elem = root.find(".//totalOfferingAmount")
             if offering_elem is not None and offering_elem.text and offering_elem.text.strip():
                 try:
                     filing.total_offering = f"${int(float(offering_elem.text)):,}"
                 except (ValueError, TypeError):
-                    pass
+                    pass  # "Indefinite" or other non-numeric values
 
-            amount_sold_elem = root.find(".//{*}totalAmountSold")
-            if amount_sold_elem is None:
-                amount_sold_elem = root.find(".//totalAmountSold")
+            # Extract amount sold
+            amount_sold_elem = root.find(".//totalAmountSold")
             if amount_sold_elem is not None and amount_sold_elem.text and amount_sold_elem.text.strip():
                 try:
                     filing.amount_raised = f"${int(float(amount_sold_elem.text)):,}"
@@ -363,27 +360,27 @@ class SECEdgarScraper:
             return filing
 
         except ET.ParseError as e:
-            # Specific handling for malformed XML
+            # Malformed XML - can't extract reliable data
             logger.error(
                 f"SEC EDGAR XML parse error for {filing.company_name}: {e}",
                 exc_info=True
             )
-            return filing  # Return partial filing
+            return None  # FIX: Return None for consistency (partial data causes downstream issues)
 
         except httpx.TimeoutException as e:
             logger.warning(f"SEC EDGAR timeout fetching details for {filing.company_name}: {e}")
-            return filing
+            return None  # FIX: Return None - missing details would cause incorrect classification
 
         except httpx.ConnectError as e:
             logger.warning(f"SEC EDGAR connection error for {filing.company_name}: {e}")
-            return filing
+            return None  # FIX: Return None for consistency
 
         except Exception as e:
             logger.error(
                 f"Unexpected error fetching filing details for {filing.company_name}: {e}",
                 exc_info=True
             )
-            return filing
+            return None  # FIX: Return None for consistency
 
     def match_tracked_fund(self, filing: FormDFiling) -> Optional[str]:
         """
@@ -432,9 +429,11 @@ class SECEdgarScraper:
             except (ValueError, TypeError):
                 amount_ok = False
 
-        # Return True if industry matches AND amount is significant
-        # OR if it's a first sale (new funding round)
-        return (industry_match and amount_ok) or filing.is_first_sale
+        # FIX: Tightened heuristic - require industry match in ALL cases
+        # Previous: (industry_match and amount_ok) or filing.is_first_sale
+        # Problem: is_first_sale alone matched real estate, medical facilities, investment funds
+        # Now: Always require industry match, plus either significant amount OR first sale
+        return industry_match and (amount_ok or filing.is_first_sale)
 
     async def to_normalized_article(
         self,
