@@ -64,16 +64,33 @@ STARTUP_FRIENDLY_AGENTS = [
     "Clerky",  # YC favorite
 ]
 
-# Search queries for finding Delaware incorporations
-DELAWARE_QUERIES = [
-    '"Delaware corporation" "artificial intelligence" formed 2024',
+# Search query templates for finding Delaware incorporations
+# Use get_delaware_queries() to get queries with current year
+_DELAWARE_QUERY_TEMPLATES = [
+    '"Delaware corporation" "artificial intelligence" formed {year}',
     '"incorporated in Delaware" startup AI OR "machine learning"',
-    '"Delaware LLC" technology startup founded',
+    '"Delaware LLC" technology startup founded {year}',
     'site:icis.corp.delaware.gov new filing technology',
     '"Stripe Atlas" startup Delaware incorporated',
     '"Delaware C-Corp" seed funding OR "Series A"',
     '"newly incorporated" Delaware tech startup',
 ]
+
+
+def get_delaware_queries() -> List[str]:
+    """Get Delaware search queries with current year substituted."""
+    current_year = date.today().year
+    return [q.format(year=current_year) for q in _DELAWARE_QUERY_TEMPLATES]
+
+
+def _get_brave_freshness(days_back: int) -> str:
+    """Map days_back to Brave Search freshness parameter."""
+    if days_back <= 1:
+        return "pd"  # Past day
+    elif days_back <= 7:
+        return "pw"  # Past week
+    else:
+        return "pm"  # Past month
 
 
 @dataclass
@@ -110,6 +127,7 @@ class DelawareCorpsScraper:
                 "Accept": "text/html,application/xhtml+xml,application/xml",
             },
             follow_redirects=True,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
     async def __aenter__(self):
@@ -211,13 +229,29 @@ class DelawareCorpsScraper:
         agent_lower = agent.lower()
         return any(sa.lower() in agent_lower for sa in STARTUP_FRIENDLY_AGENTS)
 
+    def _deduplicate_entities(self, entities: List[DelawareEntity]) -> List[DelawareEntity]:
+        """Deduplicate entities by normalized name."""
+        seen_names = set()
+        unique_entities = []
+        for entity in entities:
+            name_key = entity.entity_name.lower().strip()
+            if name_key not in seen_names:
+                seen_names.add(name_key)
+                unique_entities.append(entity)
+        return unique_entities
+
     async def search_recent_incorporations(
         self,
         days_back: int = 7,
-        max_results: int = 50,
     ) -> List[DelawareEntity]:
         """
         Search for recent Delaware incorporations via shared BraveClient.
+
+        Args:
+            days_back: How many days to look back (1=past day, 7=past week, 30+=past month)
+
+        Returns:
+            List of unique DelawareEntity objects (not limited - caller should filter/score)
         """
         entities = []
 
@@ -226,15 +260,19 @@ class DelawareCorpsScraper:
             logger.warning("BRAVE_SEARCH_KEY not configured for Delaware search")
             return entities
 
+        # Get freshness based on days_back
+        freshness = _get_brave_freshness(days_back)
+
         # Limit to 3 queries to balance coverage vs Brave API cost
         # Full 7 queries would ~2x API spend with diminishing returns
         # Primary signals (tech formation, startup incorporation, AI) covered
-        for query in DELAWARE_QUERIES[:3]:
+        queries = get_delaware_queries()
+        for query in queries[:3]:
             # Use shared BraveClient (handles retry, rate limiting, caching)
             data = await brave_client.search_web(
                 query=query,
                 count=20,
-                freshness="pw",  # Past week
+                freshness=freshness,
                 use_cache=True,  # Cache Delaware queries
             )
 
@@ -250,16 +288,8 @@ class DelawareCorpsScraper:
 
             await brave_client.delay()  # Rate limit between queries
 
-        # Deduplicate by name
-        seen_names = set()
-        unique_entities = []
-        for entity in entities:
-            name_key = entity.entity_name.lower().strip()
-            if name_key not in seen_names:
-                seen_names.add(name_key)
-                unique_entities.append(entity)
-
-        return unique_entities[:max_results]
+        # Deduplicate and return all (caller handles scoring/limiting)
+        return self._deduplicate_entities(entities)
 
     def _parse_search_result(self, result: Dict[str, Any]) -> Optional[DelawareEntity]:
         """Parse Brave search result into DelawareEntity."""
@@ -606,20 +636,22 @@ class DelawareCorpsScraper:
         self,
         days_back: int = 7,
         min_score: int = 3,
+        max_results: int = 50,
     ) -> List[NormalizedArticle]:
         """
         Full scraping pipeline for Delaware incorporations.
 
         Args:
-            days_back: How many days back to search
+            days_back: How many days back to search (1=past day, 7=past week, 30+=past month)
             min_score: Minimum score to include (filters noise)
+            max_results: Maximum number of results to return (applied AFTER scoring)
 
         Returns:
-            List of NormalizedArticle for potential startup incorporations
+            List of NormalizedArticle for potential startup incorporations, sorted by score
         """
         all_entities = []
 
-        # Search via Brave
+        # Search via Brave (uses days_back for freshness)
         brave_entities = await self.search_recent_incorporations(days_back=days_back)
         all_entities.extend(brave_entities)
 
@@ -627,26 +659,23 @@ class DelawareCorpsScraper:
         agg_entities = await self.search_aggregators()
         all_entities.extend(agg_entities)
 
-        # Deduplicate by name
-        seen_names = set()
-        unique_entities = []
-        for entity in all_entities:
-            name_key = entity.entity_name.lower().strip()
-            if name_key not in seen_names:
-                seen_names.add(name_key)
-                unique_entities.append(entity)
+        # Deduplicate using helper method
+        unique_entities = self._deduplicate_entities(all_entities)
 
-        # Score and filter
+        # Score and sort (highest first)
         scored = [(e, self.score_entity(e)) for e in unique_entities]
         scored.sort(key=lambda x: x[1], reverse=True)
 
-        # Convert to articles
+        # Filter by min_score, limit to max_results, convert to articles
         articles = []
         for entity, score in scored:
             if score >= min_score:
                 article = self.entity_to_article(entity)
                 articles.append(article)
+                if len(articles) >= max_results:
+                    break
 
+        logger.info(f"Delaware scraper: {len(articles)} articles (score>={min_score}) from {len(unique_entities)} entities")
         return articles
 
 
@@ -654,7 +683,12 @@ class DelawareCorpsScraper:
 async def run_delaware_corps_scraper(
     days_back: int = 7,
     min_score: int = 3,
+    max_results: int = 50,
 ) -> List[NormalizedArticle]:
     """Run Delaware Corps scraper and return articles."""
     async with DelawareCorpsScraper() as scraper:
-        return await scraper.scrape_all(days_back=days_back, min_score=min_score)
+        return await scraper.scrape_all(
+            days_back=days_back,
+            min_score=min_score,
+            max_results=max_results,
+        )
