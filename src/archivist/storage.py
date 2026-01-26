@@ -100,17 +100,33 @@ def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
     elif multiplier in ("thousand", "k"):
         return int(num * 1_000)
     elif multiplier in ("crore", "cr"):
-        # 1 crore = 10 million INR ≈ $120K USD (rough conversion)
-        return int(num * 120_000)
+        # 1 crore = 10 million INR
+        # Conversion: 10,000,000 INR / 83 INR/USD = ~$120,482 USD
+        # Using 83 INR/USD (Dec 2024 rate) - may drift ±10% over time
+        # FIX: Updated to be more precise at current rates
+        return int(num * 120_500)
     elif multiplier in ("lakh", "lac"):
-        # 1 lakh = 100K INR ≈ $1.2K USD
-        return int(num * 1_200)
+        # 1 lakh = 100,000 INR
+        # Conversion: 100,000 INR / 83 INR/USD = ~$1,205 USD
+        return int(num * 1_205)
     else:
-        # If no multiplier and number is small, assume it might be in millions
-        # e.g., "raised 30" often means $30M
+        # No multiplier detected - need to infer based on context
+        # FIX: In funding context, numbers without multipliers are almost always in millions
+        # e.g., "raised 30", "$30", "30 round" → $30M
+        # Only raw numbers >= 100,000 are likely already in dollars (legacy data)
         if num < 1000:
-            return int(num)  # Return raw number, don't assume
-        return int(num)
+            # Small number without multiplier in funding context = millions
+            # e.g., "raised 30" = $30M, "$50" = $50M
+            logger.debug(f"Assuming {num} is in millions (no multiplier, funding context)")
+            return int(num * 1_000_000)
+        elif num >= 100_000_000:
+            # Already looks like a dollar amount (e.g., 50000000 for $50M)
+            return int(num)
+        else:
+            # Ambiguous range (1000-99,999,999) - log warning and return as-is
+            # Could be $5000 or could be malformed $5M
+            logger.warning(f"Ambiguous amount {num} without multiplier - storing as-is")
+            return int(num)
 
 
 def normalize_company_name(name: str) -> str:

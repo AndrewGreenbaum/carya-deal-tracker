@@ -5,13 +5,15 @@ Used by both extractor.py and storage.py to consistently match investor names
 to tracked fund slugs. Prevents deal mislinks caused by order-dependent substring matching.
 
 FIX: Added word boundary matching to prevent false positives like "menlo business" → "menlo".
+FIX: Partner names now require investment context to avoid false positives.
+FIX: Negative keywords now use word boundaries instead of substring matching.
 """
 
 import re
-from typing import Optional
+from typing import Optional, Tuple
 
 
-# Fund name variants for matching
+# Fund name variants for matching (FUND NAMES ONLY - no partner names)
 # Order matters within each fund's list - more specific variants first
 FUND_NAME_VARIANTS: dict[str, list[str]] = {
     "a16z": [
@@ -29,31 +31,13 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     "benchmark": [
         "benchmark capital",
         "benchmark",
-        "bill gurley",  # Well-known Benchmark partner
-        "sarah tavel",
-        "peter fenton",
-        "eric vishria",
-        "chetan puttagunta",
-        "miles grimshaw",
-        "victor lazarte",
     ],
     "founders_fund": [
         "founders fund",
-        "peter thiel",
     ],
     "greylock": [
         "greylock partners",
         "greylock",
-        "reid hoffman",  # Co-founder LinkedIn, Greylock partner
-        "david sze",
-        "josh elman",
-        "sarah guo",
-        "saam motamedi",
-        "seth rosenberg",
-        "jerry chen",
-        "asheem chandna",
-        "mike duboe",
-        "corinne riley",
     ],
     "accel": [
         "accel partners",
@@ -72,11 +56,6 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     "redpoint": [
         "redpoint ventures",
         "redpoint",
-        "tomasz tunguz",  # Well-known Redpoint partner
-        "logan bartlett",
-        "annie kadavy",
-        "scott raney",
-        "jason warner",
     ],
     "khosla": [
         "khosla ventures",
@@ -93,8 +72,6 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     "gv": [
         "google ventures",
         "gv",  # Word boundary regex handles disambiguation (no trailing space needed)
-        "david krane",  # GV CEO
-        "mg siegler",
     ],
     "usv": [
         "union square ventures",
@@ -102,10 +79,6 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     ],
     "thrive": [
         "thrive capital",
-        "josh kushner",  # Thrive's founder/GP
-        "kareem zaki",
-        "josh miller",
-        "nadia singer",
     ],
     "general_catalyst": [
         "general catalyst",
@@ -113,7 +86,56 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     "first_round": [
         "first round capital",
         "first round",
-        "josh kopelman",  # First Round founder
+    ],
+}
+
+# Partner names mapped to their funds
+# FIX: These require investment context to avoid false positives like
+# "Peter Thiel spoke at conference" matching as Founders Fund deal
+PARTNER_NAMES: dict[str, list[str]] = {
+    "benchmark": [
+        "bill gurley",
+        "sarah tavel",
+        "peter fenton",
+        "eric vishria",
+        "chetan puttagunta",
+        "miles grimshaw",
+        "victor lazarte",
+    ],
+    "founders_fund": [
+        "peter thiel",
+    ],
+    "greylock": [
+        "reid hoffman",
+        "david sze",
+        "josh elman",
+        "sarah guo",
+        "saam motamedi",
+        "seth rosenberg",
+        "jerry chen",
+        "asheem chandna",
+        "mike duboe",
+        "corinne riley",
+    ],
+    "redpoint": [
+        "tomasz tunguz",
+        "logan bartlett",
+        "annie kadavy",
+        "scott raney",
+        "jason warner",
+    ],
+    "gv": [
+        "david krane",
+        "mg siegler",
+    ],
+    "thrive": [
+        "josh kushner",
+        "kareem zaki",
+        "josh miller",
+        "nadia singer",
+    ],
+    "first_round": [
+        "josh kopelman",
         "phin barnes",
         "bill trenchard",
         "rob hayes",
@@ -121,6 +143,19 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
         "todd jackson",
     ],
 }
+
+# Investment context keywords - required when matching by partner name
+# FIX: Partner names only match when investment context is present
+INVESTMENT_CONTEXT_KEYWORDS = [
+    "led", "leads", "leading", "co-led",
+    "invested", "invests", "investing", "investment",
+    "backed", "backs", "backing",
+    "funding", "funded", "round",
+    "series a", "series b", "series c", "seed",
+    "raised", "raises", "raising",
+    "participated", "participating", "participation",
+    "joined", "joining",
+]
 
 
 # Negative keywords - if these appear, DON'T match to that fund
@@ -290,16 +325,40 @@ def match_sec_entity(entity_name: str) -> Optional[str]:
     return None
 
 
-def match_fund_name(investor_name: str) -> Optional[str]:
+def _has_investment_context(text: str) -> bool:
+    """Check if text contains investment-related context words."""
+    text_lower = text.lower()
+    return any(kw in text_lower for kw in INVESTMENT_CONTEXT_KEYWORDS)
+
+
+def _check_negative_keywords(name_lower: str, slug: str) -> bool:
+    """
+    Check if name matches any negative keywords for a fund.
+
+    FIX: Uses word boundaries instead of substring matching to avoid
+    false positives like "global ventures" matching "gv" negative "global ventures".
+    """
+    negative_list = NEGATIVE_KEYWORDS.get(slug, [])
+    for neg in negative_list:
+        # Use word boundaries for negative keywords
+        pattern = rf'\b{re.escape(neg)}\b'
+        if re.search(pattern, name_lower):
+            return True
+    return False
+
+
+def match_fund_name(investor_name: str, context_text: str = "") -> Optional[str]:
     """
     Match an investor name to a tracked fund slug.
 
-    Uses a two-pass approach:
-    1. Check negative keywords first to exclude false positives
-    2. Check positive variants to find matches
+    Uses a multi-pass approach:
+    1. Check negative keywords first to exclude false positives (using word boundaries)
+    2. Check fund name variants for direct matches
+    3. Check partner names ONLY if investment context is present
 
     Args:
         investor_name: The investor name to match (e.g., "Felicis Ventures")
+        context_text: Optional surrounding text for partner name context validation
 
     Returns:
         Fund slug if matched (e.g., "felicis"), None if no match
@@ -311,43 +370,62 @@ def match_fund_name(investor_name: str) -> Optional[str]:
         'a16z'
         >>> match_fund_name("Benchmark International")  # Excluded by negative keyword
         None
-        >>> match_fund_name("Unknown VC")
+        >>> match_fund_name("Bill Gurley")  # No investment context
         None
+        >>> match_fund_name("Bill Gurley", "Bill Gurley led the Series A")
+        'benchmark'
     """
     if not investor_name:
         return None
 
     name_lower = investor_name.lower().strip()
+    context_lower = context_text.lower() if context_text else ""
 
     # Build a map of all matches found
     matches: list[tuple[str, int]] = []  # (slug, match_position)
 
+    # Pass 1: Check fund name variants (always valid)
     for slug, variants in FUND_NAME_VARIANTS.items():
-        # Check negative keywords first
-        negative_list = NEGATIVE_KEYWORDS.get(slug, [])
-        has_negative = any(neg in name_lower for neg in negative_list)
-        if has_negative:
+        # Check negative keywords first (using word boundaries)
+        if _check_negative_keywords(name_lower, slug):
             continue  # Skip this fund entirely
 
         # Check for positive matches with word boundary
-        # FIX: Use regex word boundaries to prevent false positives
-        # e.g., "menlo business" should NOT match "menlo"
         for variant in variants:
-            # Build regex pattern with word boundaries
-            # Escape special regex chars and add word boundary markers
             pattern = rf'\b{re.escape(variant)}\b'
             match = re.search(pattern, name_lower)
             if match:
-                # Record match with position for priority
                 pos = match.start()
                 matches.append((slug, pos))
                 break  # Only count first matching variant per fund
+
+    # Pass 2: Check partner names (only with investment context)
+    # FIX: Partner names like "Bill Gurley" require investment context
+    # to avoid matching "Bill Gurley spoke at conference"
+    has_context = _has_investment_context(name_lower) or _has_investment_context(context_lower)
+
+    if has_context:
+        for slug, partners in PARTNER_NAMES.items():
+            # Skip if negative keywords apply
+            if _check_negative_keywords(name_lower, slug):
+                continue
+
+            # Already matched this slug via fund name
+            if any(s == slug for s, _ in matches):
+                continue
+
+            for partner in partners:
+                pattern = rf'\b{re.escape(partner)}\b'
+                match = re.search(pattern, name_lower)
+                if match:
+                    pos = match.start()
+                    matches.append((slug, pos))
+                    break
 
     if not matches:
         return None
 
     # Return the match that appears earliest in the string
-    # This handles cases like "Accel and Felicis" - returns the first one
     matches.sort(key=lambda x: x[1])
     return matches[0][0]
 
@@ -366,6 +444,5 @@ def is_excluded_by_negative_keyword(investor_name: str, slug: str) -> bool:
     """Check if an investor name is excluded for a specific fund by negative keywords."""
     if not investor_name:
         return False
-    name_lower = investor_name.lower()
-    negative_list = NEGATIVE_KEYWORDS.get(slug, [])
-    return any(neg in name_lower for neg in negative_list)
+    # FIX: Use word boundaries instead of substring matching
+    return _check_negative_keywords(investor_name.lower(), slug)

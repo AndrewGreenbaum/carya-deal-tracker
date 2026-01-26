@@ -385,6 +385,33 @@ CRYPTO_URL_PATTERNS = [
     "blockchain", "token", "chain",
 ]
 
+# Keywords that indicate consumer AI (NOT Enterprise AI)
+# FIX: Detect consumer AI to prevent false Enterprise AI classification
+CONSUMER_AI_KEYWORDS = [
+    # Dating/social apps
+    "dating app", "dating platform", "matchmaking", "relationship app",
+    "social network", "social media app", "social platform",
+    # Personal consumer apps
+    "photo editor", "photo editing", "selfie", "face filter",
+    "personal assistant", "life coach", "habit tracker",
+    "fitness app", "workout app", "diet app", "meditation app",
+    "journaling app", "diary app",
+    # Consumer entertainment
+    "game", "gaming", "mobile game", "casual game",
+    "entertainment app", "music app", "video app", "streaming app",
+    # Consumer-focused signals
+    "b2c", "consumer app", "consumer product", "consumer-facing",
+    "app store", "play store", "mobile-first", "consumer startup",
+    "individual users", "personal use", "everyday users",
+]
+
+# Company name patterns that indicate consumer AI
+CONSUMER_AI_COMPANY_PATTERNS = [
+    "dating", "social", "selfie", "photo", "game", "gaming",
+    "match", "love", "friend", "chat", "snap", "gram",
+    "music", "video", "stream", "play", "fun",
+]
+
 
 def is_likely_crypto_article(text: str, source_url: str = "") -> bool:
     """
@@ -447,6 +474,61 @@ def _is_crypto_deal(deal: DealExtraction, article_text: str) -> bool:
     for investor in deal.lead_investors:
         if "crypto" in investor.name.lower():
             logger.debug(f"Crypto detected by lead investor: {investor.name}")
+            return True
+
+    return False
+
+
+def _is_consumer_ai_deal(deal: DealExtraction, article_text: str) -> bool:
+    """
+    Detect if deal is consumer AI (should NOT be Enterprise AI).
+
+    Called as post-extraction validation to catch consumer AI deals that the LLM
+    might have incorrectly classified as Enterprise AI.
+
+    Consumer AI includes:
+    - Dating/social apps with AI matching
+    - Photo editors with AI filters
+    - Gaming with AI NPCs
+    - Personal assistant apps
+    - B2C entertainment apps
+
+    Returns:
+        True if deal is consumer AI, False otherwise
+    """
+    # If already marked as consumer AI category, don't need to detect
+    if deal.enterprise_category in (
+        EnterpriseCategory.CONSUMER_AI,
+        EnterpriseCategory.GAMING_AI,
+        EnterpriseCategory.SOCIAL_AI,
+    ):
+        return True
+
+    text_lower = article_text.lower()
+    name_lower = deal.startup_name.lower() if deal.startup_name else ""
+    desc_lower = deal.startup_description.lower() if deal.startup_description else ""
+
+    # Check 1: Company name contains consumer AI patterns
+    if any(pattern in name_lower for pattern in CONSUMER_AI_COMPANY_PATTERNS):
+        logger.debug(f"Consumer AI detected by company name: {deal.startup_name}")
+        return True
+
+    # Check 2: Article is dominated by consumer AI keywords (3+ = likely consumer)
+    consumer_count = sum(1 for kw in CONSUMER_AI_KEYWORDS if kw in text_lower)
+    if consumer_count >= 3:
+        logger.debug(f"Consumer AI detected by keyword density ({consumer_count}): {deal.startup_name}")
+        return True
+
+    # Check 3: Description explicitly mentions consumer focus
+    consumer_desc_signals = [
+        "consumer", "b2c", "dating", "social", "gaming", "game",
+        "personal use", "individual users", "app store", "mobile app",
+    ]
+    if any(signal in desc_lower for signal in consumer_desc_signals):
+        # Only trigger if NOT also mentioning B2B/enterprise signals
+        enterprise_signals = ["b2b", "enterprise", "business", "saas", "platform", "api"]
+        if not any(sig in desc_lower for sig in enterprise_signals):
+            logger.debug(f"Consumer AI detected by description: {deal.startup_name}")
             return True
 
     return False
@@ -805,6 +887,22 @@ async def extract_deal(
                 response.is_ai_deal = False
                 response.enterprise_category = EnterpriseCategory.NOT_AI
 
+            # Post-process: detect and reclassify consumer AI deals
+            # FIX: Consumer AI should not be counted as Enterprise AI
+            if response and response.is_enterprise_ai and _is_consumer_ai_deal(response, article_text):
+                logger.info(
+                    f"Reclassifying {response.startup_name} as Consumer AI: "
+                    f"consumer/gaming/social AI detected"
+                )
+                response.is_enterprise_ai = False
+                # Keep is_ai_deal=True (it's still AI, just not enterprise)
+                if response.enterprise_category not in (
+                    EnterpriseCategory.CONSUMER_AI,
+                    EnterpriseCategory.GAMING_AI,
+                    EnterpriseCategory.SOCIAL_AI,
+                ):
+                    response.enterprise_category = EnterpriseCategory.CONSUMER_AI
+
             # Post-process: validate company name isn't an article title
             if response and _looks_like_article_title(response.startup_name):
                 logger.warning(
@@ -1126,6 +1224,9 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
         deal.tracked_fund_is_lead = False
         deal.tracked_fund_role = LeadStatus.PARTICIPANT
 
+    # FIX: Track ALL confirmed lead funds to record co-leads
+    confirmed_lead_funds: list[tuple[str, str, str]] = []  # (slug, name, partner)
+
     # Check ALL lead investors against our fund registry
     for investor in deal.lead_investors:
         matched_fund = match_fund_name(investor.name)
@@ -1134,43 +1235,44 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
             investor.is_tracked_fund = True
             matched_leads.append((matched_fund, investor))
 
-            # Set deal-level fields for the FIRST matching lead
-            # STRICT: Require CONFIRMED_LEAD role AND valid snippet
-            if not deal.tracked_fund_is_lead:
-                if investor.role == LeadStatus.CONFIRMED_LEAD and has_valid_snippet:
-                    deal.tracked_fund_is_lead = True
-                    deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
-                    deal.tracked_fund_role = investor.role
-                    deal.tracked_fund_partner = investor.partner_name
-                elif investor.role == LeadStatus.LIKELY_LEAD and has_valid_snippet:
-                    # Accept LIKELY_LEAD only with valid snippet
-                    deal.tracked_fund_is_lead = True
-                    deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
-                    deal.tracked_fund_role = investor.role
-                    deal.tracked_fund_partner = investor.partner_name
-                else:
-                    # Downgrade: no snippet or invalid snippet
-                    logger.info(
-                        f"Downgrading {deal.startup_name} lead claim: "
-                        f"role={investor.role.value}, has_valid_snippet={has_valid_snippet}"
-                    )
-                    # Set as tracked fund but NOT as lead
-                    if not deal.tracked_fund_name:
-                        deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
-                        deal.tracked_fund_role = LeadStatus.PARTICIPANT
-                        deal.tracked_fund_partner = investor.partner_name
+            # Track confirmed/likely leads with valid snippets
+            if investor.role in (LeadStatus.CONFIRMED_LEAD, LeadStatus.LIKELY_LEAD) and has_valid_snippet:
+                confirmed_lead_funds.append((
+                    matched_fund,
+                    FUND_REGISTRY[matched_fund].name,
+                    investor.partner_name or ""
+                ))
+            elif not deal.tracked_fund_name:
+                # Downgrade: no snippet or invalid snippet - set as participant
+                logger.info(
+                    f"Downgrading {deal.startup_name} lead claim: "
+                    f"role={investor.role.value}, has_valid_snippet={has_valid_snippet}"
+                )
+                deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
+                deal.tracked_fund_role = LeadStatus.PARTICIPANT
+                deal.tracked_fund_partner = investor.partner_name
+
         elif matched_fund:
             # Fund matched but not in registry - log warning
             logger.warning(f"Matched fund '{matched_fund}' not in FUND_REGISTRY")
 
+    # FIX: Set deal-level fields to include ALL co-lead tracked funds
+    if confirmed_lead_funds:
+        deal.tracked_fund_is_lead = True
+        # Join all co-lead fund names (e.g., "Sequoia, Benchmark")
+        fund_names = [name for _, name, _ in confirmed_lead_funds]
+        deal.tracked_fund_name = ", ".join(fund_names)
+        deal.tracked_fund_role = LeadStatus.CONFIRMED_LEAD
+        # Collect all partner names if present
+        partner_names = [p for _, _, p in confirmed_lead_funds if p]
+        deal.tracked_fund_partner = ", ".join(partner_names) if partner_names else None
+
     # Log if multiple tracked funds co-led
-    if len(matched_leads) > 1:
-        # FIX: Validate each fund in FUND_REGISTRY before accessing
-        fund_names = [
-            FUND_REGISTRY[f].name for f, _ in matched_leads
-            if f in FUND_REGISTRY
-        ]
-        logger.info(f"Multiple tracked funds co-led deal for {deal.startup_name}: {fund_names}")
+    if len(confirmed_lead_funds) > 1:
+        logger.info(
+            f"Multiple tracked funds co-led deal for {deal.startup_name}: "
+            f"{[n for _, n, _ in confirmed_lead_funds]}"
+        )
 
     # Also check ALL participating investors
     for investor in deal.participating_investors:
