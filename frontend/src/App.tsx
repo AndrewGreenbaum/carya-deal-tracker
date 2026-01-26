@@ -338,6 +338,7 @@ function App() {
       is_enterprise_ai: filters.enterpriseAiOnly ? true : undefined,
       enterprise_category: filters.selectedCategory,
       fund_slug: filters.selectedFund,
+      search: debouncedSearch || undefined,
     });
     window.open(url, '_blank');
   };

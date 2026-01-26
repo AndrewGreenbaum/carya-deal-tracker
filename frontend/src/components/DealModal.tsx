@@ -282,47 +282,63 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
             </div>
           </div>
 
-          {/* CEO/Main Founder - always show section with LinkedIn status */}
-          {deal.founders && deal.founders.length > 0 && deal.founders[0] ? (
+          {/* Founders - show all founders with LinkedIn status */}
+          {deal.founders && deal.founders.length > 0 ? (
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
-                CEO / Founder
+                {deal.founders.length === 1 ? 'Founder' : `Founders (${deal.founders.length})`}
               </label>
-              <div className="flex items-center justify-between p-3 bg-slate-900/50 border border-slate-800 rounded">
-                <div className="flex items-center gap-2">
-                  <User className="w-4 h-4 text-slate-400" />
-                  <span className="text-white">{deal.founders[0].name}</span>
-                  {deal.founders[0].title && (
-                    <span className="text-slate-500 text-sm">• {deal.founders[0].title}</span>
-                  )}
-                </div>
-                {/* LinkedIn - always show status */}
-                {deal.founders[0].linkedinUrl ? (
-                  <a
-                    href={deal.founders[0].linkedinUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-sm transition-colors"
-                    title={deal.founders[0].linkedinUrl}
-                  >
-                    <Linkedin className="w-3 h-3" />
-                    LinkedIn
-                  </a>
-                ) : (
-                  <span className="flex items-center gap-1 text-slate-600 text-sm" title="LinkedIn not found">
-                    <Linkedin className="w-3 h-3" />
-                    No LinkedIn
-                  </span>
-                )}
+              <div className="space-y-2">
+                {deal.founders.map((founder, index) => (
+                  <div key={index} className="flex items-center justify-between p-3 bg-slate-900/50 border border-slate-800 rounded">
+                    <div className="flex items-center gap-2">
+                      <User className="w-4 h-4 text-slate-400" />
+                      <span className="text-white">{founder.name}</span>
+                      {founder.title && (
+                        <span className="text-slate-500 text-sm">• {founder.title}</span>
+                      )}
+                    </div>
+                    {/* LinkedIn - always show status */}
+                    {founder.linkedinUrl ? (
+                      <a
+                        href={founder.linkedinUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-sm transition-colors"
+                        title={founder.linkedinUrl}
+                      >
+                        <Linkedin className="w-3 h-3" />
+                        LinkedIn
+                      </a>
+                    ) : (
+                      <span className="flex items-center gap-1 text-slate-600 text-sm" title="LinkedIn not found">
+                        <Linkedin className="w-3 h-3" />
+                        No LinkedIn
+                      </span>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           ) : (
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
-                CEO / Founder
+                Founders
               </label>
               <div className="flex items-center p-3 bg-slate-900/50 border border-slate-800 rounded">
                 <span className="text-slate-500 italic text-sm">No founder information available</span>
+              </div>
+            </div>
+          )}
+
+          {/* Verification Snippet - proof of lead status */}
+          {deal.verificationSnippet && (
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                Lead Verification
+              </label>
+              <div className="p-3 bg-emerald-900/20 border border-emerald-700/30 rounded">
+                <p className="text-emerald-300 text-sm italic">"{deal.verificationSnippet}"</p>
               </div>
             </div>
           )}

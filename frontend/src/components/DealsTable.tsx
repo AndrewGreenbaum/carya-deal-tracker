@@ -288,11 +288,13 @@ function CategoryBadge({
   // Check if it's a consumer AI category
   const isConsumerAi = cat === 'consumer_ai' || cat === 'gaming_ai' || cat === 'social_ai';
 
-  if (isRejected || cat === 'not_ai') {
+  // FIX: Only show not_ai style when category is actually not_ai
+  // Rejected deals keep their actual category but are styled differently at row level
+  if (cat === 'not_ai') {
     return (
       <div className="category-badge category-not_ai">
         {icon}
-        {category || 'not ai'}
+        not ai
       </div>
     );
   }
@@ -300,15 +302,16 @@ function CategoryBadge({
   // Consumer AI gets a different style
   if (isConsumerAi) {
     return (
-      <div className={`category-badge category-consumer`}>
+      <div className={`category-badge category-consumer ${isRejected ? 'opacity-75' : ''}`}>
         {icon}
         {cat.replace('_', ' ')}
       </div>
     );
   }
 
+  // Enterprise AI categories
   return (
-    <div className={`category-badge category-${cat}`}>
+    <div className={`category-badge category-${cat} ${isRejected ? 'opacity-75' : ''}`}>
       {icon}
       {cat.replace('_', ' ')}
     </div>

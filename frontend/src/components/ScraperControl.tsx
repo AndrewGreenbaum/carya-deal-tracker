@@ -47,8 +47,21 @@ export function ScraperControl() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [runningScrapers, setRunningScrapers] = useState<Set<string>>(new Set());
+  const [scraperErrors, setScraperErrors] = useState<Map<string, string>>(new Map());
   const [showFunds, setShowFunds] = useState(true);
   const [showSources, setShowSources] = useState(true);
+
+  // Clear scraper error after 10 seconds
+  const addScraperError = (source: string, message: string) => {
+    setScraperErrors((prev) => new Map(prev).set(source, message));
+    setTimeout(() => {
+      setScraperErrors((prev) => {
+        const next = new Map(prev);
+        next.delete(source);
+        return next;
+      });
+    }, 10000);
+  };
 
   const loadStatus = async () => {
     try {
@@ -74,7 +87,9 @@ export function ScraperControl() {
       await runScraper(fundSlug);
       await loadStatus();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Scraper failed';
       console.error(`Failed to run scraper for ${fundSlug}:`, err);
+      addScraperError(fundSlug, message);
     } finally {
       setRunningScrapers((prev) => {
         const next = new Set(prev);
@@ -90,7 +105,9 @@ export function ScraperControl() {
       await runAllScrapers();
       await loadStatus();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to run all scrapers';
       console.error('Failed to run all scrapers:', err);
+      addScraperError('all-funds', message);
     } finally {
       setRunningScrapers((prev) => {
         const next = new Set(prev);
@@ -125,7 +142,9 @@ export function ScraperControl() {
       }
       await loadStatus();
     } catch (err) {
+      const message = err instanceof Error ? err.message : `Failed to run ${source}`;
       console.error(`Failed to run ${source}:`, err);
+      addScraperError(source, message);
     } finally {
       setRunningScrapers((prev) => {
         const next = new Set(prev);
@@ -197,6 +216,19 @@ export function ScraperControl() {
           </div>
         </div>
       </div>
+
+      {/* Error Banner */}
+      {scraperErrors.size > 0 && (
+        <div className="px-6 py-3 bg-red-900/30 border-b border-red-700/50">
+          {Array.from(scraperErrors.entries()).map(([source, message]) => (
+            <div key={source} className="flex items-center gap-2 text-sm text-red-300">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span className="font-medium">{source}:</span>
+              <span>{message}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-6 space-y-6">

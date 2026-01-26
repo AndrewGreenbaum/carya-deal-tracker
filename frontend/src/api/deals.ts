@@ -351,6 +351,7 @@ export function getExportUrl(filters: Omit<DealFilters, 'limit' | 'offset'> = {}
   if (filters.is_ai_deal !== undefined) params.set('is_ai_deal', filters.is_ai_deal.toString());
   if (filters.is_enterprise_ai !== undefined) params.set('is_enterprise_ai', filters.is_enterprise_ai.toString());
   if (filters.enterprise_category) params.set('enterprise_category', filters.enterprise_category);
+  if (filters.search) params.set('search', filters.search);
 
   const queryString = params.toString();
   return `${API_BASE}/deals/export${queryString ? '?' + queryString : ''}`;

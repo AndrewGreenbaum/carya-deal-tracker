@@ -721,6 +721,7 @@ async def export_deals_csv(
     is_ai_deal: Optional[bool] = Query(None, description="Filter for all AI deals"),
     is_enterprise_ai: Optional[bool] = Query(None, description="Filter for Enterprise AI only"),
     enterprise_category: Optional[str] = Query(None, description="Filter by category"),
+    search: Optional[str] = Query(None, description="Search by company name"),
 ):
     """
     Export deals as CSV file.
@@ -753,6 +754,12 @@ async def export_deals_csv(
                 stmt = stmt.where(Deal.is_enterprise_ai == is_enterprise_ai)
             if enterprise_category:
                 stmt = stmt.where(Deal.enterprise_category == enterprise_category)
+
+            # Search by company name
+            if search:
+                stmt = stmt.join(PortfolioCompany, Deal.company_id == PortfolioCompany.id).where(
+                    PortfolioCompany.name.ilike(f"%{search}%")
+                )
 
             # Filter by fund_slug - join through DealInvestor to Fund
             if fund_slug:
