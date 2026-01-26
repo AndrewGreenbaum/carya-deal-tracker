@@ -34,7 +34,7 @@ from sqlalchemy.orm import selectinload
 
 from .config import settings, FUND_REGISTRY, get_all_funds
 from .analyst import extract_deal, DealExtraction, LeadStatus
-from .analyst.extractor import extract_deal_batch, clear_content_hash_cache
+from .analyst.extractor import extract_deal_batch, clear_content_hash_cache, set_extraction_context, clear_extraction_context
 from .archivist import (
     get_db,
     get_session,
@@ -1061,6 +1061,10 @@ async def extract_funding_deal(
     if request.fund_slug and request.fund_slug in FUND_REGISTRY:
         fund_context = FUND_REGISTRY[request.fund_slug]
 
+    # Set extraction context for token logging (use fund_slug if provided, else 'api_extract')
+    source_name = request.fund_slug if request.fund_slug else "api_extract"
+    set_extraction_context(source_name)
+
     try:
         result = await extract_deal(
             article_text=request.text,
@@ -1084,6 +1088,8 @@ async def extract_funding_deal(
     except Exception as e:
         logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        clear_extraction_context()
 
 
 @app.post("/extract/batch", response_model=List[ExtractionResponse])
@@ -1110,6 +1116,9 @@ async def extract_funding_deals_batch(
         }
         for article in request.articles
     ]
+
+    # Set extraction context for token logging
+    set_extraction_context("api_batch")
 
     try:
         results = await extract_deal_batch(articles, max_concurrent=5)
@@ -1138,6 +1147,8 @@ async def extract_funding_deals_batch(
     except Exception as e:
         logger.error("Request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        clear_extraction_context()
 
 
 # ----- Scraping Endpoints -----
