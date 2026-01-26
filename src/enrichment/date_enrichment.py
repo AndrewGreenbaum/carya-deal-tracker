@@ -419,8 +419,9 @@ async def enrich_deals_dates_batch(
                     company_name=deal["company_name"],
                     round_type=deal.get("round_type", "funding"),
                 )
-
-        await asyncio.sleep(delay_seconds)
+            finally:
+                # Rate limit between requests (inside semaphore to ensure spacing)
+                await asyncio.sleep(delay_seconds)
 
     # Run enrichments with limited concurrency
     tasks = [enrich_with_limit(deal) for deal in deals]

@@ -14,6 +14,7 @@ import asyncio
 import logging
 import re
 import httpx
+import feedparser
 from dataclasses import dataclass
 from datetime import date, timedelta, datetime, timezone
 from difflib import SequenceMatcher
@@ -71,6 +72,8 @@ class SECDateMatcher:
                 "Accept": "application/json, text/html, application/xml",
             },
             follow_redirects=True,
+            # Lower limits for SEC to respect their rate guidelines
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         )
 
     async def __aenter__(self):
@@ -199,8 +202,7 @@ class SECDateMatcher:
             response = await self.client.get(feed_url)
 
             if response.status_code == 200:
-                # Parse atom feed
-                import feedparser
+                # Parse atom feed (feedparser imported at module level)
                 feed = feedparser.parse(response.text)
 
                 for entry in feed.entries[:5]:
@@ -437,3 +439,91 @@ async def verify_deal_date_with_sec(
             amount=amount,
             date_hint=extracted_date,
         )
+
+
+async def persist_date_source(
+    deal_id: int,
+    source_type: str,
+    extracted_date: date,
+    confidence_score: float,
+    source_url: Optional[str] = None,
+    is_primary: bool = False,
+) -> bool:
+    """
+    Persist a date source to the database.
+
+    Args:
+        deal_id: ID of the deal
+        source_type: Type of source (sec_form_d, press_release, article_headline, etc.)
+        extracted_date: The date extracted from this source
+        confidence_score: Confidence in this date (0.0-1.0)
+        source_url: URL of the source
+        is_primary: Whether this is the primary/selected date for the deal
+
+    Returns:
+        True if persisted successfully, False otherwise
+    """
+    from ..archivist.database import get_session
+    from ..archivist.models import DateSource
+
+    try:
+        async with get_session() as session:
+            date_source = DateSource(
+                deal_id=deal_id,
+                source_type=source_type,
+                source_url=source_url,
+                extracted_date=extracted_date,
+                confidence_score=confidence_score,
+                is_primary=is_primary,
+            )
+            session.add(date_source)
+            await session.commit()
+            logger.info(f"Persisted date source for deal {deal_id}: {source_type} -> {extracted_date}")
+            return True
+    except Exception as e:
+        logger.error(f"Error persisting date source for deal {deal_id}: {e}")
+        return False
+
+
+async def persist_sec_date_match(deal_id: int, match: SECDateMatch) -> bool:
+    """
+    Persist SEC date match to both DateSource table and Deal record.
+
+    Args:
+        deal_id: ID of the deal to update
+        match: SECDateMatch result from verification
+
+    Returns:
+        True if persisted successfully, False otherwise
+    """
+    from ..archivist.database import get_session
+    from ..archivist.models import Deal, DateSource
+
+    try:
+        async with get_session() as session:
+            # Update Deal with SEC filing info
+            deal = await session.get(Deal, deal_id)
+            if deal:
+                deal.sec_filing_date = match.sec_filing_date
+                deal.sec_filing_url = match.sec_filing_url
+                if match.is_confident_match:
+                    deal.date_confidence = DATE_CONFIDENCE["sec_form_d"]
+                    deal.announced_date = match.sec_filing_date
+
+            # Add DateSource record
+            date_source = DateSource(
+                deal_id=deal_id,
+                source_type="sec_form_d",
+                source_url=match.sec_filing_url,
+                extracted_date=match.sec_filing_date,
+                confidence_score=DATE_CONFIDENCE["sec_form_d"],
+                is_primary=match.is_confident_match,
+            )
+            session.add(date_source)
+            await session.commit()
+
+            logger.info(f"Persisted SEC date match for deal {deal_id}: {match.sec_filing_date}")
+            return True
+    except Exception as e:
+        logger.error(f"Error persisting SEC date match for deal {deal_id}: {e}")
+        return False

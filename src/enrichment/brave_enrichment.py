@@ -55,6 +55,8 @@ def clear_linkedin_cache():
     _failed_linkedin_cache = {}
     if count > 0:
         logger.info(f"Cleared LinkedIn cache ({count} entries)")
+
+
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 from urllib.parse import urlparse
@@ -827,3 +829,83 @@ async def enrich_deal_founders_linkedin(
         await persist_deal_linkedin_enrichment(deal_id, updated_founders)
 
     return updated_founders
+
+
+async def persist_founder_validation(
+    deal_id: int,
+    validation: LinkedInValidationResult,
+) -> bool:
+    """
+    Persist a founder validation result to the database.
+
+    Args:
+        deal_id: ID of the deal
+        validation: LinkedInValidationResult from validation
+
+    Returns:
+        True if persisted successfully, False otherwise
+    """
+    from datetime import datetime, timezone
+    from ..archivist.database import get_session
+    from ..archivist.models import FounderValidation
+
+    try:
+        async with get_session() as session:
+            founder_val = FounderValidation(
+                deal_id=deal_id,
+                founder_name=validation.founder_name,
+                linkedin_url=validation.linkedin_url,
+                linkedin_current_company=validation.profile_current_company,
+                linkedin_current_title=validation.profile_current_title,
+                is_match=validation.company_match,
+                title_is_leadership=validation.title_is_leadership,
+                validated_at=datetime.now(timezone.utc),
+                validation_method=validation.validation_method,
+            )
+            session.add(founder_val)
+            await session.commit()
+            logger.info(f"Persisted founder validation for deal {deal_id}: {validation.founder_name}")
+            return True
+    except Exception as e:
+        logger.error(f"Error persisting founder validation for deal {deal_id}: {e}")
+        return False
+
+
+async def persist_all_founder_validations(
+    deal_id: int,
+    validations: List[LinkedInValidationResult],
+    update_deal: bool = True,
+) -> int:
+    """
+    Persist all founder validation results and optionally update the deal's founders_validated flag.
+
+    Args:
+        deal_id: ID of the deal
+        validations: List of LinkedInValidationResult objects
+        update_deal: If True, update deal.founders_validated based on results
+
+    Returns:
+        Number of validations persisted
+    """
+    from ..archivist.database import get_session
+    from ..archivist.models import Deal
+
+    persisted = 0
+    for validation in validations:
+        if await persist_founder_validation(deal_id, validation):
+            persisted += 1
+
+    # Update deal.founders_validated if all validations passed
+    if update_deal and validations:
+        all_valid = all(v.is_valid for v in validations)
+        try:
+            async with get_session() as session:
+                deal = await session.get(Deal, deal_id)
+                if deal:
+                    deal.founders_validated = all_valid
+                    await session.commit()
+                    logger.info(f"Updated founders_validated for deal {deal_id}: {all_valid}")
+        except Exception as e:
+            logger.error(f"Error updating founders_validated for deal {deal_id}: {e}")
+
+    return persisted
