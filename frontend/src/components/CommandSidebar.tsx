@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { Home, ChevronDown, ChevronUp, Search, X, Kanban, Mail } from 'lucide-react';
+import { Home, ChevronDown, ChevronUp, Search, X, Kanban, Mail, Plane } from 'lucide-react';
 import type { FilterState, EnterpriseCategory, Fund, ViewType, CostTracker } from '../types';
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
@@ -21,6 +21,7 @@ interface CommandSidebarProps {
   onViewChange: (view: ViewType) => void;
   costTracker?: CostTracker;
   onOpenFeedback?: () => void;
+  onOpenAircraft?: () => void;
 }
 
 export function CommandSidebar({
@@ -31,6 +32,7 @@ export function CommandSidebar({
   onViewChange,
   costTracker,
   onOpenFeedback,
+  onOpenAircraft,
 }: CommandSidebarProps) {
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
@@ -279,8 +281,15 @@ export function CommandSidebar({
         )}
       </div>
 
-      {/* Feedback Section */}
-      <div className="p-4 border-t border-slate-800 text-center">
+      {/* Footer Actions */}
+      <div className="p-4 border-t border-slate-800 flex items-center justify-center gap-2">
+        <button
+          onClick={onOpenAircraft}
+          className="p-2 hover:bg-emerald-500/10 text-slate-400 hover:text-emerald-400 rounded transition-colors group"
+          title="Live Aircraft Tracker"
+        >
+          <Plane className="w-5 h-5 group-hover:animate-pulse" />
+        </button>
         <button
           onClick={onOpenFeedback}
           className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors"

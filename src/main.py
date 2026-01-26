@@ -211,6 +211,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Aircraft tracking router
+from .aircraft import router as aircraft_router
+app.include_router(aircraft_router)
+
 
 # ----- Response Models -----
 

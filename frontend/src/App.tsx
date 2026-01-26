@@ -26,6 +26,7 @@ import { Tracker } from './components/Tracker';
 import { AdminFeedback } from './components/AdminFeedback';
 import { TokenUsage } from './components/TokenUsage';
 import { ClaudeDocs } from './components/ClaudeDocs';
+import { AircraftTracker } from './components/AircraftTracker';
 import {
   fetchDeals,
   fetchFunds,
@@ -175,6 +176,7 @@ function App() {
   // Modal state
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [aircraftTrackerOpen, setAircraftTrackerOpen] = useState(false);
 
   // Debounce search query
   useEffect(() => {
@@ -372,6 +374,7 @@ function App() {
           onViewChange={setCurrentView}
           costTracker={costTracker}
           onOpenFeedback={() => setFeedbackOpen(true)}
+          onOpenAircraft={() => setAircraftTrackerOpen(true)}
         />
 
         {/* Main Content */}
@@ -445,6 +448,11 @@ function App() {
       {/* Feedback Modal */}
       {feedbackOpen && (
         <FeedbackModal onClose={() => setFeedbackOpen(false)} />
+      )}
+
+      {/* Aircraft Tracker Modal */}
+      {aircraftTrackerOpen && (
+        <AircraftTracker onClose={() => setAircraftTrackerOpen(false)} />
       )}
 
       {/* Settings Panel */}
