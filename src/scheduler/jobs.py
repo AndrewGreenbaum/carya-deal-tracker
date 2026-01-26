@@ -286,7 +286,13 @@ async def enrich_new_deals(limit: int = 25):
                     logger.warning(f"Enrichment timeout for {deal_info['company_name']}")
                     continue
 
-                if not enrichment.website:
+                # FIX: Continue even if website not found - still want to persist LinkedIn
+                has_enrichment = (
+                    enrichment.website or
+                    enrichment.ceo_linkedin or
+                    enrichment.founder_linkedins
+                )
+                if not has_enrichment:
                     continue
 
                 # Update in separate transaction (per-deal isolation)
@@ -294,27 +300,51 @@ async def enrich_new_deals(limit: int = 25):
                     # Fetch fresh deal and company objects
                     deal = await db.get(Deal, deal_info["deal_id"])
                     if deal and deal.company:
-                        deal.company.website = enrichment.website
+                        # Only update website if found
+                        if enrichment.website:
+                            deal.company.website = enrichment.website
 
                         # Update founders with LinkedIn URLs
                         founders = deal_info["founders"]
+                        founders_updated = False
+
                         if enrichment.founder_linkedins or enrichment.ceo_linkedin:
+                            # Update existing founders with their LinkedIn URLs
                             for f in founders:
                                 founder_name = f.get("name", "")
                                 if founder_name in enrichment.founder_linkedins:
                                     if not f.get("linkedin_url"):
                                         f["linkedin_url"] = enrichment.founder_linkedins[founder_name]
+                                        founders_updated = True
 
+                            # FIX: Handle CEO LinkedIn - attach to existing founder OR create new entry
                             if enrichment.ceo_linkedin:
                                 ceo_found = any(f.get("linkedin_url") for f in founders)
                                 if not ceo_found:
+                                    # Try to attach to existing CEO/founder
+                                    attached = False
                                     for f in founders:
-                                        if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
+                                        title_lower = f.get("title", "").lower()
+                                        # FIX: Expanded title matching for variations
+                                        if any(t in title_lower for t in ("ceo", "chief executive", "founder", "co-founder", "cofounder")):
                                             if not f.get("linkedin_url"):
                                                 f["linkedin_url"] = enrichment.ceo_linkedin
+                                                founders_updated = True
+                                                attached = True
                                             break
 
-                            deal.founders_json = json.dumps(founders)
+                                    # FIX: If no founders exist OR no CEO title found, ADD the CEO as a new founder
+                                    if not attached and enrichment.ceo_name:
+                                        founders.append({
+                                            "name": enrichment.ceo_name,
+                                            "title": "CEO",
+                                            "linkedin_url": enrichment.ceo_linkedin,
+                                        })
+                                        founders_updated = True
+                                        logger.info(f"Added discovered CEO to founders: {enrichment.ceo_name}")
+
+                            if founders_updated:
+                                deal.founders_json = json.dumps(founders)
 
                         # Commit with timeout to prevent hanging
                         try:

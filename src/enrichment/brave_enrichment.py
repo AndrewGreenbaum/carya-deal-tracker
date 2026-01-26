@@ -416,10 +416,19 @@ class BraveEnrichmentClient:
 
                 await asyncio.sleep(self.rate_limit_delay)
 
-        # FIX #4: Fallback CEO search when NO founders were extracted
-        # This catches cases where Claude failed to extract founder names
-        if not context.founders and not result.ceo_linkedin:
-            logger.info(f"No founders extracted for {context.company_name}, trying CEO fallback search")
+        # FIX: CEO fallback search when:
+        # 1. NO founders were extracted (Claude failed to extract)
+        # 2. OR founders exist but ALL have no LinkedIn (enrichment failed for all)
+        # This ensures we always try to get at least one LinkedIn URL
+        founders_all_missing_linkedin = (
+            context.founders and
+            all(not f.get("linkedin_url") for f in context.founders) and
+            not result.founder_linkedins  # Enrichment also found nothing
+        )
+
+        if (not context.founders or founders_all_missing_linkedin) and not result.ceo_linkedin:
+            reason = "No founders extracted" if not context.founders else "All founders missing LinkedIn"
+            logger.info(f"{reason} for {context.company_name}, trying CEO fallback search")
             ceo_name, linkedin_url = await self.find_ceo_linkedin(context.company_name)
             if linkedin_url:
                 result.ceo_name = ceo_name

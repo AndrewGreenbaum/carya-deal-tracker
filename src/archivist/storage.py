@@ -67,6 +67,9 @@ def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
     # Remove currency prefixes
     clean = re.sub(r'^(usd|eur|gbp|inr)\s*', '', clean)
 
+    # FIX: Remove approximate/range prefixes that LLM might include
+    clean = re.sub(r'^(approximately|approx\.?|around|about|up\s+to|nearly|over|more\s+than|less\s+than|~)\s*', '', clean)
+
     # Handle "undisclosed" or similar
     if "undisclosed" in clean or "unknown" in clean or "<unknown>" in clean:
         return None

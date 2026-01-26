@@ -9,8 +9,22 @@ from typing import List, Optional
 from enum import Enum
 from datetime import date, timedelta
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+# LinkedIn profile URL pattern - must be /in/ not /company/, /jobs/, etc.
+LINKEDIN_PROFILE_PATTERN = re.compile(r'^https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]+/?$')
+
+# Valid URL pattern for company websites
+VALID_URL_PATTERN = re.compile(r'^https?://[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/.*)?$')
+
+# Domains that are NOT valid company websites
+INVALID_WEBSITE_DOMAINS = {
+    'linkedin.com', 'twitter.com', 'facebook.com', 'instagram.com',
+    'youtube.com', 'tiktok.com', 'medium.com', 'substack.com',
+    'crunchbase.com', 'pitchbook.com', 'techcrunch.com', 'bloomberg.com',
+}
 
 
 class RoundType(str, Enum):
@@ -63,6 +77,36 @@ class FounderInfo(BaseModel):
         default=None,
         description="LinkedIn profile URL if mentioned or can be inferred"
     )
+
+    @field_validator('linkedin_url')
+    @classmethod
+    def validate_linkedin_url(cls, v: Optional[str]) -> Optional[str]:
+        """
+        Validate LinkedIn URL is a valid profile URL.
+
+        Rejects:
+        - Non-LinkedIn URLs
+        - Company pages (/company/)
+        - Job listings (/jobs/)
+        - Other non-profile LinkedIn pages
+
+        Returns None for invalid URLs to allow extraction to continue.
+        """
+        if v is None or v == "":
+            return None
+
+        # Must be a LinkedIn profile URL
+        if not LINKEDIN_PROFILE_PATTERN.match(v):
+            # Check if it's a LinkedIn URL at all
+            if 'linkedin.com' in v.lower():
+                # It's LinkedIn but not a profile - reject silently
+                logger.debug(f"Rejecting non-profile LinkedIn URL: {v}")
+            else:
+                # Not LinkedIn at all - LLM hallucinated
+                logger.warning(f"Rejecting non-LinkedIn URL as linkedin_url: {v}")
+            return None
+
+        return v
 
 
 class InvestorMention(BaseModel):
@@ -169,6 +213,57 @@ class DealExtraction(BaseModel):
         cutoff = today - timedelta(days=365)
         if v < cutoff:
             logger.warning(f"Rejecting old date {v} (>1 year) - likely historical VC blog post")
+            return None
+
+        return v
+
+    @field_validator('company_website')
+    @classmethod
+    def validate_company_website(cls, v: Optional[str]) -> Optional[str]:
+        """
+        Validate company website URL.
+
+        Rejects:
+        - Invalid URL format
+        - Social media URLs (LinkedIn, Twitter, etc.)
+        - News/database sites (Crunchbase, TechCrunch, etc.)
+
+        Returns None for invalid URLs to allow extraction to continue.
+        """
+        if v is None or v == "":
+            return None
+
+        # Must be a valid URL format
+        if not VALID_URL_PATTERN.match(v):
+            logger.debug(f"Rejecting invalid website URL format: {v}")
+            return None
+
+        # Check for invalid domains (social media, news, etc.)
+        v_lower = v.lower()
+        for domain in INVALID_WEBSITE_DOMAINS:
+            if domain in v_lower:
+                logger.debug(f"Rejecting {domain} as company website: {v}")
+                return None
+
+        return v
+
+    @field_validator('company_linkedin')
+    @classmethod
+    def validate_company_linkedin(cls, v: Optional[str]) -> Optional[str]:
+        """
+        Validate company LinkedIn page URL.
+
+        Must be a LinkedIn company page (/company/), not a profile (/in/).
+        """
+        if v is None or v == "":
+            return None
+
+        # Must be a LinkedIn company URL
+        if 'linkedin.com/company/' not in v.lower():
+            if 'linkedin.com' in v.lower():
+                logger.debug(f"Rejecting non-company LinkedIn URL: {v}")
+            else:
+                logger.warning(f"Rejecting non-LinkedIn URL as company_linkedin: {v}")
             return None
 
         return v
