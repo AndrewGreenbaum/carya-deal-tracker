@@ -13,8 +13,8 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const API_KEY = import.meta.env.VITE_API_KEY || 'dev-test-key-123';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+const API_KEY = import.meta.env.VITE_API_KEY || 'dev-key';
 
 interface ScanSourceStats {
   articles_found: number;
