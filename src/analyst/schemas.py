@@ -315,6 +315,10 @@ class DealExtraction(BaseModel):
         default=None,
         description="Exact quote from article proving lead investor status (e.g., 'led by Sequoia')"
     )
+    lead_evidence_weak: bool = Field(
+        default=False,
+        description="True if snippet lacks explicit 'led by' language but Claude determined lead status"
+    )
 
     # Quality signals
     confidence_score: float = Field(

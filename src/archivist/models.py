@@ -86,6 +86,7 @@ class Deal(SQLModel, table=True):
     is_lead_confirmed: bool = Field(default=False, index=True)  # True if we confirmed a tracked fund led
     lead_partner_name: Optional[str] = None  # Partner who led the deal
     verification_snippet: Optional[str] = None  # Exact quote proving lead status
+    lead_evidence_weak: bool = Field(default=False)  # True if snippet lacks "led by" language (trusting Claude)
 
     # AI classification
     enterprise_category: Optional[str] = None  # infrastructure, security, vertical_saas, agentic, data_intelligence, consumer_ai, gaming_ai, social_ai, not_ai

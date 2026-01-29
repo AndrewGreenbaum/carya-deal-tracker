@@ -720,6 +720,7 @@ async def save_deal(
         is_lead_confirmed=extraction.tracked_fund_is_lead,
         lead_partner_name=extraction.tracked_fund_partner,
         verification_snippet=extraction.verification_snippet,
+        lead_evidence_weak=getattr(extraction, 'lead_evidence_weak', False),
         enterprise_category=extraction.enterprise_category.value if extraction.enterprise_category else None,
         is_enterprise_ai=extraction.is_enterprise_ai,
         is_ai_deal=getattr(extraction, 'is_ai_deal', extraction.is_enterprise_ai),  # Fallback for backwards compat

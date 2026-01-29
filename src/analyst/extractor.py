@@ -1211,14 +1211,14 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
             f"WEAK lead evidence for {deal.startup_name}: "
             f"snippet '{deal.verification_snippet[:80]}...' lacks explicit lead language - trusting Claude"
         )
-        # Previously rejected here, now just warning - trust Claude's judgment
+        deal.lead_evidence_weak = True  # Flag for frontend display
 
     if deal.tracked_fund_is_lead and not deal.verification_snippet:
         logger.warning(
             f"WEAK lead evidence for {deal.startup_name}: "
             f"no verification_snippet provided - trusting Claude"
         )
-        # Previously rejected here, now just warning - trust Claude's judgment
+        deal.lead_evidence_weak = True  # Flag for frontend display
 
     # FIX: Track ALL confirmed lead funds to record co-leads
     confirmed_lead_funds: list[tuple[str, str, str]] = []  # (slug, name, partner)

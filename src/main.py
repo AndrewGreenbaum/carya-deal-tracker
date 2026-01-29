@@ -320,6 +320,7 @@ class DealResponse(BaseModel):
     lead_investor: Optional[str] = None
     lead_partner: Optional[str] = None
     verification_snippet: Optional[str] = None
+    lead_evidence_weak: bool = False  # True if snippet lacks "led by" but Claude said lead
     # Company links
     company_website: Optional[str] = None
     company_linkedin: Optional[str] = None
@@ -690,6 +691,7 @@ async def list_deals(
                     lead_investor=lead_investor_name,
                     lead_partner=deal.lead_partner_name,
                     verification_snippet=deal.verification_snippet,
+                    lead_evidence_weak=getattr(deal, 'lead_evidence_weak', False),
                     # Company links (with fallback generation)
                     company_website=company_website,
                     company_linkedin=company_linkedin,

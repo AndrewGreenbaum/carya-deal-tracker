@@ -59,6 +59,7 @@ export interface Deal {
   leadInvestor?: string;
   leadPartner?: string;
   verificationSnippet?: string;
+  leadEvidenceWeak?: boolean; // True if snippet lacks "led by" but Claude determined lead
   // Source tracking
   sourceUrl?: string;
   sourceName?: string;

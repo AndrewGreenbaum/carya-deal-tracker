@@ -174,6 +174,7 @@ interface DealApiResponse {
   lead_investor?: string;
   lead_partner?: string;
   verification_snippet?: string;
+  lead_evidence_weak?: boolean;
   // Company links
   company_website?: string;
   company_linkedin?: string;
@@ -214,6 +215,7 @@ function mapDeal(api: DealApiResponse): Deal {
     leadInvestor: api.lead_investor,
     leadPartner: api.lead_partner,
     verificationSnippet: api.verification_snippet,
+    leadEvidenceWeak: api.lead_evidence_weak ?? false,
     // Company links
     companyWebsite: api.company_website,
     companyLinkedin: api.company_linkedin,

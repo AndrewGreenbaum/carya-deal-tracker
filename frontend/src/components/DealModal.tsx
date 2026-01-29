@@ -30,6 +30,7 @@ import {
   Check,
   Loader2,
   Flag,
+  AlertTriangle,
 } from 'lucide-react';
 import type { Deal, EnterpriseCategory } from '../types';
 import { STAGE_LABELS, CATEGORY_LABELS } from '../types';
@@ -334,11 +335,28 @@ export const DealModal = memo(function DealModal({ deal, onClose }: DealModalPro
           {/* Verification Snippet - proof of lead status */}
           {deal.verificationSnippet && (
             <div>
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 flex items-center gap-2">
                 Lead Verification
+                {deal.leadEvidenceWeak && (
+                  <span className="flex items-center gap-1 text-amber-400 font-normal normal-case tracking-normal">
+                    <AlertTriangle className="w-3 h-3" />
+                    Weak Evidence
+                  </span>
+                )}
               </label>
-              <div className="p-3 bg-emerald-900/20 border border-emerald-700/30 rounded">
-                <p className="text-emerald-300 text-sm italic">"{deal.verificationSnippet}"</p>
+              <div className={`p-3 rounded ${
+                deal.leadEvidenceWeak
+                  ? 'bg-amber-900/20 border border-amber-700/30'
+                  : 'bg-emerald-900/20 border border-emerald-700/30'
+              }`}>
+                <p className={`text-sm italic ${
+                  deal.leadEvidenceWeak ? 'text-amber-300' : 'text-emerald-300'
+                }`}>"{deal.verificationSnippet}"</p>
+                {deal.leadEvidenceWeak && (
+                  <p className="text-xs text-amber-400/70 mt-2">
+                    ⚠ Snippet lacks explicit "led by" language — Claude inferred lead status
+                  </p>
+                )}
               </div>
             </div>
           )}
