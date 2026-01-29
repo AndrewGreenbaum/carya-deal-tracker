@@ -224,21 +224,47 @@ class TechCrunchScraper:
 
     async def scrape_all(self, hours_back: int = 168) -> List[NormalizedArticle]:
         """
-        Full scraping pipeline.
+        Full scraping pipeline with parallel article fetching.
 
         Args:
             hours_back: Look back this many hours (default 7 days)
 
         Returns:
             List of normalized articles ready for extraction.
+
+        OPTIMIZED: Parallel article fetching with semaphore (was sequential).
         """
         articles = await self.fetch_all_feeds(hours_back=hours_back)
 
+        # Filter to funding articles first
+        funding_articles = [a for a in articles if self.is_funding_article(a)]
+
+        if not funding_articles:
+            return []
+
+        # OPTIMIZATION: Parallel article fetching with rate limiting
+        MAX_CONCURRENT_ARTICLES = 10
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_ARTICLES)
+
+        async def fetch_article_with_limit(article: TechCrunchArticle) -> tuple:
+            """Fetch article content with semaphore-based rate limiting."""
+            async with semaphore:
+                full_text = await self.fetch_full_article(article.url)
+                # Small delay between request completions for politeness
+                await asyncio.sleep(0.1)
+                return (article, full_text)
+
+        # Fetch all articles in parallel
+        tasks = [fetch_article_with_limit(article) for article in funding_articles]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
         normalized = []
-        for article in articles:
-            # Only process funding-related articles
-            if not self.is_funding_article(article):
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Article fetch failed: {result}")
                 continue
+
+            article, full_text = result
 
             # FIX: Use today as fallback for articles without publication dates
             # (was skipping these articles, losing 5-10% of content)
@@ -253,8 +279,6 @@ class TechCrunchScraper:
             # Check for tracked fund mentions
             fund_slug = self.match_tracked_fund(article)
 
-            # Fetch full article content
-            full_text = await self.fetch_full_article(article.url)
             text = full_text or f"{article.title}\n\n{article.description}"
 
             normalized.append(NormalizedArticle(
@@ -268,9 +292,6 @@ class TechCrunchScraper:
                 # FIX: Use timezone-aware datetime (utcnow() deprecated in Python 3.12+)
                 fetched_at=datetime.now(timezone.utc),
             ))
-
-            # Rate limit
-            await asyncio.sleep(0.3)
 
         return normalized
 

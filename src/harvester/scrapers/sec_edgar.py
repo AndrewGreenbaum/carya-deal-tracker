@@ -116,6 +116,8 @@ class SECEdgarScraper:
             },
             follow_redirects=True,  # SEC redirects to new URL structure
         )
+        # Track skipped filings for visibility into data loss
+        self._skipped_filings = 0
 
     async def __aenter__(self):
         return self
@@ -519,10 +521,9 @@ class SECEdgarScraper:
                 # FIX: Handle None returns from fetch_filing_details
                 # Changed from debug to warning for visibility into data loss
                 if result is None:
-                    skipped_count = getattr(self, '_skipped_filings', 0) + 1
-                    self._skipped_filings = skipped_count
+                    self._skipped_filings += 1
                     logger.warning(
-                        f"SEC EDGAR: Skipping filing #{skipped_count} due to missing details: "
+                        f"SEC EDGAR: Skipping filing #{self._skipped_filings} due to missing details: "
                         f"{filing.company_name} (CIK: {filing.cik}, URL: {filing.filing_url})"
                     )
                     continue

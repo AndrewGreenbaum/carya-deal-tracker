@@ -12,6 +12,7 @@ the dynamic card content. Simple HTML parsing returns empty results.
 """
 
 import logging
+from datetime import date
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
@@ -146,8 +147,8 @@ class RedpointScraper(PlaywrightScraper):
         logger.info(f"Redpoint: Found {len(articles)} articles from content hub")
         return articles
 
-    def _parse_date(self, date_str: str) -> Optional[str]:
-        """Parse date string to ISO format."""
+    def _parse_date(self, date_str: str) -> Optional[date]:
+        """Parse date string to date object (consistent with base class)."""
         if not date_str:
             return None
 
@@ -164,7 +165,7 @@ class RedpointScraper(PlaywrightScraper):
         for fmt in formats:
             try:
                 dt = datetime.strptime(date_str.strip(), fmt)
-                return dt.date().isoformat()
+                return dt.date()
             except ValueError:
                 continue
 

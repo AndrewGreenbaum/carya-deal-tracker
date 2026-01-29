@@ -380,15 +380,16 @@ async def scrape_fund(fund_slug: str) -> ScrapingResult:
                         result.deals_extracted += 1
                         if success:
                             result.deals_saved += 1
-                        elif status == "duplicate":
+                        elif status == ExtractionStatus.DUPLICATE.value:
                             # Deal-level duplicate (same company/round/amount)
                             result.articles_skipped_duplicate += 1
-                        elif status == "low_confidence":
+                        elif status == ExtractionStatus.LOW_CONFIDENCE.value:
                             result.articles_skipped_no_funding += 1
-                        elif status == "not_new_announcement":
+                        elif status == ExtractionStatus.NOT_NEW_ANNOUNCEMENT.value:
                             result.articles_rejected_not_announcement += 1
-                        elif status.startswith("error:"):
-                            result.errors.append(status)
+                        elif status in (ExtractionStatus.ERROR.value, ExtractionStatus.EXTRACTION_FAILED.value):
+                            # FIX: Use enum values instead of string matching
+                            result.errors.append(f"Article {unique_articles[i].url}: {status}")
 
                 # If we get here, scraping succeeded - break retry loop
                 break
