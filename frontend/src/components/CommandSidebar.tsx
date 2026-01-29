@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { Home, ChevronDown, ChevronUp, Search, X, Kanban, Mail, Plane, History } from 'lucide-react';
+import { Home, ChevronDown, ChevronUp, Search, X, Kanban, Mail, Plane } from 'lucide-react';
 import type { FilterState, EnterpriseCategory, Fund, ViewType } from '../types';
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
@@ -101,12 +101,6 @@ export function CommandSidebar({
             label="Tracker"
             active={currentView === 'tracker'}
             onClick={() => onViewChange('tracker')}
-          />
-          <NavItem
-            icon={<History className="w-4 h-4" />}
-            label="Scans"
-            active={currentView === 'scans'}
-            onClick={() => onViewChange('scans')}
           />
         </div>
       </nav>
