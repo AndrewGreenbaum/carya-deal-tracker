@@ -107,11 +107,12 @@ async def check_global_url_seen(url: str) -> bool:
         return False
 
 
-def clear_global_seen_urls() -> None:
+async def clear_global_seen_urls() -> None:
     """Clear global URL set. Called at start of each scheduled run."""
     global _global_seen_urls
-    size = len(_global_seen_urls)
-    _global_seen_urls.clear()
+    async with _global_urls_lock:
+        size = len(_global_seen_urls)
+        _global_seen_urls.clear()
     if size > 0:
         logger.info(f"Global URL dedup cache cleared ({size} entries)")
 
@@ -969,6 +970,7 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
     try:
         from ..harvester.scrapers.portfolio_diff import PortfolioDiffScraper
         from ..archivist.storage import save_stealth_detection
+        from ..archivist.database import get_session
 
         async with PortfolioDiffScraper() as scraper:
             articles = await scraper.scrape_all()
@@ -1273,7 +1275,7 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
     logger.info(f"[{job_id}] Content hash cache cleared for fresh run")
 
     # Phase 5: Clear global URL dedup cache for cross-source deduplication
-    clear_global_seen_urls()
+    await clear_global_seen_urls()
     logger.info(f"[{job_id}] Global URL dedup cache cleared for fresh run")
 
     # FIX: Clear LinkedIn failed-lookup cache for fresh enrichment attempts
