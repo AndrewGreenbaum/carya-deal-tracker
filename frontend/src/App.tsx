@@ -382,6 +382,24 @@ function App() {
               {/* Stats Cards */}
               <StatsCards stats={stats} />
 
+              {/* Scan Progress Bar - shows when scan is running */}
+              {(() => {
+                if (!systemStatus.nextScrape) return null;
+                const nextRun = new Date(systemStatus.nextScrape);
+                const now = new Date();
+                const isRunning = nextRun.getTime() <= now.getTime();
+                return isRunning ? (
+                  <div className="px-6 py-2 border-b border-slate-800 bg-[#0a0a0c]">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-emerald-400 font-medium">SCANNING</span>
+                      <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
+                        <div className="h-full w-1/3 bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-500 rounded-full animate-scan-bar" />
+                      </div>
+                    </div>
+                  </div>
+                ) : null;
+              })()}
+
               {/* Error Banner */}
               {error && (
                 <div className="px-6 py-2 border-b border-amber-500/30 bg-amber-500/10 text-amber-400 text-sm flex items-center justify-between">
