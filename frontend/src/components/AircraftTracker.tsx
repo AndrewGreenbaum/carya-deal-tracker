@@ -78,6 +78,17 @@ function getAltitudeColor(altitude: number | undefined, onGround: boolean | unde
   return '#ff4444';
 }
 
+// Create airplane icon with rotation
+function createAircraftIcon(heading: number, color: string): L.DivIcon {
+  const rotation = heading || 0;
+  return L.divIcon({
+    className: 'aircraft-icon',
+    html: `<div style="transform: rotate(${rotation}deg); color: ${color}; font-size: 16px; text-shadow: 0 0 3px #000;">✈</div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+}
+
 // Format altitude in feet
 function formatAltitude(meters?: number): string {
   if (!meters) return 'Ground';
@@ -203,18 +214,13 @@ function AircraftLayer({
       {visibleAircraft.map((ac) => {
         const pos = positions.get(ac.id) || [ac.latitude, ac.longitude];
         const color = getAltitudeColor(ac.altitude, ac.on_ground);
+        const icon = createAircraftIcon(ac.heading || 0, color);
 
         return (
-          <CircleMarker
+          <Marker
             key={ac.id}
-            center={pos as [number, number]}
-            radius={4}
-            pathOptions={{
-              fillColor: color,
-              fillOpacity: 0.9,
-              color: '#0a0e14',
-              weight: 1,
-            }}
+            position={pos as [number, number]}
+            icon={icon}
             eventHandlers={{
               click: () => onAircraftClick(ac),
             }}
@@ -250,7 +256,7 @@ function AircraftLayer({
                 )}
               </div>
             </Popup>
-          </CircleMarker>
+          </Marker>
         );
       })}
     </>
@@ -487,6 +493,13 @@ export function AircraftTracker({ onClose }: AircraftTrackerProps) {
         .leaflet-container {
           background: #0a0e14 !important;
           font-family: 'JetBrains Mono', monospace !important;
+        }
+        .aircraft-icon {
+          background: transparent !important;
+          border: none !important;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
         .leaflet-control-zoom a {
           background: #0d1117 !important;
