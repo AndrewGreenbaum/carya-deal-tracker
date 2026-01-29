@@ -44,6 +44,9 @@ const DEG_TO_RAD = Math.PI / 180;
 // Animation update interval (ms) - 10fps for performance
 const ANIMATION_INTERVAL = 100;
 
+// Max aircraft to display (prioritizes airborne)
+const MAX_DISPLAYED_AIRCRAFT = 250;
+
 // Calculate predicted position based on velocity and heading
 function predictPosition(
   lat: number,
@@ -117,7 +120,7 @@ function AircraftLayer({
     setPositions(newPositions);
   }, [aircraft]);
 
-  // Filter aircraft to only those in viewport (with buffer)
+  // Filter aircraft to only those in viewport (with buffer) and limit count
   useEffect(() => {
     const updateVisibleAircraft = () => {
       const bounds = map.getBounds();
@@ -133,7 +136,16 @@ function AircraftLayer({
         );
       });
 
-      setVisibleAircraft(filtered);
+      // Sort by altitude (airborne first) then limit to MAX_DISPLAYED_AIRCRAFT
+      const sorted = filtered.sort((a, b) => {
+        // Ground aircraft last
+        if (a.on_ground && !b.on_ground) return 1;
+        if (!a.on_ground && b.on_ground) return -1;
+        // Higher altitude first
+        return (b.altitude || 0) - (a.altitude || 0);
+      });
+
+      setVisibleAircraft(sorted.slice(0, MAX_DISPLAYED_AIRCRAFT));
     };
 
     updateVisibleAircraft();
@@ -447,7 +459,7 @@ export function AircraftTracker({ onClose }: AircraftTrackerProps) {
           <span className="text-slate-700">|</span>
           <span>Coverage: Continental USA</span>
           <span className="text-slate-700">|</span>
-          <span>Optimized Rendering</span>
+          <span>Showing max 250 aircraft</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1">
