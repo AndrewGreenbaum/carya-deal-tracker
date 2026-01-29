@@ -594,24 +594,26 @@ def _is_background_mention(
         (is_background, reason): True if background mention, with explanation
 
     Heuristics:
-    - If company name not in first 150 chars (headline/lede), likely background
-    - Exception: Very short articles where everything is "first 150 chars"
+    - If company name not in first 400 chars (headline/lede), likely background
+    - 400 chars accounts for wire service headers, bylines, dates
+    - Exception: Very short articles where everything is "first 400 chars"
     """
     if not company_name or not article_text:
         return False, ""
 
-    # Get the headline/lede (at least 150 chars to catch long company names)
+    # Get the headline/lede (at least 400 chars to account for wire headers/bylines)
+    # Previous 150 char limit was too aggressive - rejected 92% of valid extractions
     first_line_end = article_text.find('\n')
     if first_line_end == -1:
-        first_line_end = 150
+        first_line_end = 400
     else:
-        first_line_end = max(first_line_end, 150)  # At least 150 chars
+        first_line_end = max(first_line_end, 400)  # At least 400 chars
     headline_area = article_text[:first_line_end].lower()
 
     company_lower = company_name.lower().strip()
 
-    # Short articles (<500 chars) - skip this check
-    if len(article_text) < 500:
+    # Short articles (<800 chars) - skip this check (increased from 500 to match 400 char headline)
+    if len(article_text) < 800:
         return False, ""
 
     # Check if company name appears in headline/lede
