@@ -30,7 +30,7 @@ export type EnterpriseCategory =
 
 export type ScraperType = 'html' | 'rss' | 'playwright' | 'external' | 'dom_diff';
 
-export type ViewType = 'dashboard' | 'stealth' | 'settings' | 'scrapers' | 'tracker';
+export type ViewType = 'dashboard' | 'stealth' | 'settings' | 'scrapers' | 'tracker' | 'scans';
 
 export type ServiceStatus = 'live' | 'idle' | 'error' | 'processing';
 

@@ -9,8 +9,8 @@
  */
 
 import { useState } from 'react';
-import { Home, ChevronDown, ChevronUp, Search, X, Kanban, Mail, Plane } from 'lucide-react';
-import type { FilterState, EnterpriseCategory, Fund, ViewType, CostTracker } from '../types';
+import { Home, ChevronDown, ChevronUp, Search, X, Kanban, Mail, Plane, History } from 'lucide-react';
+import type { FilterState, EnterpriseCategory, Fund, ViewType } from '../types';
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
 interface CommandSidebarProps {
@@ -19,7 +19,6 @@ interface CommandSidebarProps {
   funds: Fund[];
   currentView: ViewType;
   onViewChange: (view: ViewType) => void;
-  costTracker?: CostTracker;
   onOpenFeedback?: () => void;
   onOpenAircraft?: () => void;
 }
@@ -30,7 +29,6 @@ export function CommandSidebar({
   funds,
   currentView,
   onViewChange,
-  costTracker,
   onOpenFeedback,
   onOpenAircraft,
 }: CommandSidebarProps) {
@@ -254,31 +252,6 @@ export function CommandSidebar({
           ))}
         </ul>
 
-        {/* Cost Tracker */}
-        {costTracker && (
-          <div className="mt-8 p-3 bg-slate-900 border border-slate-800 rounded text-center">
-            <div className="text-[10px] text-slate-500 mb-1">CURRENT COST</div>
-            <div className="text-xl font-bold text-white">
-              ${costTracker.currentMonth.toFixed(0)}
-              <span className="text-sm text-slate-500">/mo</span>
-            </div>
-            <div className="w-full bg-slate-800 h-1 mt-2 rounded-full overflow-hidden">
-              <div
-                className="bg-blue-500 h-full transition-all"
-                style={{
-                  width: `${Math.min(
-                    (costTracker.currentMonth / costTracker.monthlyLimit) * 100,
-                    100
-                  )}%`,
-                }}
-              />
-            </div>
-            <div className="text-[9px] text-slate-500 mt-1 flex justify-between">
-              <span>Used</span>
-              <span>${costTracker.monthlyLimit} Limit</span>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Footer Actions */}

@@ -546,6 +546,7 @@ async def save_deal(
     article_text: Optional[str] = None,
     source_fund_slug: Optional[str] = None,
     article_published_date: Optional[date] = None,
+    scan_job_id: Optional[int] = None,
 ) -> Tuple[Optional[Deal], Optional[LeadDealAlertInfo]]:
     """
     Save an extracted deal to the database.
@@ -727,6 +728,7 @@ async def save_deal(
         founders_json=founders_json,
         confidence_score=extraction.confidence_score,
         thesis_drift_score=extraction.thesis_drift_score,
+        scan_job_id=scan_job_id,
     )
     session.add(deal)
     await session.flush()

@@ -107,6 +107,9 @@ class Deal(SQLModel, table=True):
     confidence_score: float = 0.0
     thesis_drift_score: float = 0.0
 
+    # Scan tracking
+    scan_job_id: Optional[int] = Field(default=None, foreign_key="scan_jobs.id", index=True)
+
     # Metadata
     # FIX #43: Add index=True for date range queries
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
@@ -403,3 +406,53 @@ class FounderValidation(SQLModel, table=True):
     validated_at: Optional[datetime] = None
     validation_method: str = Field(default="brave_search")  # brave_search, manual
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ScanJob(SQLModel, table=True):
+    """Track scheduled and manual scraping jobs.
+
+    Provides visibility into what each scan found:
+    - When it ran and how long it took
+    - Articles found per source
+    - Deals extracted and saved
+    - Errors encountered
+
+    The deals table has scan_job_id to link deals to their originating scan.
+    """
+    __tablename__ = "scan_jobs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    job_id: str = Field(unique=True, index=True)  # e.g., "20241225_160000"
+
+    # Timing
+    started_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    )
+    completed_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True))
+    )
+    duration_seconds: Optional[float] = None
+
+    # Status
+    status: str = Field(default="running", index=True)  # running, success, failed
+    error_message: Optional[str] = None
+
+    # Summary stats
+    total_articles_found: int = Field(default=0)
+    total_deals_extracted: int = Field(default=0)
+    total_deals_saved: int = Field(default=0)
+    total_duplicates_skipped: int = Field(default=0)
+    total_errors: int = Field(default=0)
+
+    # Breakdown by type
+    lead_deals_found: int = Field(default=0)
+    enterprise_ai_deals_found: int = Field(default=0)
+
+    # Detailed results per source (JSON)
+    # {"brave_search": {"articles": 10, "deals": 2}, "techcrunch": {...}}
+    source_results_json: Optional[str] = None
+
+    # Trigger type
+    trigger: str = Field(default="scheduled")  # scheduled, manual, api

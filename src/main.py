@@ -2967,6 +2967,240 @@ async def get_scheduler_status():
     )
 
 
+# ----- Scan History -----
+
+class ScanDealResponse(BaseModel):
+    """Simplified deal info for scan results."""
+    id: str
+    startup_name: str
+    round_type: str
+    amount: Optional[str] = None
+    lead_investor: Optional[str] = None
+    is_lead: bool = False
+    is_enterprise_ai: bool = False
+    enterprise_category: Optional[str] = None
+    source_name: Optional[str] = None
+    founders: Optional[List[FounderResponse]] = None
+
+
+class ScanSourceStats(BaseModel):
+    """Stats for a single source within a scan."""
+    articles_found: int = 0
+    deals_extracted: int = 0
+    deals_saved: int = 0
+    duplicates_skipped: int = 0
+    errors: int = 0
+    error_message: Optional[str] = None
+
+
+class ScanResponse(BaseModel):
+    """Response for a scan job."""
+    id: int
+    job_id: str
+    started_at: str
+    completed_at: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    status: str
+    trigger: str
+    total_articles_found: int = 0
+    total_deals_extracted: int = 0
+    total_deals_saved: int = 0
+    total_duplicates_skipped: int = 0
+    total_errors: int = 0
+    lead_deals_found: int = 0
+    enterprise_ai_deals_found: int = 0
+    error_message: Optional[str] = None
+
+
+class ScanDetailResponse(ScanResponse):
+    """Detailed response including deals and per-source breakdown."""
+    source_results: Optional[Dict[str, ScanSourceStats]] = None
+    deals: List[ScanDealResponse] = []
+
+
+class ScanListResponse(BaseModel):
+    """Paginated list of scans."""
+    scans: List[ScanResponse]
+    total_count: int
+    page: int
+    limit: int
+
+
+@app.get("/scans", response_model=ScanListResponse)
+async def list_scans(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None, description="Filter by status (running, success, failed)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """List all scans with pagination, most recent first."""
+    from .archivist.models import ScanJob
+
+    async with get_session() as session:
+        # Build query
+        query = select(ScanJob).order_by(ScanJob.started_at.desc())
+
+        if status:
+            query = query.where(ScanJob.status == status)
+
+        # Get total count
+        count_query = select(func.count(ScanJob.id))
+        if status:
+            count_query = count_query.where(ScanJob.status == status)
+        count_result = await session.execute(count_query)
+        total_count = count_result.scalar() or 0
+
+        # Get paginated results
+        query = query.offset((page - 1) * limit).limit(limit)
+        result = await session.execute(query)
+        scans = result.scalars().all()
+
+        scan_responses = []
+        for scan in scans:
+            scan_responses.append(ScanResponse(
+                id=scan.id,
+                job_id=scan.job_id,
+                started_at=scan.started_at.isoformat() if scan.started_at else "",
+                completed_at=scan.completed_at.isoformat() if scan.completed_at else None,
+                duration_seconds=scan.duration_seconds,
+                status=scan.status,
+                trigger=scan.trigger,
+                total_articles_found=scan.total_articles_found,
+                total_deals_extracted=scan.total_deals_extracted,
+                total_deals_saved=scan.total_deals_saved,
+                total_duplicates_skipped=scan.total_duplicates_skipped,
+                total_errors=scan.total_errors,
+                lead_deals_found=scan.lead_deals_found,
+                enterprise_ai_deals_found=scan.enterprise_ai_deals_found,
+                error_message=scan.error_message,
+            ))
+
+        return ScanListResponse(
+            scans=scan_responses,
+            total_count=total_count,
+            page=page,
+            limit=limit,
+        )
+
+
+@app.get("/scans/{scan_id}", response_model=ScanDetailResponse)
+async def get_scan_detail(
+    scan_id: int,
+    api_key: str = Depends(verify_api_key),
+):
+    """Get detailed scan info including deals found."""
+    from .archivist.models import ScanJob
+
+    async with get_session() as session:
+        # Get scan
+        scan_result = await session.execute(
+            select(ScanJob).where(ScanJob.id == scan_id)
+        )
+        scan = scan_result.scalar_one_or_none()
+
+        if not scan:
+            raise HTTPException(status_code=404, detail="Scan not found")
+
+        # Get deals for this scan
+        deals_result = await session.execute(
+            select(Deal, PortfolioCompany)
+            .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
+            .where(Deal.scan_job_id == scan_id)
+            .order_by(Deal.created_at.desc())
+        )
+        deal_rows = deals_result.all()
+
+        # Parse source results JSON
+        source_results = None
+        if scan.source_results_json:
+            try:
+                raw_results = json.loads(scan.source_results_json)
+                source_results = {}
+                for source_name, stats in raw_results.items():
+                    if source_name == "total_deals_saved" or not isinstance(stats, dict):
+                        continue
+                    if "error" in stats:
+                        source_results[source_name] = ScanSourceStats(
+                            error_message=str(stats.get("error", ""))
+                        )
+                    else:
+                        source_results[source_name] = ScanSourceStats(
+                            articles_found=stats.get("articles_received", stats.get("articles_found", 0)),
+                            deals_extracted=stats.get("deals_extracted", 0),
+                            deals_saved=stats.get("deals_saved", 0),
+                            duplicates_skipped=stats.get("articles_skipped_duplicate", 0),
+                            errors=stats.get("errors", 0),
+                        )
+            except json.JSONDecodeError:
+                pass
+
+        # Build deal responses
+        deal_responses = []
+        for deal, company in deal_rows:
+            # Get lead investor from deal_investors
+            investors_result = await session.execute(
+                select(DealInvestor)
+                .where(DealInvestor.deal_id == deal.id)
+                .where(DealInvestor.is_lead == True)
+            )
+            lead_investor = investors_result.scalar_one_or_none()
+
+            # Parse founders
+            founders = None
+            if deal.founders_json:
+                try:
+                    founders_data = json.loads(deal.founders_json)
+                    founders = [
+                        FounderResponse(
+                            name=f.get("name", ""),
+                            title=f.get("title"),
+                            linkedin_url=f.get("linkedin_url"),
+                        )
+                        for f in founders_data
+                    ]
+                except json.JSONDecodeError:
+                    pass
+
+            # Get source from article
+            article_result = await session.execute(
+                select(Article).where(Article.deal_id == deal.id).limit(1)
+            )
+            article = article_result.scalar_one_or_none()
+
+            deal_responses.append(ScanDealResponse(
+                id=str(deal.id),
+                startup_name=company.name,
+                round_type=deal.round_type,
+                amount=deal.amount,
+                lead_investor=lead_investor.investor_name if lead_investor else None,
+                is_lead=deal.is_lead_confirmed,
+                is_enterprise_ai=deal.is_enterprise_ai,
+                enterprise_category=deal.enterprise_category,
+                source_name=article.source_fund_slug if article else None,
+                founders=founders,
+            ))
+
+        return ScanDetailResponse(
+            id=scan.id,
+            job_id=scan.job_id,
+            started_at=scan.started_at.isoformat() if scan.started_at else "",
+            completed_at=scan.completed_at.isoformat() if scan.completed_at else None,
+            duration_seconds=scan.duration_seconds,
+            status=scan.status,
+            trigger=scan.trigger,
+            total_articles_found=scan.total_articles_found,
+            total_deals_extracted=scan.total_deals_extracted,
+            total_deals_saved=scan.total_deals_saved,
+            total_duplicates_skipped=scan.total_duplicates_skipped,
+            total_errors=scan.total_errors,
+            lead_deals_found=scan.lead_deals_found,
+            enterprise_ai_deals_found=scan.enterprise_ai_deals_found,
+            error_message=scan.error_message,
+            source_results=source_results,
+            deals=deal_responses,
+        )
+
+
 # ----- Cache Management -----
 
 @app.post("/cache/clear")

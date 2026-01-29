@@ -27,6 +27,7 @@ import { AdminFeedback } from './components/AdminFeedback';
 import { TokenUsage } from './components/TokenUsage';
 import { ClaudeDocs } from './components/ClaudeDocs';
 import { AircraftTracker } from './components/AircraftTracker';
+import { ScansPage } from './components/ScansPage';
 import {
   fetchDeals,
   fetchFunds,
@@ -44,7 +45,6 @@ import type {
   ViewType,
   SystemStatus,
   DashboardStats,
-  CostTracker,
   PaginatedDeals,
   SortDirection,
 } from './types';
@@ -164,13 +164,6 @@ function App() {
     tokensUsed: '0',
     claudeCalls: 0,
     verificationRate: 100,
-  });
-
-  // Cost tracker
-  const [costTracker] = useState<CostTracker>({
-    currentMonth: 45,
-    monthlyLimit: 100,
-    lastUpdated: new Date().toISOString(),
   });
 
   // Modal state
@@ -372,7 +365,6 @@ function App() {
           funds={funds}
           currentView={currentView}
           onViewChange={setCurrentView}
-          costTracker={costTracker}
           onOpenFeedback={() => setFeedbackOpen(true)}
           onOpenAircraft={() => setAircraftTrackerOpen(true)}
         />
@@ -435,6 +427,13 @@ function App() {
           {currentView === 'tracker' && (
             <ErrorBoundary>
               <Tracker />
+            </ErrorBoundary>
+          )}
+
+          {/* Scans View */}
+          {currentView === 'scans' && (
+            <ErrorBoundary>
+              <ScansPage />
             </ErrorBoundary>
           )}
         </main>

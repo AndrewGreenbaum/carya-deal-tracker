@@ -569,6 +569,7 @@ _last_job_duration: Optional[float] = None
 async def process_external_articles(
     articles: List[NormalizedArticle],
     source_name: str,
+    scan_job_id: Optional[int] = None,
 ) -> Dict[str, int]:
     """
     Process articles from external sources through extraction pipeline.
@@ -723,6 +724,7 @@ async def process_external_articles(
                         article_text=article.text,
                         source_fund_slug=article.fund_slug,
                         article_published_date=article.published_date,
+                        scan_job_id=scan_job_id,
                     )
 
                 # Update stats thread-safely
@@ -803,7 +805,7 @@ async def process_external_articles(
     return stats
 
 
-async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
+async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Scrape all external data sources and process through extraction pipeline.
 
@@ -854,7 +856,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
                     include_partner_names=True,  # Critical for Benchmark, Khosla, First Round
                 )
 
-            stats = await process_external_articles(articles, "brave_search")
+            stats = await process_external_articles(articles, "brave_search", scan_job_id)
             results["brave_search"] = stats
             total_deals_saved += stats["deals_saved"]
 
@@ -887,7 +889,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
 
             logger.info(f"SEC EDGAR: Created {len(articles)} articles with full details")
 
-        stats = await process_external_articles(articles, "sec_edgar")
+        stats = await process_external_articles(articles, "sec_edgar", scan_job_id)
         results["sec_edgar"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -904,7 +906,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             async with GoogleAlertsScraper(feed_urls) as scraper:
                 articles = await scraper.scrape_all()
 
-            stats = await process_external_articles(articles, "google_alerts")
+            stats = await process_external_articles(articles, "google_alerts", scan_job_id)
             results["google_alerts"] = stats
             total_deals_saved += stats["deals_saved"]
 
@@ -920,7 +922,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             async with TwitterMonitor() as monitor:
                 articles = await monitor.scrape_all(hours_back=days * 24)
 
-            stats = await process_external_articles(articles, "twitter")
+            stats = await process_external_articles(articles, "twitter", scan_job_id)
             results["twitter"] = stats
             total_deals_saved += stats["deals_saved"]
 
@@ -935,7 +937,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         async with TechCrunchScraper() as scraper:
             articles = await scraper.scrape_all(hours_back=days * 24)
 
-        stats = await process_external_articles(articles, "techcrunch")
+        stats = await process_external_articles(articles, "techcrunch", scan_job_id)
         results["techcrunch"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -955,7 +957,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             async with LinkedInJobsScraper() as scraper:
                 articles = await scraper.scrape_all()
 
-            stats = await process_external_articles(articles, "linkedin_jobs")
+            stats = await process_external_articles(articles, "linkedin_jobs", scan_job_id)
             results["linkedin_jobs"] = stats
             total_deals_saved += stats["deals_saved"]
 
@@ -1005,7 +1007,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         async with CrunchbaseNewsScraper() as scraper:
             articles = await scraper.scrape_all(hours_back=days * 24)
 
-        stats = await process_external_articles(articles, "crunchbase_news")
+        stats = await process_external_articles(articles, "crunchbase_news", scan_job_id)
         results["crunchbase_news"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1020,7 +1022,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         async with VentureBeatScraper() as scraper:
             articles = await scraper.scrape_all(hours_back=days * 24)
 
-        stats = await process_external_articles(articles, "venturebeat")
+        stats = await process_external_articles(articles, "venturebeat", scan_job_id)
         results["venturebeat"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1035,7 +1037,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         async with AxiosProRataScraper() as scraper:
             articles = await scraper.scrape_all(hours_back=days * 24)
 
-        stats = await process_external_articles(articles, "axios_prorata")
+        stats = await process_external_articles(articles, "axios_prorata", scan_job_id)
         results["axios_prorata"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1050,7 +1052,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         async with StrictlyVCScraper() as scraper:
             articles = await scraper.scrape_all(hours_back=days * 24)
 
-        stats = await process_external_articles(articles, "strictlyvc")
+        stats = await process_external_articles(articles, "strictlyvc", scan_job_id)
         results["strictlyvc"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1066,7 +1068,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             # Use fund_filter=True to only process articles mentioning tracked funds
             articles = await scraper.scrape_all_feeds(hours_back=days * 24, fund_filter=True)
 
-        stats = await process_external_articles(articles, "prwire")
+        stats = await process_external_articles(articles, "prwire", scan_job_id)
         results["prwire"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1082,7 +1084,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             async with DelawareCorpsScraper() as scraper:
                 articles = await scraper.scrape_all(days_back=days, min_score=3)
 
-            stats = await process_external_articles(articles, "delaware_corps")
+            stats = await process_external_articles(articles, "delaware_corps", scan_job_id)
             results["delaware_corps"] = stats
             total_deals_saved += stats["deals_saved"]
 
@@ -1097,7 +1099,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         async with YCombinatorScraper() as scraper:
             articles = await scraper.scrape_all(filter_enterprise=True)
 
-        stats = await process_external_articles(articles, "ycombinator")
+        stats = await process_external_articles(articles, "ycombinator", scan_job_id)
         results["ycombinator"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1113,7 +1115,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
             repos = await scraper.fetch_all_trending(since="daily")
             articles = await scraper.scrape_all(since="daily", filter_enterprise=True, repos=repos)
 
-        stats = await process_external_articles(articles, "github_trending")
+        stats = await process_external_articles(articles, "github_trending", scan_job_id)
         results["github_trending"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1128,7 +1130,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         async with HackerNewsScraper() as scraper:
             articles = await scraper.scrape_all(hours_back=days * 24)
 
-        stats = await process_external_articles(articles, "hackernews")
+        stats = await process_external_articles(articles, "hackernews", scan_job_id)
         results["hackernews"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1143,7 +1145,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         async with TechFundingNewsScraper() as scraper:
             articles = await scraper.scrape_all(hours_back=days * 24)
 
-        stats = await process_external_articles(articles, "tech_funding_news")
+        stats = await process_external_articles(articles, "tech_funding_news", scan_job_id)
         results["tech_funding_news"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1158,7 +1160,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
         async with VentureburnScraper() as scraper:
             articles = await scraper.scrape_all(hours_back=days * 24)
 
-        stats = await process_external_articles(articles, "ventureburn")
+        stats = await process_external_articles(articles, "ventureburn", scan_job_id)
         results["ventureburn"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1217,7 +1219,7 @@ async def scrape_external_sources(days: int = 7) -> Dict[str, Any]:
     return results
 
 
-async def scheduled_scrape_job():
+async def scheduled_scrape_job(trigger: str = "scheduled"):
     """
     Main scheduled scraping job.
 
@@ -1228,16 +1230,40 @@ async def scheduled_scrape_job():
     This is the FIXED version that includes external sources
     which contain partner name queries for funds like Benchmark,
     Khosla, and First Round that don't have useful website scrapers.
+
+    Args:
+        trigger: How the job was triggered ("scheduled", "manual", "api")
     """
     global _last_job_run, _last_job_status, _last_job_error, _last_job_duration
 
     job_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    logger.info(f"[{job_id}] Starting scheduled scrape job")
+    logger.info(f"[{job_id}] Starting scheduled scrape job (trigger={trigger})")
 
     # Track job execution
     _last_job_run = datetime.now(timezone.utc)
     _last_job_status = "running"
     _last_job_error = None
+
+    # Create ScanJob record in database
+    from ..archivist.models import ScanJob
+    from ..archivist.database import get_session
+    import json
+
+    scan_job_db_id = None
+    try:
+        async with get_session() as session:
+            scan_job = ScanJob(
+                job_id=job_id,
+                status="running",
+                trigger=trigger,
+            )
+            session.add(scan_job)
+            await session.commit()
+            await session.refresh(scan_job)
+            scan_job_db_id = scan_job.id
+            logger.info(f"[{job_id}] Created ScanJob record (id={scan_job_db_id})")
+    except Exception as e:
+        logger.warning(f"[{job_id}] Failed to create ScanJob record: {e}")
 
     # CRITICAL FIX: Clear content hash cache at start of each run
     # Without this, duplicate detection prevents processing the same article
@@ -1282,7 +1308,7 @@ async def scheduled_scrape_job():
         # ===== PHASE 2: Scrape external sources (THE FIX) =====
         logger.info(f"[{job_id}] Phase 2: Scraping external sources (Brave Search, SEC, etc.)")
 
-        external_results = await scrape_external_sources(days=7)
+        external_results = await scrape_external_sources(days=7, scan_job_id=scan_job_db_id)
         external_deals = external_results.get("total_deals_saved", 0)
 
         logger.info(
@@ -1326,6 +1352,48 @@ async def scheduled_scrape_job():
         _last_job_duration = duration
         logger.info(f"[{job_id}] Job completed successfully in {duration:.1f}s")
 
+        # Update ScanJob record with success
+        if scan_job_db_id:
+            try:
+                # Calculate totals from external_results
+                total_articles = fund_articles
+                total_extracted = 0
+                total_saved = fund_deals
+                total_duplicates = 0
+                total_errors = fund_errors
+                lead_deals = 0
+                enterprise_ai_deals = 0
+
+                for source_name, stats in external_results.items():
+                    if source_name.startswith("_") or source_name == "total_deals_saved":
+                        continue
+                    if isinstance(stats, dict) and "error" not in stats:
+                        total_articles += stats.get("articles_received", 0)
+                        total_extracted += stats.get("deals_extracted", 0)
+                        total_saved += stats.get("deals_saved", 0)
+                        total_duplicates += stats.get("articles_skipped_duplicate", 0)
+                        total_errors += stats.get("errors", 0)
+
+                async with get_session() as session:
+                    from sqlalchemy import select
+                    stmt = select(ScanJob).where(ScanJob.id == scan_job_db_id)
+                    result = await session.execute(stmt)
+                    scan_job = result.scalar_one_or_none()
+                    if scan_job:
+                        scan_job.status = "success"
+                        scan_job.completed_at = datetime.now(timezone.utc)
+                        scan_job.duration_seconds = duration
+                        scan_job.total_articles_found = total_articles
+                        scan_job.total_deals_extracted = total_extracted
+                        scan_job.total_deals_saved = total_saved
+                        scan_job.total_duplicates_skipped = total_duplicates
+                        scan_job.total_errors = total_errors
+                        scan_job.source_results_json = json.dumps(external_results, default=str)
+                        await session.commit()
+                        logger.info(f"[{job_id}] Updated ScanJob record with success stats")
+            except Exception as e:
+                logger.warning(f"[{job_id}] Failed to update ScanJob record: {e}")
+
     except Exception as e:
         logger.error(f"[{job_id}] Scrape job failed: {e}", exc_info=True)
         duration = (datetime.now(timezone.utc) - start_time).total_seconds()
@@ -1334,6 +1402,24 @@ async def scheduled_scrape_job():
         _last_job_status = "failed"
         _last_job_error = str(e)
         _last_job_duration = duration
+
+        # Update ScanJob record with failure
+        if scan_job_db_id:
+            try:
+                async with get_session() as session:
+                    from sqlalchemy import select
+                    stmt = select(ScanJob).where(ScanJob.id == scan_job_db_id)
+                    result = await session.execute(stmt)
+                    scan_job = result.scalar_one_or_none()
+                    if scan_job:
+                        scan_job.status = "failed"
+                        scan_job.completed_at = datetime.now(timezone.utc)
+                        scan_job.duration_seconds = duration
+                        scan_job.error_message = str(e)[:500]  # Truncate long errors
+                        await session.commit()
+                        logger.info(f"[{job_id}] Updated ScanJob record with failure")
+            except Exception as update_err:
+                logger.warning(f"[{job_id}] Failed to update ScanJob failure: {update_err}")
 
         # Still try to send error notification
         await send_scrape_summary(

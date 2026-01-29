@@ -22,3 +22,6 @@ export { TrackerModal } from './TrackerModal';
 
 // Documentation
 export { ClaudeDocs } from './ClaudeDocs';
+
+// Scans
+export { ScansPage } from './ScansPage';
