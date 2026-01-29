@@ -1202,29 +1202,23 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
     matched_leads = []
     matched_participants = []
 
-    # Validate verification snippet FIRST - STRICT CHECK
+    # Validate verification snippet - WARNING ONLY (don't reject)
+    # Trust Claude's lead determination, but log for review if snippet lacks explicit lead language
     has_valid_snippet = _has_lead_language(deal.verification_snippet)
 
-    # CRITICAL FIX: If snippet exists but lacks lead language, REJECT lead claim immediately
-    # This prevents false positives where LLM says "confirmed_lead" without proof
-    if deal.verification_snippet and not has_valid_snippet:
+    if deal.tracked_fund_is_lead and deal.verification_snippet and not has_valid_snippet:
         logger.warning(
-            f"REJECTING lead claim for {deal.startup_name}: "
-            f"snippet '{deal.verification_snippet[:80]}...' lacks lead language"
+            f"WEAK lead evidence for {deal.startup_name}: "
+            f"snippet '{deal.verification_snippet[:80]}...' lacks explicit lead language - trusting Claude"
         )
-        # Override LLM's incorrect assignment - NOT a lead
-        deal.tracked_fund_is_lead = False
-        deal.tracked_fund_role = LeadStatus.PARTICIPANT
-        # Continue processing to identify which fund is involved, but as participant
+        # Previously rejected here, now just warning - trust Claude's judgment
 
-    # Also reject if NO snippet provided but deal claims lead status
     if deal.tracked_fund_is_lead and not deal.verification_snippet:
         logger.warning(
-            f"REJECTING lead claim for {deal.startup_name}: "
-            f"no verification_snippet provided"
+            f"WEAK lead evidence for {deal.startup_name}: "
+            f"no verification_snippet provided - trusting Claude"
         )
-        deal.tracked_fund_is_lead = False
-        deal.tracked_fund_role = LeadStatus.PARTICIPANT
+        # Previously rejected here, now just warning - trust Claude's judgment
 
     # FIX: Track ALL confirmed lead funds to record co-leads
     confirmed_lead_funds: list[tuple[str, str, str]] = []  # (slug, name, partner)
