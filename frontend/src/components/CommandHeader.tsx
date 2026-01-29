@@ -108,7 +108,7 @@ export function CommandHeader({
           }
         />
 
-        {/* Next Scrape Countdown */}
+        {/* Next Scrape Countdown with animated bar */}
         {nextScrape && (
           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 rounded border border-slate-800">
             <Clock className="w-3 h-3 text-slate-400" />
@@ -116,6 +116,9 @@ export function CommandHeader({
             <span className={`font-mono ${nextScrape === 'Running...' ? 'text-orange-400 animate-pulse' : 'text-emerald-400'}`}>
               {nextScrape}
             </span>
+            <div className="w-16 h-1 bg-slate-800 rounded-full overflow-hidden ml-1">
+              <div className="h-full w-1/3 bg-emerald-500 rounded-full animate-scan-bar" />
+            </div>
           </div>
         )}
 
