@@ -1,13 +1,12 @@
 /**
  * AircraftTracker - Interactive aircraft tracking map
  * Real-time ADS-B data from OpenSky Network via backend
- * Smooth CSS-based position animation
+ * Optimized for 500+ aircraft with viewport culling and throttled animation
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Plane, Radio, Maximize2, Minimize2 } from 'lucide-react';
-import { MapContainer, TileLayer, useMap } from 'react-leaflet';
-import L from 'leaflet';
+import { MapContainer, TileLayer, useMap, CircleMarker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 interface Aircraft {
@@ -42,6 +41,9 @@ const DEFAULT_ZOOM = 4;
 const METERS_PER_DEGREE_LAT = 111320;
 const DEG_TO_RAD = Math.PI / 180;
 
+// Animation update interval (ms) - 10fps for performance
+const ANIMATION_INTERVAL = 100;
+
 // Calculate predicted position based on velocity and heading
 function predictPosition(
   lat: number,
@@ -72,18 +74,6 @@ function getAltitudeColor(altitude: number | undefined, onGround: boolean | unde
   return '#ff4444';
 }
 
-// Create aircraft icon HTML
-function createIconHtml(color: string, heading: number): string {
-  return `
-    <div class="aircraft-icon" style="transform: rotate(${heading}deg);">
-      <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
-        <path d="M16 4 L17.5 12 L26 14 L26 15.5 L17.5 14.5 L17.5 23 L21 25 L21 26.5 L16 25 L11 26.5 L11 25 L14.5 23 L14.5 14.5 L6 15.5 L6 14 L14.5 12 Z"
-              fill="${color}" stroke="#0a0e14" stroke-width="0.5"/>
-      </svg>
-    </div>
-  `;
-}
-
 // Format altitude in feet
 function formatAltitude(meters?: number): string {
   if (!meters) return 'Ground';
@@ -98,41 +88,7 @@ function formatSpeed(ms?: number): string {
   return `${Math.round(knots)} kts`;
 }
 
-// Create popup content
-function createPopupContent(ac: Aircraft): string {
-  const altColor = ac.on_ground ? '#64748b' : '#00ff9d';
-  return `
-    <div style="background: #0d1117; color: white; padding: 12px; min-width: 200px; margin: -14px -20px; font-family: monospace; font-size: 11px;">
-      <div style="color: #00ff9d; font-weight: bold; font-size: 13px; margin-bottom: 8px; border-bottom: 1px solid #21262d; padding-bottom: 8px;">
-        ${ac.callsign?.trim() || ac.icao24}
-      </div>
-      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-        <span style="color: #64748b;">ICAO:</span>
-        <span>${ac.icao24}</span>
-      </div>
-      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-        <span style="color: #64748b;">Altitude:</span>
-        <span style="color: ${altColor};">${formatAltitude(ac.altitude)}</span>
-      </div>
-      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-        <span style="color: #64748b;">Speed:</span>
-        <span>${formatSpeed(ac.velocity)}</span>
-      </div>
-      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-        <span style="color: #64748b;">Heading:</span>
-        <span>${ac.heading ? `${Math.round(ac.heading)}°` : '-'}</span>
-      </div>
-      ${ac.origin_country ? `
-      <div style="display: flex; justify-content: space-between;">
-        <span style="color: #64748b;">Origin:</span>
-        <span>${ac.origin_country}</span>
-      </div>
-      ` : ''}
-    </div>
-  `;
-}
-
-// Map controller for programmatic control and aircraft layer management
+// Optimized Aircraft Layer using Canvas-based CircleMarkers
 function AircraftLayer({
   aircraft,
   onAircraftClick
@@ -141,93 +97,69 @@ function AircraftLayer({
   onAircraftClick: (ac: Aircraft) => void;
 }) {
   const map = useMap();
-  const markersRef = useRef<Map<string, L.Marker>>(new Map());
-  const animationRef = useRef<number | null>(null);
+  const [visibleAircraft, setVisibleAircraft] = useState<Aircraft[]>([]);
+  const [positions, setPositions] = useState<Map<string, [number, number]>>(new Map());
   const baseDataRef = useRef<Map<string, { ac: Aircraft; baseTime: number }>>(new Map());
+  const animationRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Update base data when aircraft data changes
   useEffect(() => {
     const now = Date.now();
     const newBaseData = new Map<string, { ac: Aircraft; baseTime: number }>();
+    const newPositions = new Map<string, [number, number]>();
 
     aircraft.forEach(ac => {
       newBaseData.set(ac.id, { ac, baseTime: now });
+      newPositions.set(ac.id, [ac.latitude, ac.longitude]);
     });
 
     baseDataRef.current = newBaseData;
+    setPositions(newPositions);
   }, [aircraft]);
 
-  // Create/update/remove markers
+  // Filter aircraft to only those in viewport (with buffer)
   useEffect(() => {
-    const currentIds = new Set(aircraft.map(ac => ac.id));
-    const existingIds = new Set(markersRef.current.keys());
+    const updateVisibleAircraft = () => {
+      const bounds = map.getBounds();
+      const buffer = 2; // degrees buffer around viewport
 
-    // Remove markers for aircraft no longer present
-    existingIds.forEach(id => {
-      if (!currentIds.has(id)) {
-        const marker = markersRef.current.get(id);
-        if (marker) {
-          marker.remove();
-          markersRef.current.delete(id);
-        }
-      }
-    });
+      const filtered = aircraft.filter(ac => {
+        const pos = positions.get(ac.id) || [ac.latitude, ac.longitude];
+        return (
+          pos[0] >= bounds.getSouth() - buffer &&
+          pos[0] <= bounds.getNorth() + buffer &&
+          pos[1] >= bounds.getWest() - buffer &&
+          pos[1] <= bounds.getEast() + buffer
+        );
+      });
 
-    // Add or update markers
-    aircraft.forEach(ac => {
-      const color = getAltitudeColor(ac.altitude, ac.on_ground);
-      const heading = ac.heading || 0;
+      setVisibleAircraft(filtered);
+    };
 
-      if (markersRef.current.has(ac.id)) {
-        // Update existing marker
-        const marker = markersRef.current.get(ac.id)!;
-        const icon = L.divIcon({
-          className: 'aircraft-marker-animated',
-          html: createIconHtml(color, heading),
-          iconSize: [24, 24],
-          iconAnchor: [12, 12],
-        });
-        marker.setIcon(icon);
-        marker.setPopupContent(createPopupContent(ac));
-      } else {
-        // Create new marker
-        const icon = L.divIcon({
-          className: 'aircraft-marker-animated',
-          html: createIconHtml(color, heading),
-          iconSize: [24, 24],
-          iconAnchor: [12, 12],
-        });
+    updateVisibleAircraft();
 
-        const marker = L.marker([ac.latitude, ac.longitude], { icon })
-          .addTo(map)
-          .bindPopup(createPopupContent(ac), {
-            className: 'aircraft-popup-custom',
-          });
+    map.on('moveend', updateVisibleAircraft);
+    map.on('zoomend', updateVisibleAircraft);
 
-        marker.on('click', () => onAircraftClick(ac));
-        markersRef.current.set(ac.id, marker);
-      }
-    });
-  }, [aircraft, map, onAircraftClick]);
+    return () => {
+      map.off('moveend', updateVisibleAircraft);
+      map.off('zoomend', updateVisibleAircraft);
+    };
+  }, [map, aircraft, positions]);
 
-  // Animation loop for smooth movement
+  // Throttled animation loop (10fps)
   useEffect(() => {
-    let isRunning = true;
-
     const animate = () => {
-      if (!isRunning) return;
-
       const now = Date.now();
+      const newPositions = new Map<string, [number, number]>();
 
       baseDataRef.current.forEach(({ ac, baseTime }, id) => {
-        const marker = markersRef.current.get(id);
-        if (!marker) return;
-
-        // Skip ground aircraft
-        if (ac.on_ground || !ac.velocity || ac.velocity < 10) return;
+        if (ac.on_ground || !ac.velocity || ac.velocity < 10) {
+          newPositions.set(id, [ac.latitude, ac.longitude]);
+          return;
+        }
 
         const elapsed = (now - baseTime) / 1000;
-        // Clamp to 15 seconds max
         const clampedElapsed = Math.min(elapsed, 15);
 
         const [newLat, newLon] = predictPosition(
@@ -238,31 +170,78 @@ function AircraftLayer({
           clampedElapsed
         );
 
-        marker.setLatLng([newLat, newLon]);
+        newPositions.set(id, [newLat, newLon]);
       });
 
-      animationRef.current = requestAnimationFrame(animate);
+      setPositions(newPositions);
     };
 
-    animate();
+    animationRef.current = setInterval(animate, ANIMATION_INTERVAL);
 
     return () => {
-      isRunning = false;
       if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
+        clearInterval(animationRef.current);
       }
     };
   }, []);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      markersRef.current.forEach(marker => marker.remove());
-      markersRef.current.clear();
-    };
-  }, []);
+  return (
+    <>
+      {visibleAircraft.map((ac) => {
+        const pos = positions.get(ac.id) || [ac.latitude, ac.longitude];
+        const color = getAltitudeColor(ac.altitude, ac.on_ground);
 
-  return null;
+        return (
+          <CircleMarker
+            key={ac.id}
+            center={pos as [number, number]}
+            radius={4}
+            pathOptions={{
+              fillColor: color,
+              fillOpacity: 0.9,
+              color: '#0a0e14',
+              weight: 1,
+            }}
+            eventHandlers={{
+              click: () => onAircraftClick(ac),
+            }}
+          >
+            <Popup className="aircraft-popup-custom">
+              <div className="popup-content">
+                <div className="popup-header">
+                  {ac.callsign?.trim() || ac.icao24}
+                </div>
+                <div className="popup-row">
+                  <span className="popup-label">ICAO:</span>
+                  <span>{ac.icao24}</span>
+                </div>
+                <div className="popup-row">
+                  <span className="popup-label">Altitude:</span>
+                  <span className={ac.on_ground ? 'text-gray' : 'text-green'}>
+                    {formatAltitude(ac.altitude)}
+                  </span>
+                </div>
+                <div className="popup-row">
+                  <span className="popup-label">Speed:</span>
+                  <span>{formatSpeed(ac.velocity)}</span>
+                </div>
+                <div className="popup-row">
+                  <span className="popup-label">Heading:</span>
+                  <span>{ac.heading ? `${Math.round(ac.heading)}°` : '-'}</span>
+                </div>
+                {ac.origin_country && (
+                  <div className="popup-row">
+                    <span className="popup-label">Origin:</span>
+                    <span>{ac.origin_country}</span>
+                  </div>
+                )}
+              </div>
+            </Popup>
+          </CircleMarker>
+        );
+      })}
+    </>
+  );
 }
 
 // Map controller for flying to locations
@@ -446,6 +425,7 @@ export function AircraftTracker({ onClose }: AircraftTrackerProps) {
             zoom={DEFAULT_ZOOM}
             style={{ height: '100%', width: '100%', background: '#0a0e14' }}
             zoomControl={true}
+            preferCanvas={true}
           >
             <TileLayer
               attribution='&copy; <a href="https://carto.com/">CARTO</a>'
@@ -467,7 +447,7 @@ export function AircraftTracker({ onClose }: AircraftTrackerProps) {
           <span className="text-slate-700">|</span>
           <span>Coverage: Continental USA</span>
           <span className="text-slate-700">|</span>
-          <span>Live Interpolation</span>
+          <span>Optimized Rendering</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1">
@@ -491,30 +471,6 @@ export function AircraftTracker({ onClose }: AircraftTrackerProps) {
 
       {/* Custom styles for Leaflet */}
       <style>{`
-        .aircraft-marker-animated {
-          background: transparent !important;
-          border: none !important;
-        }
-        .aircraft-icon {
-          filter: drop-shadow(0 0 4px rgba(0, 255, 157, 0.5));
-          will-change: transform;
-        }
-        .aircraft-popup-custom .leaflet-popup-content-wrapper {
-          background: transparent !important;
-          border: none !important;
-          border-radius: 0 !important;
-          box-shadow: none !important;
-          padding: 0 !important;
-        }
-        .aircraft-popup-custom .leaflet-popup-content {
-          margin: 0 !important;
-          background: #0d1117;
-          border: 1px solid #00ff9d;
-          box-shadow: 0 0 20px rgba(0, 255, 157, 0.3);
-        }
-        .aircraft-popup-custom .leaflet-popup-tip-container {
-          display: none;
-        }
         .leaflet-container {
           background: #0a0e14 !important;
           font-family: 'JetBrains Mono', monospace !important;
@@ -533,6 +489,50 @@ export function AircraftTracker({ onClose }: AircraftTrackerProps) {
         }
         .leaflet-control-attribution a {
           color: #00ff9d !important;
+        }
+        .aircraft-popup-custom .leaflet-popup-content-wrapper {
+          background: #0d1117 !important;
+          border: 1px solid #00ff9d !important;
+          border-radius: 0 !important;
+          box-shadow: 0 0 20px rgba(0, 255, 157, 0.3) !important;
+          padding: 0 !important;
+        }
+        .aircraft-popup-custom .leaflet-popup-content {
+          margin: 0 !important;
+        }
+        .aircraft-popup-custom .leaflet-popup-tip {
+          background: #0d1117 !important;
+          border: 1px solid #00ff9d !important;
+        }
+        .popup-content {
+          background: #0d1117;
+          color: white;
+          padding: 12px;
+          min-width: 180px;
+          font-family: monospace;
+          font-size: 11px;
+        }
+        .popup-header {
+          color: #00ff9d;
+          font-weight: bold;
+          font-size: 13px;
+          margin-bottom: 8px;
+          border-bottom: 1px solid #21262d;
+          padding-bottom: 8px;
+        }
+        .popup-row {
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 4px;
+        }
+        .popup-label {
+          color: #64748b;
+        }
+        .text-green {
+          color: #00ff9d;
+        }
+        .text-gray {
+          color: #64748b;
         }
       `}</style>
     </div>
