@@ -710,10 +710,12 @@ async def save_deal(
 
     # Create deal with enterprise AI classification
     # FIX: Set date_confidence based on extraction source
+    # FIX: Populate amount_usd for numeric queries/sorting
     deal = Deal(
         company_id=company.id,
         round_type=extraction.round_label.value,
         amount=extraction.amount,
+        amount_usd=normalize_amount(extraction.amount),  # FIX: Store normalized amount
         valuation=extraction.valuation,
         announced_date=announced_date,
         date_confidence=date_confidence,  # FIX: Set based on source

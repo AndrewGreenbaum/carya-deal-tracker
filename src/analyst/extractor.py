@@ -282,6 +282,9 @@ SUPPORTING_KEYWORDS = [
     "announces", "valuation", "pre-seed", "series a", "series b", "series c"
 ]
 
+# FIX: Pre-compute combined keyword list at module level (was created on every call)
+ALL_FUNDING_KEYWORDS = STRONG_FUNDING_KEYWORDS + AMOUNT_KEYWORDS + SUPPORTING_KEYWORDS
+
 
 def is_likely_funding_content(text: str) -> bool:
     """
@@ -303,8 +306,8 @@ def is_likely_funding_content(text: str) -> bool:
         return True
 
     # Fallback: require 3+ keywords total
-    all_keywords = STRONG_FUNDING_KEYWORDS + AMOUNT_KEYWORDS + SUPPORTING_KEYWORDS
-    matches = sum(1 for kw in all_keywords if kw in text_lower)
+    # FIX: Use pre-computed module-level constant (was creating list on every call)
+    matches = sum(1 for kw in ALL_FUNDING_KEYWORDS if kw in text_lower)
     return matches >= 3
 
 

@@ -363,8 +363,7 @@ class DealExtraction(BaseModel):
             if not self.announcement_evidence:
                 # FIX: Don't accept is_new_announcement=True without proof
                 # Downgrade to False instead of crashing extraction
-                import logging
-                logger = logging.getLogger(__name__)
+                # FIX: Use module-level logger instead of creating new one each validation
                 logger.warning(
                     f"Downgrading {self.startup_name}: is_new_announcement=True "
                     f"but no announcement_evidence provided"
