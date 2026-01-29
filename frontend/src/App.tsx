@@ -115,6 +115,11 @@ function App() {
     return <ClaudeDocs />;
   }
 
+  // Check for scans page URL
+  if (window.location.pathname === '/scans') {
+    return <ScansPage />;
+  }
+
   // View state
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [settingsOpen, setSettingsOpen] = useState(false);
