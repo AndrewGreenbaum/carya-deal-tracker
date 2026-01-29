@@ -102,6 +102,12 @@ export function CommandSidebar({
             active={currentView === 'tracker'}
             onClick={() => onViewChange('tracker')}
           />
+          <NavItem
+            icon={<History className="w-4 h-4" />}
+            label="Scans"
+            active={currentView === 'scans'}
+            onClick={() => onViewChange('scans')}
+          />
         </div>
       </nav>
 
