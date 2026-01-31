@@ -23,7 +23,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, HTTPException, Depends, Security, Query, Request, Response
+from fastapi import FastAPI, HTTPException, Depends, Security, Query, Request, Response, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import APIKeyHeader
@@ -2967,6 +2967,43 @@ async def get_scheduler_status():
     )
 
 
+class TriggerJobResponse(BaseModel):
+    """Response for triggering the scheduled job."""
+    status: str
+    message: str
+    job_id: Optional[str] = None
+
+
+@app.post("/scheduler/trigger", response_model=TriggerJobResponse)
+async def trigger_scheduled_job(
+    background_tasks: BackgroundTasks,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Manually trigger the scheduled scrape job.
+
+    This runs the full pipeline:
+    1. Scrape all 18 fund websites
+    2. Scrape external sources (Brave, SEC, RSS feeds)
+    3. Process through Claude extraction
+    4. Save new deals to database
+    5. Enrich deals (website + LinkedIn)
+
+    The job runs in the background and can take 5-15 minutes.
+    Check /scheduler/status for progress.
+    """
+    from .scheduler.jobs import scheduled_scrape_job
+
+    # Run in background
+    background_tasks.add_task(scheduled_scrape_job, "api")
+
+    return TriggerJobResponse(
+        status="started",
+        message="Scheduled job triggered. Check /scheduler/status for progress.",
+        job_id=datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"),
+    )
+
+
 # ----- Scan History -----
 
 class ScanDealResponse(BaseModel):
@@ -3590,7 +3627,7 @@ async def enrich_deal_dates(
                         # Persist to database directly (same session)
                         if persist:
                             deal.announced_date = enrichment_result.found_date
-                            deal.updated_at = datetime.now(timezone.utc)
+                            deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     else:
                         not_found += 1
 
@@ -3683,14 +3720,14 @@ async def cross_reference_dates(
                             "articles_checked": len(deal.articles),
                         })
                         deal.announced_date = earliest_date
-                        deal.updated_at = datetime.now(timezone.utc)
+                        deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                         updated += 1
                     else:
                         already_earliest += 1
                 else:
                     # Deal had no date, set it
                     deal.announced_date = earliest_date
-                    deal.updated_at = datetime.now(timezone.utc)
+                    deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     updated += 1
 
             await session.commit()

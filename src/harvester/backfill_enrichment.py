@@ -200,7 +200,7 @@ async def update_company_website_in_session(
         company = result.scalar_one_or_none()
         if company:
             company.website = website
-            company.updated_at = datetime.now(timezone.utc)
+            company.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
             logger.info(f"Updated company {company_id} ({company.name}) website to {website}")
             return True
         else:

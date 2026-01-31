@@ -18,6 +18,15 @@ from sqlalchemy import Column, DateTime
 import uuid
 
 
+def utc_now_naive() -> datetime:
+    """Return current UTC time as timezone-naive datetime.
+
+    PostgreSQL TIMESTAMP WITHOUT TIME ZONE columns require naive datetimes.
+    Using timezone-aware datetimes causes asyncpg DataError.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 class Fund(SQLModel, table=True):
     """A tracked VC fund."""
     __tablename__ = "funds"
@@ -26,7 +35,7 @@ class Fund(SQLModel, table=True):
     slug: str = Field(unique=True, index=True)
     name: str
     website: Optional[str] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=utc_now_naive)
 
     # Relationships
     partners: List["Partner"] = Relationship(back_populates="fund")
@@ -42,7 +51,7 @@ class Partner(SQLModel, table=True):
     fund_id: int = Field(foreign_key="funds.id")
     linkedin_url: Optional[str] = None
     twitter_handle: Optional[str] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=utc_now_naive)
 
     # Relationships
     fund: Fund = Relationship(back_populates="partners")
@@ -60,8 +69,8 @@ class PortfolioCompany(SQLModel, table=True):
     sector: Optional[str] = None
     founded_year: Optional[int] = None
     hq_location: Optional[str] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    updated_at: datetime = Field(default_factory=utc_now_naive)
 
     # Relationships
     deals: List["Deal"] = Relationship(back_populates="company")
@@ -112,8 +121,8 @@ class Deal(SQLModel, table=True):
 
     # Metadata
     # FIX #43: Add index=True for date range queries
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=utc_now_naive, index=True)
+    updated_at: datetime = Field(default_factory=utc_now_naive)
 
     # Relationships
     company: PortfolioCompany = Relationship(back_populates="deals")
@@ -159,7 +168,7 @@ class Article(SQLModel, table=True):
     title: str
     source_fund_slug: Optional[str] = None  # Which fund's feed we found it on
     published_date: Optional[date] = None
-    fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    fetched_at: datetime = Field(default_factory=utc_now_naive)
 
     # Content
     raw_html: Optional[str] = None
@@ -192,7 +201,7 @@ class StealthDetection(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     fund_slug: str = Field(index=True)
     detected_url: str
-    detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    detected_at: datetime = Field(default_factory=utc_now_naive)
     company_name: Optional[str] = None
     is_confirmed: bool = False
     notes: Optional[str] = None
@@ -209,7 +218,7 @@ class PortfolioSnapshot(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     fund_slug: str = Field(unique=True, index=True)  # One snapshot per fund
     companies_json: str  # JSON list of company names (lowercase)
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=utc_now_naive)
 
 
 class ThesisDrift(SQLModel, table=True):
@@ -224,7 +233,7 @@ class ThesisDrift(SQLModel, table=True):
         default=None,
         sa_column=Column(Vector(1536))
     )
-    calculated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    calculated_at: datetime = Field(default_factory=utc_now_naive)
 
 
 class TrackerItem(SQLModel, table=True):
@@ -262,11 +271,11 @@ class TrackerItem(SQLModel, table=True):
 
     # Metadata - use sa_column for proper PostgreSQL TIMESTAMPTZ type
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=utc_now_naive,
         sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=utc_now_naive,
         sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     )
 
@@ -299,7 +308,7 @@ class Feedback(SQLModel, table=True):
 
     # Metadata
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=utc_now_naive,
         sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     )
 
@@ -323,7 +332,7 @@ class TokenUsage(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     # FIX: Use sa_column with timezone=True to match the database schema
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=utc_now_naive,
         sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     )
 
@@ -363,7 +372,7 @@ class CompanyAlias(SQLModel, table=True):
     alias_name: str = Field(index=True)  # The alternative name
     alias_type: str = Field(default="rebrand")  # rebrand, dba, acquired_name, typo
     effective_date: Optional[date] = None  # When the change happened
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=utc_now_naive)
 
 
 class DateSource(SQLModel, table=True):
@@ -383,7 +392,7 @@ class DateSource(SQLModel, table=True):
     extracted_date: date
     confidence_score: float = Field(default=0.5)
     is_primary: bool = Field(default=False)  # Currently used as deal.announced_date
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=utc_now_naive)
 
 
 class FounderValidation(SQLModel, table=True):
@@ -405,7 +414,7 @@ class FounderValidation(SQLModel, table=True):
     title_is_leadership: Optional[bool] = None  # Is the title CEO/founder/CTO?
     validated_at: Optional[datetime] = None
     validation_method: str = Field(default="brave_search")  # brave_search, manual
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=utc_now_naive)
 
 
 class ScanJob(SQLModel, table=True):
@@ -426,7 +435,7 @@ class ScanJob(SQLModel, table=True):
 
     # Timing
     started_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=utc_now_naive,
         sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     )
     completed_at: Optional[datetime] = Field(

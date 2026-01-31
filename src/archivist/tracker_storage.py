@@ -163,7 +163,7 @@ async def update_tracker_item(
         if key in allowed_fields and hasattr(item, key):
             setattr(item, key, value)
 
-    item.updated_at = datetime.now(timezone.utc)
+    item.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await session.flush()
 
     logger.info(f"Updated tracker item: {item_id}")
@@ -251,7 +251,7 @@ async def move_tracker_item(
     # Update the item itself
     item.status = new_status
     item.position = new_position
-    item.updated_at = datetime.now(timezone.utc)
+    item.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     await session.flush()
 

@@ -585,6 +585,7 @@ async def process_external_articles(
     articles: List[NormalizedArticle],
     source_name: str,
     scan_job_id: Optional[int] = None,
+    skip_title_filter: bool = False,
 ) -> Dict[str, int]:
     """
     Process articles from external sources through extraction pipeline.
@@ -595,6 +596,7 @@ async def process_external_articles(
     Args:
         articles: List of NormalizedArticle from external source
         source_name: Name of source for logging
+        skip_title_filter: If True, bypass title-based filtering (for SEC, YC, etc.)
 
     Returns:
         Dict with processing stats
@@ -672,31 +674,36 @@ async def process_external_articles(
     # OPTIMIZATION: Title pre-filters - skip articles BEFORE Claude call
     # Filter 1: Skip non-announcement titles (year-in-review, interviews, etc.)
     # Filter 2: Skip titles without funding signals
-    filtered_articles = []
-    skipped_non_announcement = 0
-    for article in new_articles:
-        # First check: Is this clearly NOT an announcement?
-        if is_non_announcement_title(article.title):
-            skipped_non_announcement += 1
-            continue
-        # Second check: Does it have funding signals?
-        if is_likely_funding_from_title(article.title):
-            filtered_articles.append(article)
-        else:
-            stats["articles_skipped_title"] += 1
+    # NOTE: Some sources (SEC, YCombinator) bypass title filtering since their
+    # content is already funding-related but doesn't have typical news headlines
+    if skip_title_filter:
+        logger.info(f"[{source_name}] Skipping title filter (source content is pre-qualified)")
+    else:
+        filtered_articles = []
+        skipped_non_announcement = 0
+        for article in new_articles:
+            # First check: Is this clearly NOT an announcement?
+            if is_non_announcement_title(article.title):
+                skipped_non_announcement += 1
+                continue
+            # Second check: Does it have funding signals?
+            if is_likely_funding_from_title(article.title):
+                filtered_articles.append(article)
+            else:
+                stats["articles_skipped_title"] += 1
 
-    if skipped_non_announcement > 0:
-        logger.info(f"[{source_name}] Skipped {skipped_non_announcement} non-announcement articles (year-in-review, interviews, etc.)")
-    if stats["articles_skipped_title"] > 0:
-        logger.info(f"[{source_name}] Skipped {stats['articles_skipped_title']} articles without funding signals")
+        if skipped_non_announcement > 0:
+            logger.info(f"[{source_name}] Skipped {skipped_non_announcement} non-announcement articles (year-in-review, interviews, etc.)")
+        if stats["articles_skipped_title"] > 0:
+            logger.info(f"[{source_name}] Skipped {stats['articles_skipped_title']} articles without funding signals")
 
-    new_articles = filtered_articles
+        new_articles = filtered_articles
 
-    if not new_articles:
-        logger.info(f"[{source_name}] No articles passed title filter")
-        return stats
+        if not new_articles:
+            logger.info(f"[{source_name}] No articles passed title filter")
+            return stats
 
-    logger.info(f"[{source_name}] {len(new_articles)} new articles to process (skipped {stats['articles_skipped_duplicate']} duplicates, {stats['articles_skipped_title']} by title)")
+    logger.info(f"[{source_name}] {len(new_articles)} articles to process (skipped {stats['articles_skipped_duplicate']} duplicates, {stats['articles_skipped_title']} by title)")
 
     # OPTIMIZATION: Concurrent processing with semaphore (vs serial 0.5s per article)
     MAX_CONCURRENT = 5
@@ -921,7 +928,8 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
 
             logger.info(f"SEC EDGAR: Created {len(articles)} articles with full details")
 
-        stats = await process_external_articles(articles, "sec_edgar", scan_job_id)
+        # SEC filings are already funding-related, bypass title filter
+        stats = await process_external_articles(articles, "sec_edgar", scan_job_id, skip_title_filter=True)
         results["sec_edgar"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1117,7 +1125,8 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             async with DelawareCorpsScraper() as scraper:
                 articles = await scraper.scrape_all(days_back=days, min_score=3)
 
-            stats = await process_external_articles(articles, "delaware_corps", scan_job_id)
+            # Corp filings don't have news headlines, bypass title filter
+            stats = await process_external_articles(articles, "delaware_corps", scan_job_id, skip_title_filter=True)
             results["delaware_corps"] = stats
             total_deals_saved += stats["deals_saved"]
 
@@ -1132,7 +1141,8 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
         async with YCombinatorScraper() as scraper:
             articles = await scraper.scrape_all(filter_enterprise=True)
 
-        stats = await process_external_articles(articles, "ycombinator", scan_job_id)
+        # YC batches are pre-qualified startup content, bypass title filter
+        stats = await process_external_articles(articles, "ycombinator", scan_job_id, skip_title_filter=True)
         results["ycombinator"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1148,7 +1158,8 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             repos = await scraper.fetch_all_trending(since="daily")
             articles = await scraper.scrape_all(since="daily", filter_enterprise=True, repos=repos)
 
-        stats = await process_external_articles(articles, "github_trending", scan_job_id)
+        # GitHub repos don't have news headlines, bypass title filter
+        stats = await process_external_articles(articles, "github_trending", scan_job_id, skip_title_filter=True)
         results["github_trending"] = stats
         total_deals_saved += stats["deals_saved"]
 
@@ -1163,7 +1174,8 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
         async with HackerNewsScraper() as scraper:
             articles = await scraper.scrape_all(hours_back=days * 24)
 
-        stats = await process_external_articles(articles, "hackernews", scan_job_id)
+        # HN discussions don't have typical funding headlines, bypass title filter
+        stats = await process_external_articles(articles, "hackernews", scan_job_id, skip_title_filter=True)
         results["hackernews"] = stats
         total_deals_saved += stats["deals_saved"]
 

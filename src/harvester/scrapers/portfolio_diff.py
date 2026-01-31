@@ -201,12 +201,12 @@ class PortfolioDiffScraper:
             stmt = pg_insert(PortfolioSnapshot).values(
                 fund_slug=fund_slug,
                 companies_json=companies_json,
-                updated_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
             ).on_conflict_do_update(
                 index_elements=['fund_slug'],
                 set_={
                     'companies_json': companies_json,
-                    'updated_at': datetime.now(timezone.utc),
+                    'updated_at': datetime.now(timezone.utc).replace(tzinfo=None),
                 }
             )
             await session.execute(stmt)

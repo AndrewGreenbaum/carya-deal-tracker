@@ -365,7 +365,7 @@ async def get_or_create_company(
             company.linkedin_url = linkedin_url
         if description and not company.description:
             company.description = description
-        company.updated_at = datetime.now(timezone.utc)
+        company.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
         return company
 
     company = PortfolioCompany(
@@ -641,7 +641,7 @@ async def save_deal(
                 existing_deal.announced_date = announced_date
                 existing_deal.date_confidence = max(existing_deal.date_confidence, date_confidence)
                 existing_deal.date_source_count = (existing_deal.date_source_count or 1) + 1
-                existing_deal.updated_at = datetime.now(timezone.utc)
+                existing_deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
             elif date_diff <= 1:
                 # Dates match (within 1 day tolerance) - this is CONFIRMATION
@@ -656,7 +656,7 @@ async def save_deal(
                         f"confidence: {existing_deal.date_confidence:.2f} → {new_confidence:.2f})"
                     )
                     existing_deal.date_confidence = new_confidence
-                    existing_deal.updated_at = datetime.now(timezone.utc)
+                    existing_deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
         elif announced_date and not existing_deal.announced_date:
             # Deal had no date, now we have one
@@ -666,7 +666,7 @@ async def save_deal(
             existing_deal.announced_date = announced_date
             existing_deal.date_confidence = date_confidence
             existing_deal.date_source_count = 1
-            existing_deal.updated_at = datetime.now(timezone.utc)
+            existing_deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # FIX: Use ON CONFLICT DO NOTHING to prevent race condition
         # Between check_article_url_exists() and insert, another task could insert same URL
