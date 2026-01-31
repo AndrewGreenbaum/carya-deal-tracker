@@ -3174,11 +3174,12 @@ async def get_scan_detail(
         # Build deal responses
         deal_responses = []
         for deal, company in deal_rows:
-            # Get lead investor from deal_investors
+            # Get lead investor from deal_investors (use first() for co-lead deals)
             investors_result = await session.execute(
                 select(DealInvestor)
                 .where(DealInvestor.deal_id == deal.id)
                 .where(DealInvestor.is_lead == True)
+                .limit(1)
             )
             lead_investor = investors_result.scalar_one_or_none()
 
