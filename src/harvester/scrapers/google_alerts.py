@@ -22,7 +22,7 @@ import httpx
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 from datetime import datetime, date, timezone
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from typing import List, Optional, Tuple
 from bs4 import BeautifulSoup
 
@@ -265,8 +265,43 @@ class GoogleAlertsScraper:
         logger.info(f"Fetched {len(all_items)} unique articles from {len(self.feed_urls)} feeds")
         return all_items
 
+    def _extract_real_url(self, url: str) -> str:
+        """
+        Extract actual article URL from Google redirect URLs.
+
+        Google Alerts returns URLs like:
+        https://www.google.com/url?rct=j&sa=t&url=https://example.com/article&...
+
+        We need to extract the 'url' parameter to get the real article URL.
+        """
+        if not url:
+            return url
+
+        try:
+            parsed = urlparse(url)
+
+            # Check if this is a Google redirect URL
+            if 'google.com/url' in url or 'google.com/alerts' in url:
+                query_params = parse_qs(parsed.query)
+                if 'url' in query_params and query_params['url']:
+                    real_url = query_params['url'][0]
+                    # Validate extracted URL has a valid scheme
+                    if real_url and real_url.startswith(('http://', 'https://')):
+                        logger.debug(f"Extracted real URL from Google redirect: {real_url[:100]}...")
+                        return real_url
+                    else:
+                        logger.warning(f"Invalid URL extracted from Google redirect: {real_url[:50] if real_url else 'empty'}")
+
+            return url
+        except Exception as e:
+            logger.warning(f"Error extracting URL from Google redirect: {e}")
+            return url
+
     async def fetch_full_article(self, url: str, max_retries: int = 2) -> Optional[str]:
         """Fetch full article content from URL with retry logic."""
+        # FIX: Extract actual URL from Google redirect URLs
+        actual_url = self._extract_real_url(url)
+
         # Extended list of article content selectors (ordered by specificity)
         ARTICLE_SELECTORS = [
             # News site specific
@@ -286,7 +321,7 @@ class GoogleAlertsScraper:
         for attempt in range(max_retries):
             try:
                 response = await self.client.get(
-                    url,
+                    actual_url,  # FIX: Use extracted URL, not Google redirect
                     follow_redirects=True,
                     timeout=15,
                 )
@@ -315,14 +350,14 @@ class GoogleAlertsScraper:
             except httpx.HTTPError as e:
                 if attempt < max_retries - 1:
                     delay = 2 ** attempt
-                    logger.warning(f"HTTP error fetching article (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {url}")
+                    logger.warning(f"HTTP error fetching article (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {actual_url}")
                     await asyncio.sleep(delay)
                 else:
-                    logger.error(f"HTTP error fetching article after {max_retries} attempts {url}: {e}")
+                    logger.error(f"HTTP error fetching article after {max_retries} attempts {actual_url}: {e}")
                     return None
 
             except Exception as e:
-                logger.error(f"Unexpected error fetching article {url}: {e}", exc_info=True)
+                logger.error(f"Unexpected error fetching article {actual_url}: {e}", exc_info=True)
                 return None
 
         return None

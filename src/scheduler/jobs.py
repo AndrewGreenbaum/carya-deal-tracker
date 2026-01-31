@@ -731,6 +731,24 @@ async def process_external_articles(
                     logger.debug(f"[{source_name}] Extraction returned None for {article.url}")
                     return None
 
+                # Skip non-announcement extractions (background mentions)
+                if not extraction.is_new_announcement:
+                    logger.debug(f"[{source_name}] Skipping non-announcement: {extraction.startup_name}")
+                    return None
+
+                # FIX: Reject invalid company names like <UNKNOWN>, etc.
+                # These deals will likely be captured from another source with better content
+                # Conservative list - only clear LLM placeholders
+                invalid_names = {"<unknown>", "unknown", "n/a", "none", "tbd", ""}
+                company_name = (extraction.startup_name or "").strip()
+                if company_name.lower() in invalid_names or not company_name:
+                    logger.warning(
+                        f"[{source_name}] Skipping invalid company: '{extraction.startup_name}' - "
+                        f"Amount: {extraction.amount}, Fund: {extraction.tracked_fund_name} - "
+                        f"URL: {article.url}"
+                    )
+                    return None
+
                 # Skip low-confidence extractions
                 if extraction.confidence_score < settings.extraction_confidence_threshold:
                     return None

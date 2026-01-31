@@ -31,8 +31,22 @@ class ExtractionStatus(str, Enum):
     DUPLICATE = "duplicate"
     LOW_CONFIDENCE = "low_confidence"
     NOT_NEW_ANNOUNCEMENT = "not_new_announcement"
+    INVALID_COMPANY_NAME = "invalid_company_name"  # FIX: Reject <UNKNOWN> etc.
     EXTRACTION_FAILED = "extraction_failed"
     ERROR = "error"  # Generic error
+
+
+# Invalid company name patterns that should be rejected
+# FIX: Prevent saving deals with placeholder/unknown company names
+# Conservative list - only clear LLM placeholders, not generic names that could be real companies
+INVALID_COMPANY_NAMES = {
+    "<unknown>",  # LLM explicit "I don't know" response
+    "unknown",    # Variation
+    "n/a",        # Not applicable
+    "none",       # Missing value
+    "tbd",        # To be determined
+    "",           # Empty string
+}
 
 from sqlalchemy import select
 
@@ -218,6 +232,20 @@ async def process_article(
                 f"URL: {article.url}"
             )
             return False, ExtractionStatus.NOT_NEW_ANNOUNCEMENT.value
+
+        # FIX: Reject invalid company names like <UNKNOWN>, "the company", etc.
+        # This catches cases where LLM couldn't identify the company but set is_new_announcement=True
+        # These deals will likely be captured from another source with better content
+        company_name = (extraction.startup_name or "").strip()
+        if company_name.lower() in {n.lower() for n in INVALID_COMPANY_NAMES} or not company_name:
+            # Log with enough detail to manually investigate if needed
+            logger.warning(
+                f"Skipping deal with invalid company name: '{extraction.startup_name}' - "
+                f"Amount: {extraction.amount}, Fund: {extraction.tracked_fund_name}, "
+                f"URL: {article.url} - "
+                f"(Deal may be captured from another source with better content)"
+            )
+            return False, ExtractionStatus.INVALID_COMPANY_NAME.value
 
         # Skip low-confidence extractions (threshold from settings)
         if extraction.confidence_score < settings.extraction_confidence_threshold:
