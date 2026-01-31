@@ -200,6 +200,7 @@ async def check_urls_exist_batch(urls: List[str]) -> set:
 async def process_article(
     article: NormalizedArticle,
     fund_config: FundConfig,
+    scan_job_id: Optional[int] = None,
 ) -> Tuple[bool, str]:
     """
     Process a single article through extraction and storage.
@@ -268,6 +269,7 @@ async def process_article(
                 article_text=article.text,
                 source_fund_slug=article.fund_slug,
                 article_published_date=article.published_date,
+                scan_job_id=scan_job_id,
             )
 
             # Check if this was a duplicate (save_deal returns None for duplicates)
@@ -305,7 +307,7 @@ async def process_article(
         return False, ExtractionStatus.ERROR.value
 
 
-async def scrape_fund(fund_slug: str) -> ScrapingResult:
+async def scrape_fund(fund_slug: str, scan_job_id: Optional[int] = None) -> ScrapingResult:
     """
     Scrape a single fund and process all articles.
 
@@ -316,6 +318,7 @@ async def scrape_fund(fund_slug: str) -> ScrapingResult:
 
     Args:
         fund_slug: The slug of the fund to scrape (e.g., "a16z")
+        scan_job_id: Optional ID of the scan job for linking deals
 
     Returns:
         ScrapingResult with statistics
@@ -392,7 +395,7 @@ async def scrape_fund(fund_slug: str) -> ScrapingResult:
                 async with semaphore:
                     # Small delay between extractions (rate limiting)
                     await asyncio.sleep(RATE_LIMIT_DELAY)
-                    return await process_article(article, fund_config)
+                    return await process_article(article, fund_config, scan_job_id)
 
             # Run all extractions concurrently
             if unique_articles:
@@ -455,6 +458,7 @@ async def scrape_all_funds(
     fund_slugs: Optional[List[str]] = None,
     parallel: bool = False,
     max_parallel_funds: int = 3,
+    scan_job_id: Optional[int] = None,
 ) -> List[ScrapingResult]:
     """
     Scrape multiple funds.
@@ -467,6 +471,7 @@ async def scrape_all_funds(
         fund_slugs: List of fund slugs to scrape. If None, scrapes all implemented funds.
         parallel: If True, scrape funds concurrently.
         max_parallel_funds: Maximum number of funds to scrape in parallel.
+        scan_job_id: Optional ID of the scan job for linking deals.
 
     Returns:
         List of ScrapingResult objects
@@ -482,7 +487,7 @@ async def scrape_all_funds(
 
         async def scrape_with_limit(slug: str) -> ScrapingResult:
             async with semaphore:
-                return await scrape_fund(slug)
+                return await scrape_fund(slug, scan_job_id)
 
         tasks = [scrape_with_limit(slug) for slug in fund_slugs]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -502,7 +507,7 @@ async def scrape_all_funds(
         # Run scrapers sequentially
         results = []
         for slug in fund_slugs:
-            result = await scrape_fund(slug)
+            result = await scrape_fund(slug, scan_job_id)
             results.append(result)
             # Delay between funds
             await asyncio.sleep(1.0)

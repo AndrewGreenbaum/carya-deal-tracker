@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# GLOBAL URL DEDUPLICATION (Phase 5)
+# GLOBAL URL DEDUPLICATION (used in Phase 0 cache clearing)
 # =============================================================================
 
 # Global set to track URLs seen across ALL sources within a single run
@@ -389,16 +389,12 @@ async def enrich_deal_dates(limit: int = 50) -> int:
     """
     Enrich deals with accurate announcement dates.
 
-    FIX: This module existed but was never called - dates were never being enriched!
-
     Uses two sources:
-    1. Brave Search - finds news articles with page_age metadata
-    2. SEC Form D - official legal filing dates (highest confidence)
+    1. SEC Form D - official legal filing dates (highest confidence = 0.95)
+    2. Brave Search - finds news articles with page_age metadata
 
-    Prioritizes deals:
-    1. Deals with NULL announced_date
-    2. Deals with low date_confidence (<0.7)
-    3. Recent deals (last 90 days) that could benefit from SEC verification
+    OPTIMIZED: Now uses 5 concurrent enrichments (was serial with 0.5s delays).
+    50 deals: ~10s (was 25s+ serial)
 
     Returns:
         Number of deals with dates enriched
@@ -411,11 +407,8 @@ async def enrich_deal_dates(limit: int = 50) -> int:
         from sqlalchemy import select, or_
         from sqlalchemy.orm import selectinload
         from datetime import date, timedelta
-        import json
 
-        enriched_count = 0
         today = date.today()
-        recent_cutoff = today - timedelta(days=90)
 
         # Fetch deals needing date enrichment
         async with get_session() as db:
@@ -463,108 +456,128 @@ async def enrich_deal_dates(limit: int = 50) -> int:
                     "lead_investor": lead_investor,
                     "amount": deal.amount,
                     "current_date": deal.announced_date,
-                    "current_confidence": deal.date_confidence,
+                    "current_confidence": deal.date_confidence or 0.0,
                 })
 
         logger.info(f"Processing {len(deals_to_enrich)} deals for date enrichment")
 
-        # Process each deal with date enrichment
+        # FIX: Parallel date enrichment with semaphore (was serial with 0.5s delays)
+        # 5 concurrent = ~10s for 50 deals (vs 25s+ serial)
+        MAX_CONCURRENT_DATE_ENRICHMENT = 5
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_DATE_ENRICHMENT)
+        enriched_count = [0]  # Use list for mutation in nested function
+        count_lock = asyncio.Lock()
+
+        async def enrich_single_deal(
+            deal_info: dict,
+            date_client: "DateEnrichmentClient",
+            sec_matcher: "SECDateMatcher",
+        ) -> bool:
+            """Enrich a single deal's date with concurrent rate limiting."""
+            async with semaphore:
+                try:
+                    found_date = None
+                    date_source = None
+                    confidence = 0.0
+                    source_url = None
+
+                    # Try 1: SEC Form D (highest confidence = 0.95)
+                    try:
+                        sec_match = await sec_matcher.search_company(
+                            company_name=deal_info["company_name"],
+                            amount=deal_info["amount"],
+                            date_hint=deal_info["current_date"],
+                        )
+                        if sec_match and sec_match.is_confident_match:
+                            found_date = sec_match.sec_filing_date
+                            date_source = "sec_form_d"
+                            confidence = DATE_CONFIDENCE["sec_form_d"]
+                            source_url = sec_match.sec_filing_url
+
+                            # Persist SEC match
+                            await persist_sec_date_match(deal_info["deal_id"], sec_match)
+                            logger.info(
+                                f"SEC match for {deal_info['company_name']}: "
+                                f"{found_date} (confidence={confidence})"
+                            )
+                    except Exception as e:
+                        logger.debug(f"SEC lookup failed for {deal_info['company_name']}: {e}")
+
+                    # Try 2: Brave Search (if no SEC match)
+                    if not found_date:
+                        try:
+                            brave_result = await date_client.enrich_deal_date(
+                                deal_id=deal_info["deal_id"],
+                                company_name=deal_info["company_name"],
+                                round_type=deal_info["round_type"],
+                                lead_investor=deal_info["lead_investor"],
+                            )
+                            if brave_result.found_date:
+                                found_date = brave_result.found_date
+                                date_source = brave_result.date_source
+                                source_url = brave_result.search_url
+
+                                # Set confidence based on source
+                                if brave_result.confidence == "high":
+                                    confidence = 0.80
+                                elif brave_result.confidence == "medium":
+                                    confidence = 0.65
+                                else:
+                                    confidence = 0.50
+
+                        except Exception as e:
+                            logger.debug(f"Brave date lookup failed for {deal_info['company_name']}: {e}")
+
+                    # Update deal if we found a better date
+                    if found_date and confidence > deal_info["current_confidence"]:
+                        async with get_session() as db:
+                            deal = await db.get(Deal, deal_info["deal_id"])
+                            if deal:
+                                deal.announced_date = found_date
+                                deal.date_confidence = confidence
+                                deal.date_source_count = (deal.date_source_count or 0) + 1
+
+                                if date_source == "sec_form_d" and source_url:
+                                    deal.sec_filing_date = found_date
+                                    deal.sec_filing_url = source_url
+
+                                # Record in DateSource table
+                                date_record = DateSource(
+                                    deal_id=deal_info["deal_id"],
+                                    source_type=date_source or "brave_search",
+                                    source_url=source_url,
+                                    extracted_date=found_date,
+                                    confidence_score=confidence,
+                                    is_primary=True,
+                                )
+                                db.add(date_record)
+
+                                await db.commit()
+                                async with count_lock:
+                                    enriched_count[0] += 1
+                                logger.info(
+                                    f"Updated date for {deal_info['company_name']}: "
+                                    f"{found_date} (source={date_source}, confidence={confidence:.2f})"
+                                )
+                                return True
+
+                    # Small delay for rate limiting (inside semaphore)
+                    await asyncio.sleep(0.1)
+                    return False
+
+                except Exception as e:
+                    logger.warning(f"Error enriching date for {deal_info['company_name']}: {e}")
+                    return False
+
+        # Process all deals concurrently with shared clients
         async with DateEnrichmentClient() as date_client:
             async with SECDateMatcher() as sec_matcher:
-                for deal_info in deals_to_enrich:
-                    try:
-                        found_date = None
-                        date_source = None
-                        confidence = 0.0
-                        source_url = None
+                await asyncio.gather(
+                    *[enrich_single_deal(d, date_client, sec_matcher) for d in deals_to_enrich],
+                    return_exceptions=True
+                )
 
-                        # Try 1: SEC Form D (highest confidence = 0.95)
-                        try:
-                            sec_match = await sec_matcher.search_company(
-                                company_name=deal_info["company_name"],
-                                amount=deal_info["amount"],
-                                date_hint=deal_info["current_date"],
-                            )
-                            if sec_match and sec_match.is_confident_match:
-                                found_date = sec_match.sec_filing_date
-                                date_source = "sec_form_d"
-                                confidence = DATE_CONFIDENCE["sec_form_d"]
-                                source_url = sec_match.sec_filing_url
-
-                                # Persist SEC match
-                                await persist_sec_date_match(deal_info["deal_id"], sec_match)
-                                logger.info(
-                                    f"SEC match for {deal_info['company_name']}: "
-                                    f"{found_date} (confidence={confidence})"
-                                )
-                        except Exception as e:
-                            logger.debug(f"SEC lookup failed for {deal_info['company_name']}: {e}")
-
-                        # Try 2: Brave Search (if no SEC match)
-                        if not found_date:
-                            try:
-                                brave_result = await date_client.enrich_deal_date(
-                                    deal_id=deal_info["deal_id"],
-                                    company_name=deal_info["company_name"],
-                                    round_type=deal_info["round_type"],
-                                    lead_investor=deal_info["lead_investor"],
-                                )
-                                if brave_result.found_date:
-                                    found_date = brave_result.found_date
-                                    date_source = brave_result.date_source
-                                    source_url = brave_result.search_url
-
-                                    # Set confidence based on source
-                                    if brave_result.confidence == "high":
-                                        confidence = 0.80
-                                    elif brave_result.confidence == "medium":
-                                        confidence = 0.65
-                                    else:
-                                        confidence = 0.50
-
-                            except Exception as e:
-                                logger.debug(f"Brave date lookup failed for {deal_info['company_name']}: {e}")
-
-                        # Update deal if we found a better date
-                        if found_date and confidence > deal_info["current_confidence"]:
-                            async with get_session() as db:
-                                deal = await db.get(Deal, deal_info["deal_id"])
-                                if deal:
-                                    # Update deal with new date info
-                                    deal.announced_date = found_date
-                                    deal.date_confidence = confidence
-                                    deal.date_source_count = (deal.date_source_count or 0) + 1
-
-                                    if date_source == "sec_form_d" and source_url:
-                                        deal.sec_filing_date = found_date
-                                        deal.sec_filing_url = source_url
-
-                                    # Record in DateSource table
-                                    date_record = DateSource(
-                                        deal_id=deal_info["deal_id"],
-                                        source_type=date_source or "brave_search",
-                                        source_url=source_url,
-                                        extracted_date=found_date,
-                                        confidence_score=confidence,
-                                        is_primary=True,
-                                    )
-                                    db.add(date_record)
-
-                                    await db.commit()
-                                    enriched_count += 1
-                                    logger.info(
-                                        f"Updated date for {deal_info['company_name']}: "
-                                        f"{found_date} (source={date_source}, confidence={confidence:.2f})"
-                                    )
-
-                        # Rate limit between deals
-                        await asyncio.sleep(0.5)
-
-                    except Exception as e:
-                        logger.warning(f"Error enriching date for {deal_info['company_name']}: {e}")
-                        continue
-
-        return enriched_count
+        return enriched_count[0]
 
     except Exception as e:
         logger.error(f"Date enrichment job failed: {e}", exc_info=True)
@@ -853,6 +866,9 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
     External sources find articles about deals, but they must be extracted
     by Claude to become actual deal records in the database.
 
+    OPTIMIZED: Free RSS sources now run in parallel (was serial = ~60s wasted).
+    API-rate-limited sources (Brave, SEC, Twitter) still run serially.
+
     Sources scraped:
     1. Brave Search (with partner name queries for Benchmark, Khosla, etc.)
     2. SEC EDGAR (Form D filings)
@@ -881,6 +897,10 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
     results = {}
     total_deals_saved = 0
 
+    # =========================================================================
+    # PART 1: API-RATE-LIMITED SOURCES (run serially to respect rate limits)
+    # =========================================================================
+
     # 1. BRAVE SEARCH (most important - includes partner name queries)
     if settings.brave_search_key:
         try:
@@ -904,7 +924,7 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             logger.error("Brave Search scraping failed: %s", e)
             results["brave_search"] = {"error": str(e)}
 
-    # 2. SEC EDGAR (free - Form D filings)
+    # 2. SEC EDGAR (free - Form D filings, rate limited)
     try:
         from ..harvester.scrapers.sec_edgar import SECEdgarScraper
 
@@ -955,24 +975,7 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
         logger.error("SEC EDGAR scraping failed: %s", e)
         results["sec_edgar"] = {"error": str(e)}
 
-    # 3. GOOGLE ALERTS (free - RSS feeds)
-    if settings.google_alerts_feeds:
-        try:
-            from ..harvester.scrapers.google_alerts import GoogleAlertsScraper
-
-            feed_urls = [f.strip() for f in settings.google_alerts_feeds.split(',') if f.strip()]
-            async with GoogleAlertsScraper(feed_urls) as scraper:
-                articles = await scraper.scrape_all()
-
-            stats = await process_external_articles(articles, "google_alerts", scan_job_id)
-            results["google_alerts"] = stats
-            total_deals_saved += stats["deals_saved"]
-
-        except Exception as e:
-            logger.error("Google Alerts scraping failed: %s", e)
-            results["google_alerts"] = {"error": str(e)}
-
-    # 4. TWITTER (free tier)
+    # 3. TWITTER (API rate limited)
     if settings.twitter_bearer_token:
         try:
             from ..harvester.scrapers.twitter_monitor import TwitterMonitor
@@ -988,26 +991,7 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             logger.error("Twitter scraping failed: %s", e)
             results["twitter"] = {"error": str(e)}
 
-    # 5. TECHCRUNCH RSS (free)
-    try:
-        from ..harvester.scrapers.techcrunch_rss import TechCrunchScraper
-
-        async with TechCrunchScraper() as scraper:
-            articles = await scraper.scrape_all(hours_back=days * 24)
-
-        stats = await process_external_articles(articles, "techcrunch", scan_job_id)
-        results["techcrunch"] = stats
-        total_deals_saved += stats["deals_saved"]
-
-    except Exception as e:
-        logger.error("TechCrunch scraping failed: %s", e)
-        results["techcrunch"] = {"error": str(e)}
-
-    # 6. FORTUNE TERM SHEET - DISABLED (Fortune blocked RSS access Dec 2024)
-    # Deal coverage provided by Brave Search and other RSS sources
-    results["fortune"] = {"articles_found": 0, "deals_saved": 0, "status": "disabled"}
-
-    # 7. LINKEDIN JOBS / STEALTH DETECTOR (uses Brave Search)
+    # 4. LINKEDIN JOBS / STEALTH DETECTOR (uses Brave Search - rate limited)
     if settings.brave_search_key:
         try:
             from ..harvester.scrapers.linkedin_jobs import LinkedInJobsScraper
@@ -1023,119 +1007,7 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             logger.error("LinkedIn Jobs scraping failed: %s", e)
             results["linkedin_jobs"] = {"error": str(e)}
 
-    # 7b. PORTFOLIO DIFF (stealth detection via portfolio page diffing - FREE)
-    try:
-        from ..harvester.scrapers.portfolio_diff import PortfolioDiffScraper
-        from ..archivist.storage import save_stealth_detection
-        from ..archivist.database import get_session
-
-        async with PortfolioDiffScraper() as scraper:
-            articles = await scraper.scrape_all()
-
-        # FIX: Save stealth detections with per-article transactions
-        # (prevents batch rollback if one article fails)
-        stealth_saved = 0
-        for article in articles:
-            try:
-                async with get_session() as session:
-                    await save_stealth_detection(
-                        session=session,
-                        fund_slug=article.fund_slug,
-                        detected_url=article.url,
-                        company_name=article.title.split(":")[1].strip() if ":" in article.title else None,
-                        notes=f"Source: Portfolio Diff | Tags: {', '.join(article.tags)}",
-                    )
-                stealth_saved += 1
-            except Exception as e:
-                logger.warning(f"Failed to save stealth detection for {article.url}: {e}")
-
-        results["portfolio_diff"] = {
-            "articles_found": len(articles),
-            "stealth_saved": stealth_saved,
-        }
-        logger.info(f"Portfolio Diff: {len(articles)} new additions, {stealth_saved} saved")
-
-    except Exception as e:
-        logger.error("Portfolio Diff scraping failed: %s", e)
-        results["portfolio_diff"] = {"error": str(e)}
-
-    # 8. CRUNCHBASE NEWS (free RSS)
-    try:
-        from ..harvester.scrapers.crunchbase_news import CrunchbaseNewsScraper
-
-        async with CrunchbaseNewsScraper() as scraper:
-            articles = await scraper.scrape_all(hours_back=days * 24)
-
-        stats = await process_external_articles(articles, "crunchbase_news", scan_job_id)
-        results["crunchbase_news"] = stats
-        total_deals_saved += stats["deals_saved"]
-
-    except Exception as e:
-        logger.error("Crunchbase News scraping failed: %s", e)
-        results["crunchbase_news"] = {"error": str(e)}
-
-    # 9. VENTUREBEAT (free RSS)
-    try:
-        from ..harvester.scrapers.venturebeat import VentureBeatScraper
-
-        async with VentureBeatScraper() as scraper:
-            articles = await scraper.scrape_all(hours_back=days * 24)
-
-        stats = await process_external_articles(articles, "venturebeat", scan_job_id)
-        results["venturebeat"] = stats
-        total_deals_saved += stats["deals_saved"]
-
-    except Exception as e:
-        logger.error("VentureBeat scraping failed: %s", e)
-        results["venturebeat"] = {"error": str(e)}
-
-    # 10. AXIOS PRO RATA (free RSS - may return 0 if deprecated)
-    try:
-        from ..harvester.scrapers.axios_prorata import AxiosProRataScraper
-
-        async with AxiosProRataScraper() as scraper:
-            articles = await scraper.scrape_all(hours_back=days * 24)
-
-        stats = await process_external_articles(articles, "axios_prorata", scan_job_id)
-        results["axios_prorata"] = stats
-        total_deals_saved += stats["deals_saved"]
-
-    except Exception as e:
-        logger.error("Axios Pro Rata scraping failed: %s", e)
-        results["axios_prorata"] = {"error": str(e)}
-
-    # 11. STRICTLYVC (free RSS)
-    try:
-        from ..harvester.scrapers.strictlyvc import StrictlyVCScraper
-
-        async with StrictlyVCScraper() as scraper:
-            articles = await scraper.scrape_all(hours_back=days * 24)
-
-        stats = await process_external_articles(articles, "strictlyvc", scan_job_id)
-        results["strictlyvc"] = stats
-        total_deals_saved += stats["deals_saved"]
-
-    except Exception as e:
-        logger.error("StrictlyVC scraping failed: %s", e)
-        results["strictlyvc"] = {"error": str(e)}
-
-    # 12. PR WIRE RSS (free - PRNewswire, GlobeNewswire, BusinessWire press releases)
-    try:
-        from ..harvester.scrapers.prwire_rss import PRWireRSSScraper
-
-        async with PRWireRSSScraper() as scraper:
-            # Use fund_filter=True to only process articles mentioning tracked funds
-            articles = await scraper.scrape_all_feeds(hours_back=days * 24, fund_filter=True)
-
-        stats = await process_external_articles(articles, "prwire", scan_job_id)
-        results["prwire"] = stats
-        total_deals_saved += stats["deals_saved"]
-
-    except Exception as e:
-        logger.error("PR Wire RSS scraping failed: %s", e)
-        results["prwire"] = {"error": str(e)}
-
-    # 13. DELAWARE CORPS (uses Brave Search - catches new tech company formations)
+    # 5. DELAWARE CORPS (uses Brave Search - rate limited)
     if settings.brave_search_key:
         try:
             from ..harvester.scrapers.delaware_corps import DelawareCorpsScraper
@@ -1152,84 +1024,240 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             logger.error("Delaware Corps scraping failed: %s", e)
             results["delaware_corps"] = {"error": str(e)}
 
-    # 13. Y COMBINATOR (free - Demo Day companies)
-    try:
-        from ..harvester.scrapers.ycombinator import YCombinatorScraper
+    # =========================================================================
+    # PART 2: FREE RSS/HTTP SOURCES (run in parallel - no rate limits)
+    # FIX: Was running 12+ sources serially (~60s wasted)
+    # Now: All run in parallel with asyncio.gather (~5-10s total)
+    # =========================================================================
 
-        async with YCombinatorScraper() as scraper:
-            articles = await scraper.scrape_all(filter_enterprise=True)
+    async def scrape_google_alerts() -> tuple:
+        """Scrape Google Alerts RSS feeds."""
+        source_name = "google_alerts"
+        if not settings.google_alerts_feeds:
+            return source_name, {"articles_found": 0, "status": "not_configured"}
+        try:
+            from ..harvester.scrapers.google_alerts import GoogleAlertsScraper
+            feed_urls = [f.strip() for f in settings.google_alerts_feeds.split(',') if f.strip()]
+            async with GoogleAlertsScraper(feed_urls) as scraper:
+                articles = await scraper.scrape_all()
+            stats = await process_external_articles(articles, source_name, scan_job_id)
+            return source_name, stats
+        except Exception as e:
+            logger.error("Google Alerts scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-        # YC batches are pre-qualified startup content, bypass title filter
-        stats = await process_external_articles(articles, "ycombinator", scan_job_id, skip_title_filter=True)
-        results["ycombinator"] = stats
-        total_deals_saved += stats["deals_saved"]
+    async def scrape_techcrunch() -> tuple:
+        """Scrape TechCrunch RSS."""
+        source_name = "techcrunch"
+        try:
+            from ..harvester.scrapers.techcrunch_rss import TechCrunchScraper
+            async with TechCrunchScraper() as scraper:
+                articles = await scraper.scrape_all(hours_back=days * 24)
+            stats = await process_external_articles(articles, source_name, scan_job_id)
+            return source_name, stats
+        except Exception as e:
+            logger.error("TechCrunch scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-    except Exception as e:
-        logger.error("Y Combinator scraping failed: %s", e)
-        results["ycombinator"] = {"error": str(e)}
+    async def scrape_crunchbase() -> tuple:
+        """Scrape Crunchbase News RSS."""
+        source_name = "crunchbase_news"
+        try:
+            from ..harvester.scrapers.crunchbase_news import CrunchbaseNewsScraper
+            async with CrunchbaseNewsScraper() as scraper:
+                articles = await scraper.scrape_all(hours_back=days * 24)
+            stats = await process_external_articles(articles, source_name, scan_job_id)
+            return source_name, stats
+        except Exception as e:
+            logger.error("Crunchbase News scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-    # 14. GITHUB TRENDING (free - dev tools before funding)
-    try:
-        from ..harvester.scrapers.github_trending import GitHubTrendingScraper
+    async def scrape_venturebeat() -> tuple:
+        """Scrape VentureBeat RSS."""
+        source_name = "venturebeat"
+        try:
+            from ..harvester.scrapers.venturebeat import VentureBeatScraper
+            async with VentureBeatScraper() as scraper:
+                articles = await scraper.scrape_all(hours_back=days * 24)
+            stats = await process_external_articles(articles, source_name, scan_job_id)
+            return source_name, stats
+        except Exception as e:
+            logger.error("VentureBeat scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-        async with GitHubTrendingScraper() as scraper:
-            repos = await scraper.fetch_all_trending(since="daily")
-            articles = await scraper.scrape_all(since="daily", filter_enterprise=True, repos=repos)
+    async def scrape_axios() -> tuple:
+        """Scrape Axios Pro Rata RSS."""
+        source_name = "axios_prorata"
+        try:
+            from ..harvester.scrapers.axios_prorata import AxiosProRataScraper
+            async with AxiosProRataScraper() as scraper:
+                articles = await scraper.scrape_all(hours_back=days * 24)
+            stats = await process_external_articles(articles, source_name, scan_job_id)
+            return source_name, stats
+        except Exception as e:
+            logger.error("Axios Pro Rata scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-        # GitHub repos don't have news headlines, bypass title filter
-        stats = await process_external_articles(articles, "github_trending", scan_job_id, skip_title_filter=True)
-        results["github_trending"] = stats
-        total_deals_saved += stats["deals_saved"]
+    async def scrape_strictlyvc() -> tuple:
+        """Scrape StrictlyVC RSS."""
+        source_name = "strictlyvc"
+        try:
+            from ..harvester.scrapers.strictlyvc import StrictlyVCScraper
+            async with StrictlyVCScraper() as scraper:
+                articles = await scraper.scrape_all(hours_back=days * 24)
+            stats = await process_external_articles(articles, source_name, scan_job_id)
+            return source_name, stats
+        except Exception as e:
+            logger.error("StrictlyVC scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-    except Exception as e:
-        logger.error("GitHub Trending scraping failed: %s", e)
-        results["github_trending"] = {"error": str(e)}
+    async def scrape_prwire() -> tuple:
+        """Scrape PR Wire RSS (PRNewswire, GlobeNewswire, BusinessWire)."""
+        source_name = "prwire"
+        try:
+            from ..harvester.scrapers.prwire_rss import PRWireRSSScraper
+            async with PRWireRSSScraper() as scraper:
+                articles = await scraper.scrape_all_feeds(hours_back=days * 24, fund_filter=True)
+            stats = await process_external_articles(articles, source_name, scan_job_id)
+            return source_name, stats
+        except Exception as e:
+            logger.error("PR Wire RSS scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-    # 15. HACKER NEWS (free - launch posts)
-    try:
-        from ..harvester.scrapers.hackernews import HackerNewsScraper
+    async def scrape_ycombinator() -> tuple:
+        """Scrape Y Combinator (Demo Day companies)."""
+        source_name = "ycombinator"
+        try:
+            from ..harvester.scrapers.ycombinator import YCombinatorScraper
+            async with YCombinatorScraper() as scraper:
+                articles = await scraper.scrape_all(filter_enterprise=True)
+            stats = await process_external_articles(articles, source_name, scan_job_id, skip_title_filter=True)
+            return source_name, stats
+        except Exception as e:
+            logger.error("Y Combinator scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-        async with HackerNewsScraper() as scraper:
-            articles = await scraper.scrape_all(hours_back=days * 24)
+    async def scrape_github() -> tuple:
+        """Scrape GitHub Trending (dev tools before funding)."""
+        source_name = "github_trending"
+        try:
+            from ..harvester.scrapers.github_trending import GitHubTrendingScraper
+            async with GitHubTrendingScraper() as scraper:
+                repos = await scraper.fetch_all_trending(since="daily")
+                articles = await scraper.scrape_all(since="daily", filter_enterprise=True, repos=repos)
+            stats = await process_external_articles(articles, source_name, scan_job_id, skip_title_filter=True)
+            return source_name, stats
+        except Exception as e:
+            logger.error("GitHub Trending scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-        # HN discussions don't have typical funding headlines, bypass title filter
-        stats = await process_external_articles(articles, "hackernews", scan_job_id, skip_title_filter=True)
-        results["hackernews"] = stats
-        total_deals_saved += stats["deals_saved"]
+    async def scrape_hackernews() -> tuple:
+        """Scrape Hacker News (launch posts)."""
+        source_name = "hackernews"
+        try:
+            from ..harvester.scrapers.hackernews import HackerNewsScraper
+            async with HackerNewsScraper() as scraper:
+                articles = await scraper.scrape_all(hours_back=days * 24)
+            stats = await process_external_articles(articles, source_name, scan_job_id, skip_title_filter=True)
+            return source_name, stats
+        except Exception as e:
+            logger.error("Hacker News scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-    except Exception as e:
-        logger.error("Hacker News scraping failed: %s", e)
-        results["hackernews"] = {"error": str(e)}
+    async def scrape_tech_funding_news() -> tuple:
+        """Scrape Tech Funding News RSS (SaaS/AI/FinTech)."""
+        source_name = "tech_funding_news"
+        try:
+            from ..harvester.scrapers.tech_funding_news import TechFundingNewsScraper
+            async with TechFundingNewsScraper() as scraper:
+                articles = await scraper.scrape_all(hours_back=days * 24)
+            stats = await process_external_articles(articles, source_name, scan_job_id)
+            return source_name, stats
+        except Exception as e:
+            logger.error("Tech Funding News scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-    # 16. TECH FUNDING NEWS (free RSS - SaaS/AI/FinTech)
-    try:
-        from ..harvester.scrapers.tech_funding_news import TechFundingNewsScraper
+    async def scrape_ventureburn() -> tuple:
+        """Scrape Ventureburn RSS (emerging markets/Africa)."""
+        source_name = "ventureburn"
+        try:
+            from ..harvester.scrapers.ventureburn import VentureburnScraper
+            async with VentureburnScraper() as scraper:
+                articles = await scraper.scrape_all(hours_back=days * 24)
+            stats = await process_external_articles(articles, source_name, scan_job_id)
+            return source_name, stats
+        except Exception as e:
+            logger.error("Ventureburn scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-        async with TechFundingNewsScraper() as scraper:
-            articles = await scraper.scrape_all(hours_back=days * 24)
+    async def scrape_portfolio_diff() -> tuple:
+        """Scrape Portfolio Diff (stealth detection via portfolio page diffing)."""
+        source_name = "portfolio_diff"
+        try:
+            from ..harvester.scrapers.portfolio_diff import PortfolioDiffScraper
+            from ..archivist.storage import save_stealth_detection
+            from ..archivist.database import get_session
 
-        stats = await process_external_articles(articles, "tech_funding_news", scan_job_id)
-        results["tech_funding_news"] = stats
-        total_deals_saved += stats["deals_saved"]
+            async with PortfolioDiffScraper() as scraper:
+                articles = await scraper.scrape_all()
 
-    except Exception as e:
-        logger.error("Tech Funding News scraping failed: %s", e)
-        results["tech_funding_news"] = {"error": str(e)}
+            # Save stealth detections with per-article transactions
+            stealth_saved = 0
+            for article in articles:
+                try:
+                    async with get_session() as session:
+                        await save_stealth_detection(
+                            session=session,
+                            fund_slug=article.fund_slug,
+                            detected_url=article.url,
+                            company_name=article.title.split(":")[1].strip() if ":" in article.title else None,
+                            notes=f"Source: Portfolio Diff | Tags: {', '.join(article.tags)}",
+                        )
+                    stealth_saved += 1
+                except Exception as e:
+                    logger.warning(f"Failed to save stealth detection for {article.url}: {e}")
 
-    # 17. VENTUREBURN (free RSS - emerging markets/Africa)
-    try:
-        from ..harvester.scrapers.ventureburn import VentureburnScraper
+            return source_name, {
+                "articles_found": len(articles),
+                "stealth_saved": stealth_saved,
+            }
 
-        async with VentureburnScraper() as scraper:
-            articles = await scraper.scrape_all(hours_back=days * 24)
+        except Exception as e:
+            logger.error("Portfolio Diff scraping failed: %s", e)
+            return source_name, {"error": str(e)}
 
-        stats = await process_external_articles(articles, "ventureburn", scan_job_id)
-        results["ventureburn"] = stats
-        total_deals_saved += stats["deals_saved"]
+    # Run all free sources in parallel
+    logger.info("Phase 2b: Running 13 free RSS/HTTP sources in parallel...")
+    parallel_tasks = [
+        scrape_google_alerts(),
+        scrape_techcrunch(),
+        scrape_crunchbase(),
+        scrape_venturebeat(),
+        scrape_axios(),
+        scrape_strictlyvc(),
+        scrape_prwire(),
+        scrape_ycombinator(),
+        scrape_github(),
+        scrape_hackernews(),
+        scrape_tech_funding_news(),
+        scrape_ventureburn(),
+        scrape_portfolio_diff(),
+    ]
 
-    except Exception as e:
-        logger.error("Ventureburn scraping failed: %s", e)
-        results["ventureburn"] = {"error": str(e)}
+    parallel_results = await asyncio.gather(*parallel_tasks, return_exceptions=True)
+
+    # Process parallel results
+    for result in parallel_results:
+        if isinstance(result, Exception):
+            logger.error(f"Parallel scrape task failed: {result}")
+            continue
+        source_name, stats = result
+        results[source_name] = stats
+        if isinstance(stats, dict) and "deals_saved" in stats:
+            total_deals_saved += stats["deals_saved"]
+
+    # Fortune Term Sheet - DISABLED (Fortune blocked RSS access Dec 2024)
+    results["fortune"] = {"articles_found": 0, "deals_saved": 0, "status": "disabled"}
 
     results["total_deals_saved"] = total_deals_saved
 
@@ -1328,21 +1356,16 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
     except Exception as e:
         logger.warning(f"[{job_id}] Failed to create ScanJob record: {e}")
 
-    # CRITICAL FIX: Clear content hash cache at start of each run
+    # ===== PHASE 0: Clear caches for fresh run =====
     # Without this, duplicate detection prevents processing the same article
     # across different runs (100% data loss after first run)
     from ..analyst.extractor import clear_content_hash_cache
-    clear_content_hash_cache()
-    logger.info(f"[{job_id}] Content hash cache cleared for fresh run")
-
-    # Phase 5: Clear global URL dedup cache for cross-source deduplication
-    await clear_global_seen_urls()
-    logger.info(f"[{job_id}] Global URL dedup cache cleared for fresh run")
-
-    # FIX: Clear LinkedIn failed-lookup cache for fresh enrichment attempts
     from ..enrichment.brave_enrichment import clear_linkedin_cache
+
+    clear_content_hash_cache()
+    await clear_global_seen_urls()
     clear_linkedin_cache()
-    logger.info(f"[{job_id}] LinkedIn cache cleared for fresh run")
+    logger.info(f"[{job_id}] Phase 0: Caches cleared (content hash, URL dedup, LinkedIn)")
 
     start_time = datetime.now(timezone.utc)
 
@@ -1355,7 +1378,8 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
         results = await scrape_all_funds(
             fund_slugs=fund_slugs,
             parallel=True,
-            max_parallel_funds=3
+            max_parallel_funds=3,
+            scan_job_id=scan_job_db_id,
         )
 
         # Calculate Phase 1 stats
