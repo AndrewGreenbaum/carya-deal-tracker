@@ -124,22 +124,13 @@ class InvestorMention(BaseModel):
 
 
 class ChainOfThought(BaseModel):
-    """Reasoning trace for the extraction decision."""
-    verb_analysis: str = Field(
-        description="Analysis of key verbs: 'led', 'participated', 'joined', 'priced'"
-    )
-    lead_signals: List[str] = Field(
-        description="Phrases indicating lead investor status"
-    )
-    participation_signals: List[str] = Field(
-        description="Phrases indicating participation only"
-    )
-    ambiguity_flags: List[str] = Field(
-        default_factory=list,
-        description="Any ambiguous language that complicates determination"
-    )
+    """Simplified reasoning trace for the extraction decision.
+
+    Optimized for token efficiency - only captures final reasoning.
+    Saves ~100-200 tokens per extraction vs. full analysis fields.
+    """
     final_reasoning: str = Field(
-        description="Final reasoning for the is_lead determination"
+        description="Brief reasoning for the lead investor determination (1-2 sentences)"
     )
 
 
@@ -325,11 +316,7 @@ class DealExtraction(BaseModel):
         ge=0.0, le=1.0,
         description="Confidence in the extraction (0.0-1.0)"
     )
-    thesis_drift_score: float = Field(
-        default=0.0,
-        ge=0.0, le=1.0,
-        description="How far this deal is from fund's typical thesis (0=typical, 1=unusual)"
-    )
+    # Note: thesis_drift_score removed - was never used in API/frontend
 
     # NEW: Announcement verification (prevents false positives from background mentions)
     is_new_announcement: bool = Field(

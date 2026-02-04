@@ -731,7 +731,7 @@ async def save_deal(
         is_ai_deal=getattr(extraction, 'is_ai_deal', extraction.is_enterprise_ai),  # Fallback for backwards compat
         founders_json=founders_json,
         confidence_score=extraction.confidence_score,
-        thesis_drift_score=extraction.thesis_drift_score,
+        thesis_drift_score=0.0,  # Field removed from LLM extraction for token efficiency
         scan_job_id=scan_job_id,
     )
     session.add(deal)

@@ -783,16 +783,11 @@ async def extract_deal(
             is_ai_deal=False,
             verification_snippet=None,
             confidence_score=0.1,
-            thesis_drift_score=0.0,
             # NEW: Mark as not a new announcement
             is_new_announcement=False,
             announcement_evidence=None,
             announcement_rejection_reason="No funding keywords detected - not a funding article",
             reasoning=ChainOfThought(
-                verb_analysis="No funding keywords detected",
-                lead_signals=[],
-                participation_signals=[],
-                ambiguity_flags=["Text does not appear to be about funding"],
                 final_reasoning="Skipped extraction - no funding content detected"
             )
         )
@@ -819,15 +814,10 @@ async def extract_deal(
             is_ai_deal=False,
             verification_snippet=None,
             confidence_score=0.1,
-            thesis_drift_score=0.0,
             is_new_announcement=False,
             announcement_evidence=None,
             announcement_rejection_reason="Crypto/blockchain article - not an AI company",
             reasoning=ChainOfThought(
-                verb_analysis="Crypto keywords detected",
-                lead_signals=[],
-                participation_signals=[],
-                ambiguity_flags=["Article appears to be about crypto/blockchain"],
                 final_reasoning="Skipped extraction - crypto article detected"
             )
         )
