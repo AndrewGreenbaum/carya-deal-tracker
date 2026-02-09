@@ -1517,12 +1517,55 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
         )
 
 
+def get_scan_schedule() -> tuple[CronTrigger, str]:
+    """
+    Get the cron trigger based on SCAN_FREQUENCY environment variable.
+
+    Returns:
+        tuple: (CronTrigger, description string)
+
+    Supported frequencies:
+        - "daily": Once per day at 9am EST
+        - "3x_daily": Three times per day at 9am, 1pm, 6pm EST
+        - "4_hourly": Every 4 hours (default, 6x/day)
+    """
+    from ..config.settings import settings
+
+    frequency = settings.scan_frequency.lower().strip()
+
+    if frequency == "daily":
+        # Once per day at 9am EST
+        return (
+            CronTrigger(hour=9, minute=0, timezone="America/New_York"),
+            "daily at 9am EST"
+        )
+    elif frequency == "3x_daily":
+        # Three times per day: 9am, 1pm, 6pm EST
+        return (
+            CronTrigger(hour="9,13,18", minute=0, timezone="America/New_York"),
+            "3x daily (9am, 1pm, 6pm EST)"
+        )
+    elif frequency == "4_hourly":
+        # Every 4 hours (original behavior)
+        return (
+            CronTrigger(hour='*/4', minute=0, timezone="America/New_York"),
+            "every 4 hours"
+        )
+    else:
+        # Default to daily if unknown
+        logger.warning(f"Unknown SCAN_FREQUENCY '{frequency}', defaulting to daily")
+        return (
+            CronTrigger(hour=9, minute=0, timezone="America/New_York"),
+            "daily at 9am EST (default)"
+        )
+
+
 def setup_scheduler() -> AsyncIOScheduler:
     """
     Initialize and start the APScheduler.
 
     Configures:
-    - Scrape job every 4 hours (at 12am, 4am, 8am, 12pm, 4pm, 8pm EST)
+    - Scrape job based on SCAN_FREQUENCY env var (daily, 3x_daily, 4_hourly)
     - Job store in memory (stateless)
     - Timezone: America/New_York (EST/EDT)
     """
@@ -1537,17 +1580,20 @@ def setup_scheduler() -> AsyncIOScheduler:
         }
     )
 
-    # Add scrape job - runs every 4 hours at :00 EST
+    # Get schedule based on SCAN_FREQUENCY setting
+    trigger, schedule_desc = get_scan_schedule()
+
+    # Add scrape job with configured frequency
     scheduler.add_job(
         scheduled_scrape_job,
-        trigger=CronTrigger(hour='*/4', minute=0, timezone="America/New_York"),
+        trigger=trigger,
         id="scheduled_scrape",
-        name="VC Fund Scrape (4-hourly)",
+        name=f"VC Fund Scrape ({schedule_desc})",
         replace_existing=True,
     )
 
     scheduler.start()
-    logger.info("Scheduler started with 4-hourly scrape job")
+    logger.info(f"Scheduler started with scan frequency: {schedule_desc}")
 
     # List scheduled jobs
     for job in scheduler.get_jobs():

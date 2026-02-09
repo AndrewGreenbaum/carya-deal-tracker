@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     max_concurrent_brave_searches: int = 3  # Brave API calls in parallel
     enrichment_timeout: float = 30.0  # Timeout for enrichment API calls
 
+    # Scheduler Settings
+    # Options: "daily" (1x at 9am), "3x_daily" (9am, 1pm, 6pm), "4_hourly" (every 4 hours)
+    scan_frequency: str = "daily"
+
     # Webhooks (optional)
     slack_webhook_url: str = ""
     discord_webhook_url: str = ""

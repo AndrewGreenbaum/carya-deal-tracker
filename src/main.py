@@ -2929,6 +2929,7 @@ class SchedulerJobStatus(BaseModel):
 class SchedulerStatusResponse(BaseModel):
     status: str
     jobs: List[SchedulerJobStatus]
+    scan_frequency: str = "unknown"  # daily, 3x_daily, 4_hourly
     # Job execution tracking
     last_run: Optional[str] = None
     last_status: Optional[str] = None
@@ -2939,9 +2940,15 @@ class SchedulerStatusResponse(BaseModel):
 @app.get("/scheduler/status", response_model=SchedulerStatusResponse)
 async def get_scheduler_status():
     """Get scheduler status and next run times."""
+    from .config.settings import settings
+
     sched = scheduler_module.scheduler
     if not sched:
-        return SchedulerStatusResponse(status="not_initialized", jobs=[])
+        return SchedulerStatusResponse(
+            status="not_initialized",
+            jobs=[],
+            scan_frequency=settings.scan_frequency,
+        )
 
     jobs = []
     for job in sched.get_jobs():
@@ -2960,6 +2967,7 @@ async def get_scheduler_status():
     return SchedulerStatusResponse(
         status="running" if sched.running else "stopped",
         jobs=jobs,
+        scan_frequency=settings.scan_frequency,
         last_run=last_run.isoformat() if last_run else None,
         last_status=last_status,
         last_error=last_error,
