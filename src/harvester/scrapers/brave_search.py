@@ -53,7 +53,8 @@ FUND_SEARCH_NAMES = {
 # NOTE: Be careful not to exclude common startup terms (e.g., don't exclude "accelerate" for Accel)
 EXCLUSION_TERMS = {
     "gv": ["-NYSE", "-stock", "-ticker", "-dividend", "-\"Visionary Holdings\""],
-    "thrive": ["-\"Thrive Global\"", "-\"Thrive IT\"", "-\"Thrive Market\"", "-wellness"],
+    # FIXED: Removed "-wellness" - was too broad, excluded any article mentioning wellness sector
+    "thrive": ["-\"Thrive Global\"", "-\"Thrive IT\"", "-\"Thrive Market\"", "-\"Thrive Wellness\""],
     "sequoia": ["-\"Sequoia National\"", "-HongShan", "-\"Peak XV\"", "-\"Sequoia India\"", "-\"Sequoia China\""],
     "benchmark": ["-benchmark.com", "-\"Benchmark International\"", "-\"Benchmark Electronics\""],  # Removed -benchmarking (too broad)
     "accel": ["-\"Accel Entertainment\""],  # Removed -accelerate/-acceleration/-accelerator (common startup terms)

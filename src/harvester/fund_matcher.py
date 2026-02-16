@@ -79,6 +79,7 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
     ],
     "thrive": [
         "thrive capital",
+        "thrive",  # Standalone - relies on negative keywords to filter "Thrive Global", "Thrive IT", etc.
     ],
     "general_catalyst": [
         "general catalyst",
@@ -179,6 +180,10 @@ NEGATIVE_KEYWORDS: dict[str, list[str]] = {
         "thrive it",
         "thrive market",
         "thrive services",
+        "thrive pet",  # Thrive Pet Healthcare - veterinary chain
+        "thrive wellness",
+        "thrive causemetics",  # Beauty brand
+        "thrive fitness",
     ],
     "sequoia": [
         "hongshan",
