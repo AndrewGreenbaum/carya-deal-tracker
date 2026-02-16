@@ -11,6 +11,8 @@ How it works:
 4. Store snapshot for next comparison
 
 This is one of the BEST free sources for true stealth detection.
+
+UPDATED: Now uses Playwright for JS-heavy pages (a16z, Felicis, Accel, etc.)
 """
 
 import asyncio
@@ -23,6 +25,8 @@ from dataclasses import dataclass
 from datetime import datetime, date, timezone
 from typing import List, Optional, Dict, Set
 
+from playwright.async_api import async_playwright, Browser, BrowserContext, Playwright
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -33,20 +37,42 @@ from ...archivist.models import PortfolioSnapshot
 
 logger = logging.getLogger(__name__)
 
+# Funds that require JavaScript rendering (React/Vue SPAs)
+# Based on empirical testing - these return 0-1 companies with simple HTTP
+PLAYWRIGHT_REQUIRED_FUNDS = {
+    "a16z",       # React SPA - portfolio loads dynamically
+    "felicis",    # JS-heavy portfolio grid
+    "accel",      # Dynamic company list
+    "index",      # Client-side rendered
+    "insight",    # JS portfolio page
+    "greylock",   # Gatsby/React site
+    "redpoint",   # React site
+    "menlo",      # JS-rendered portfolio
+    "gv",         # React portfolio
+    "khosla",     # JS portfolio
+    "benchmark",  # Dynamic portfolio
+    "first_round", # JS portfolio
+    # NOTE: Thrive removed - no public portfolio page
+}
+
 # Memory safety limit
 MAX_COMPANIES_PER_FUND = 500
 
 # Portfolio page URLs for tracked funds
+# NOTE: Extract company names from img alt tags or specific CSS selectors
+# Some funds don't have public portfolio pages (Thrive - just a splash page)
 PORTFOLIO_URLS = {
     "a16z": {
         "url": "https://a16z.com/portfolio/",
-        "selector": ".portfolio-company, .company-card, [class*='portfolio'], a[href*='/companies/']",
-        "name_selector": "h3, h4, .company-name, .title",
+        # a16z uses img alt tags for company names inside portfolio cards
+        "selector": ".portfolio-card",
+        "name_selector": ".logo-wrap img",  # Company name in img alt attribute
+        "name_attr": "alt",  # Extract from alt attribute instead of text
     },
     "sequoia": {
         "url": "https://www.sequoiacap.com/our-companies/",
-        "selector": ".company-card, .portfolio-item, [class*='company']",
-        "name_selector": "h3, h4, .name, .company-name",
+        "selector": "a[href*='/companies/']",
+        "name_selector": None,  # Use link text directly
     },
     "founders_fund": {
         "url": "https://foundersfund.com/portfolio/",
@@ -118,12 +144,8 @@ PORTFOLIO_URLS = {
         "selector": ".company, .portfolio-item",
         "name_selector": "h3, h4, .name",
     },
-    "thrive": {
-        # FIXED: Use job board which lists all 101 portfolio companies
-        "url": "https://jobs.thrivecap.com/companies",
-        "selector": "[class*='company'], .company-card, a[href*='/companies/']",
-        "name_selector": "h3, h4, .company-name, [class*='title']",
-    },
+    # NOTE: Thrive has no public portfolio page - just a splash page
+    # Portfolio tracking for Thrive done via Brave Search / news sources
     "gv": {
         "url": "https://www.gv.com/portfolio/",
         "selector": ".portfolio-company, .company",
@@ -160,6 +182,9 @@ class PortfolioDiffScraper:
 
     Detects stealth additions by comparing current portfolio
     against stored snapshot from previous run.
+
+    Uses Playwright for JS-heavy pages (React/Vue SPAs) and
+    simple HTTP for static HTML pages.
     """
 
     def __init__(self):
@@ -171,12 +196,38 @@ class PortfolioDiffScraper:
             },
             follow_redirects=True,
         )
+        # Playwright for JS-heavy pages
+        self._playwright: Optional[Playwright] = None
+        self._browser: Optional[Browser] = None
+        self._context: Optional[BrowserContext] = None
 
     async def __aenter__(self):
+        # Initialize Playwright for JS-heavy fund pages
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--disable-dev-shm-usage',
+                '--no-sandbox',
+            ]
+        )
+        self._context = await self._browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            java_script_enabled=True,
+        )
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.client.aclose()
+        # Clean up Playwright
+        if self._context:
+            await self._context.close()
+        if self._browser:
+            await self._browser.close()
+        if self._playwright:
+            await self._playwright.stop()
 
     async def _load_snapshot(self, fund_slug: str) -> Set[str]:
         """Load previous snapshot of company names from database."""
@@ -213,19 +264,68 @@ class PortfolioDiffScraper:
             await session.execute(stmt)
             await session.commit()
 
+    async def _fetch_with_playwright(self, url: str, wait_selector: Optional[str] = None) -> str:
+        """
+        Fetch page using Playwright for JavaScript rendering.
+
+        Args:
+            url: URL to fetch
+            wait_selector: CSS selector to wait for content load
+
+        Returns:
+            Rendered HTML string
+        """
+        page = await self._context.new_page()
+        try:
+            # Add anti-detection
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            """)
+
+            await page.goto(url, wait_until='load', timeout=30000)
+
+            # Wait for content selector if provided
+            if wait_selector:
+                try:
+                    await page.wait_for_selector(wait_selector, timeout=5000)
+                except Exception:
+                    pass  # Continue even if selector not found
+
+            # Wait for JS to render content
+            await page.wait_for_timeout(2000)
+
+            # Scroll to load lazy content
+            await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+            await page.wait_for_timeout(1000)
+
+            return await page.content()
+        finally:
+            await page.close()
+
     async def scrape_portfolio_page(self, fund_slug: str) -> List[PortfolioCompany]:
         """
         Scrape a single fund's portfolio page for company names.
+
+        Uses Playwright for JS-heavy pages (React/Vue SPAs) and
+        simple HTTP for static HTML pages.
         """
         config = PORTFOLIO_URLS.get(fund_slug)
         if not config:
             return []
 
         try:
-            response = await self.client.get(config["url"])
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.text, 'lxml')
+            # Use Playwright for JS-heavy pages
+            if fund_slug in PLAYWRIGHT_REQUIRED_FUNDS:
+                logger.info(f"Using Playwright for {fund_slug} (JS-heavy page)")
+                html = await self._fetch_with_playwright(
+                    config["url"],
+                    wait_selector=config.get("selector")
+                )
+                soup = BeautifulSoup(html, 'lxml')
+            else:
+                response = await self.client.get(config["url"])
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, 'lxml')
             companies = []
             seen_names = set()
 
@@ -246,10 +346,18 @@ class PortfolioDiffScraper:
                         # Try to extract company name
                         name = None
 
-                        # Try name selector first
-                        name_elem = elem.select_one(config.get("name_selector", "h3, h4"))
-                        if name_elem:
-                            name = name_elem.get_text(strip=True)
+                        # Check if we should extract from an attribute (e.g., img alt)
+                        name_attr = config.get("name_attr")
+                        name_selector = config.get("name_selector")
+
+                        if name_selector:
+                            name_elem = elem.select_one(name_selector)
+                            if name_elem:
+                                if name_attr:
+                                    # Extract from attribute (e.g., img alt="Airbnb")
+                                    name = name_elem.get(name_attr, "").strip()
+                                else:
+                                    name = name_elem.get_text(strip=True)
 
                         # Fallback to element text
                         if not name:
