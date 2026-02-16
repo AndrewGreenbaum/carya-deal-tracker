@@ -112,10 +112,13 @@ ENTERPRISE_KEYWORDS = [
 ]
 
 # Lead investor phrases - include past AND present tense variations
+# FIXED: Added single-word "leads" and "led" for headlines like "Thrive Capital leads $34M"
 LEAD_PHRASES = [
     "led by", "led the round", "led the investment",
     "leading the round", "leads the round", "leads the investment",
     "lead investor", "spearheaded by", "co-led by",
+    "leads",  # Single word for headlines
+    "led",    # Single word for headlines
 ]
 
 # Participation phrases
@@ -216,13 +219,14 @@ class BraveSearchScraper:
             return ""
 
         name_query = " OR ".join([f'"{name}"' for name in fund_names])
-        funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:4]])
+        # FIXED: Use first 6 keywords (was 4) - now includes "Series B" and "Series C"
+        funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:6]])
         exclusions = EXCLUSION_TERMS.get(fund_slug, [])
         exclusion_query = " ".join(exclusions) if exclusions else ""
 
         if query_type == "lead":
-            # Use first 6 phrases to include present tense variations
-            lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES[:6]])
+            # FIXED: Use all lead phrases, not just first 6 (was missing "leads", "led" single words)
+            lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES])
             query = f'({name_query}) AND ({lead_query}) AND ({funding_query})'
         else:
             participation_query = " OR ".join([f'"{phrase}"' for phrase in PARTICIPATION_PHRASES[:4]])
@@ -240,9 +244,9 @@ class BraveSearchScraper:
         else:
             keywords = " OR ".join([f'"{kw}"' for kw in ENTERPRISE_KEYWORDS[:6]])
 
-        # Use first 6 phrases to include present tense variations
-        lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES[:6]])
-        funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:4]])
+        # Use all lead phrases for broader coverage
+        lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES])
+        funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:6]])
         return f'({keywords}) AND ({funding_query}) AND ({lead_query})'
 
     def _build_stealth_query(self) -> str:
