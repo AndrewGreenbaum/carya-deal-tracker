@@ -119,9 +119,10 @@ PORTFOLIO_URLS = {
         "name_selector": "h3, h4, .name",
     },
     "thrive": {
-        "url": "https://www.thrivecap.com/portfolio/",
-        "selector": ".portfolio-company, .company",
-        "name_selector": "h3, h4, .name",
+        # FIXED: Use job board which lists all 101 portfolio companies
+        "url": "https://jobs.thrivecap.com/companies",
+        "selector": "[class*='company'], .company-card, a[href*='/companies/']",
+        "name_selector": "h3, h4, .company-name, [class*='title']",
     },
     "gv": {
         "url": "https://www.gv.com/portfolio/",
