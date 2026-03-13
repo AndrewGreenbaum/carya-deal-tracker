@@ -1,23 +1,326 @@
 """
-Storage functions for CRM tracker items.
+Storage functions for CRM tracker items and configurable columns.
 
 Handles CRUD operations for the Kanban-style deal pipeline tracker.
 """
 
 import logging
+import re
 from datetime import datetime, date, timezone
-from typing import Optional, List
+from typing import Optional, List, Set
 
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import TrackerItem, Deal, PortfolioCompany
+from .models import TrackerItem, TrackerColumn, Deal, PortfolioCompany
 
 logger = logging.getLogger(__name__)
 
 
-# Valid status values for Kanban columns
-VALID_STATUSES = {"watching", "reached_out", "in_conversation", "closing_spv", "spv_complete", "spv_rejected"}
+# Available colors for columns (Tailwind color names)
+AVAILABLE_COLORS = {"slate", "blue", "amber", "emerald", "green", "red", "purple", "pink", "cyan", "orange"}
+
+
+# ============================================
+# Column Management Functions
+# ============================================
+
+async def get_valid_statuses(session: AsyncSession) -> Set[str]:
+    """Get all valid status values from active tracker columns."""
+    stmt = select(TrackerColumn.slug).where(TrackerColumn.is_active == True)
+    result = await session.execute(stmt)
+    return set(result.scalars().all())
+
+
+async def get_tracker_columns(
+    session: AsyncSession,
+    include_inactive: bool = False,
+) -> List[TrackerColumn]:
+    """
+    Get all tracker columns ordered by position.
+
+    Args:
+        session: Database session
+        include_inactive: Include soft-deleted columns
+
+    Returns:
+        List of TrackerColumn records
+    """
+    stmt = select(TrackerColumn).order_by(TrackerColumn.position)
+    if not include_inactive:
+        stmt = stmt.where(TrackerColumn.is_active == True)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_tracker_column(
+    session: AsyncSession,
+    column_id: int,
+) -> Optional[TrackerColumn]:
+    """Get a single tracker column by ID."""
+    stmt = select(TrackerColumn).where(TrackerColumn.id == column_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def get_tracker_column_by_slug(
+    session: AsyncSession,
+    slug: str,
+) -> Optional[TrackerColumn]:
+    """Get a tracker column by slug."""
+    stmt = select(TrackerColumn).where(TrackerColumn.slug == slug)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+def slugify(text: str) -> str:
+    """Convert text to a valid slug (lowercase, underscores, alphanumeric)."""
+    # Convert to lowercase and replace spaces/hyphens with underscores
+    slug = text.lower().strip()
+    slug = re.sub(r'[\s\-]+', '_', slug)
+    # Remove non-alphanumeric characters except underscores
+    slug = re.sub(r'[^a-z0-9_]', '', slug)
+    # Remove leading/trailing underscores
+    slug = slug.strip('_')
+    return slug or 'column'
+
+
+async def generate_unique_slug(
+    session: AsyncSession,
+    base_slug: str,
+) -> str:
+    """Generate a unique slug by appending a number if needed."""
+    slug = base_slug
+    counter = 1
+    while await get_tracker_column_by_slug(session, slug):
+        slug = f"{base_slug}_{counter}"
+        counter += 1
+    return slug
+
+
+async def create_tracker_column(
+    session: AsyncSession,
+    display_name: str,
+    color: str = "slate",
+    slug: Optional[str] = None,
+) -> TrackerColumn:
+    """
+    Create a new tracker column.
+
+    Args:
+        session: Database session
+        display_name: User-visible column name
+        color: Tailwind color name
+        slug: Optional custom slug (auto-generated from display_name if not provided)
+
+    Returns:
+        Created TrackerColumn
+    """
+    # Generate slug if not provided
+    if not slug:
+        base_slug = slugify(display_name)
+        slug = await generate_unique_slug(session, base_slug)
+
+    # Validate color
+    if color not in AVAILABLE_COLORS:
+        color = "slate"
+
+    # Get max position to append at end
+    stmt = select(func.max(TrackerColumn.position))
+    result = await session.execute(stmt)
+    max_pos = result.scalar_one_or_none() or -1
+
+    column = TrackerColumn(
+        slug=slug,
+        display_name=display_name,
+        color=color,
+        position=max_pos + 1,
+        is_active=True,
+    )
+    session.add(column)
+    await session.flush()
+
+    logger.info(f"Created tracker column: {display_name} ({slug}) at position {column.position}")
+    return column
+
+
+async def update_tracker_column(
+    session: AsyncSession,
+    column_id: int,
+    display_name: Optional[str] = None,
+    color: Optional[str] = None,
+) -> Optional[TrackerColumn]:
+    """
+    Update a tracker column's display name or color.
+
+    Args:
+        session: Database session
+        column_id: Column ID to update
+        display_name: New display name (optional)
+        color: New color (optional)
+
+    Returns:
+        Updated TrackerColumn or None if not found
+    """
+    column = await get_tracker_column(session, column_id)
+    if not column:
+        logger.warning(f"Tracker column not found: {column_id}")
+        return None
+
+    if display_name is not None:
+        column.display_name = display_name
+
+    if color is not None and color in AVAILABLE_COLORS:
+        column.color = color
+
+    column.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    await session.flush()
+
+    logger.info(f"Updated tracker column: {column_id}")
+    return column
+
+
+async def move_tracker_column(
+    session: AsyncSession,
+    column_id: int,
+    new_position: int,
+) -> Optional[TrackerColumn]:
+    """
+    Move a tracker column to a new position.
+
+    Args:
+        session: Database session
+        column_id: Column ID to move
+        new_position: Target position (0-indexed)
+
+    Returns:
+        Moved TrackerColumn or None if not found
+    """
+    column = await get_tracker_column(session, column_id)
+    if not column:
+        logger.warning(f"Tracker column not found: {column_id}")
+        return None
+
+    old_position = column.position
+
+    if old_position == new_position:
+        return column
+
+    # Clamp new_position to valid range
+    stmt = select(func.count(TrackerColumn.id)).where(TrackerColumn.is_active == True)
+    result = await session.execute(stmt)
+    max_pos = (result.scalar_one() or 1) - 1
+    new_position = max(0, min(new_position, max_pos))
+
+    if old_position < new_position:
+        # Moving right: shift items between old and new positions left
+        await session.execute(
+            update(TrackerColumn)
+            .where(TrackerColumn.is_active == True)
+            .where(TrackerColumn.position > old_position)
+            .where(TrackerColumn.position <= new_position)
+            .values(position=TrackerColumn.position - 1)
+        )
+    else:
+        # Moving left: shift items between new and old positions right
+        await session.execute(
+            update(TrackerColumn)
+            .where(TrackerColumn.is_active == True)
+            .where(TrackerColumn.position >= new_position)
+            .where(TrackerColumn.position < old_position)
+            .values(position=TrackerColumn.position + 1)
+        )
+
+    column.position = new_position
+    column.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    await session.flush()
+
+    logger.info(f"Moved tracker column {column_id}: {old_position} -> {new_position}")
+    return column
+
+
+async def delete_tracker_column(
+    session: AsyncSession,
+    column_id: int,
+) -> bool:
+    """
+    Delete a tracker column and move its items to the first column.
+
+    Args:
+        session: Database session
+        column_id: Column ID to delete
+
+    Returns:
+        True if deleted, False if not found or is the last column
+    """
+    column = await get_tracker_column(session, column_id)
+    if not column:
+        logger.warning(f"Tracker column not found: {column_id}")
+        return False
+
+    # Check if this is the last column
+    stmt = select(func.count(TrackerColumn.id)).where(TrackerColumn.is_active == True)
+    result = await session.execute(stmt)
+    count = result.scalar_one() or 0
+    if count <= 1:
+        logger.warning("Cannot delete the last tracker column")
+        return False
+
+    # Get the first column (lowest position) that isn't this one
+    stmt = (
+        select(TrackerColumn)
+        .where(TrackerColumn.is_active == True)
+        .where(TrackerColumn.id != column_id)
+        .order_by(TrackerColumn.position)
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    target_column = result.scalar_one_or_none()
+
+    if not target_column:
+        logger.error("No target column found for moving items")
+        return False
+
+    # Move all items from deleted column to target column
+    await session.execute(
+        update(TrackerItem)
+        .where(TrackerItem.status == column.slug)
+        .values(status=target_column.slug)
+    )
+
+    # Close gap in positions
+    await session.execute(
+        update(TrackerColumn)
+        .where(TrackerColumn.is_active == True)
+        .where(TrackerColumn.position > column.position)
+        .values(position=TrackerColumn.position - 1)
+    )
+
+    # Soft delete the column
+    column.is_active = False
+    column.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    await session.flush()
+
+    logger.info(f"Deleted tracker column: {column.slug}, items moved to {target_column.slug}")
+    return True
+
+
+async def get_column_item_counts(
+    session: AsyncSession,
+) -> dict:
+    """Get count of items per column slug."""
+    columns = await get_tracker_columns(session)
+    counts = {}
+    for col in columns:
+        stmt = select(func.count(TrackerItem.id)).where(TrackerItem.status == col.slug)
+        result = await session.execute(stmt)
+        counts[col.slug] = result.scalar_one() or 0
+    return counts
+
+
+# ============================================
+# Tracker Item Functions
+# ============================================
 
 
 async def get_tracker_items(
@@ -31,7 +334,7 @@ async def get_tracker_items(
 
     Args:
         session: Database session
-        status: Optional status filter (watching, reached_out, in_conversation, closing_spv)
+        status: Optional status filter (any valid column slug)
 
     Returns:
         List of TrackerItem records
@@ -39,7 +342,8 @@ async def get_tracker_items(
     stmt = select(TrackerItem).order_by(TrackerItem.status, TrackerItem.position)
 
     if status:
-        if status not in VALID_STATUSES:
+        valid_statuses = await get_valid_statuses(session)
+        if status not in valid_statuses:
             logger.warning(f"Invalid status filter: {status}")
             return []
         stmt = stmt.where(TrackerItem.status == status)
@@ -86,7 +390,7 @@ async def create_tracker_item(
     Args:
         session: Database session
         company_name: Name of the company
-        status: Initial Kanban column (default: watching)
+        status: Initial Kanban column (default: first active column)
         round_type: Funding round type (seed, series_a, etc.)
         amount: Funding amount ("$50M")
         lead_investor: Lead investor name
@@ -97,9 +401,16 @@ async def create_tracker_item(
     Returns:
         Created TrackerItem
     """
-    if status not in VALID_STATUSES:
-        logger.warning(f"Invalid status '{status}', defaulting to 'watching'")
-        status = "watching"
+    valid_statuses = await get_valid_statuses(session)
+    if status not in valid_statuses:
+        # Default to first column if invalid status
+        columns = await get_tracker_columns(session)
+        if columns:
+            status = columns[0].slug
+            logger.warning(f"Invalid status, defaulting to '{status}'")
+        else:
+            status = "watching"
+            logger.warning("No columns found, defaulting to 'watching'")
 
     # Get max position in target column to append at end
     stmt = (
@@ -184,13 +495,14 @@ async def move_tracker_item(
     Args:
         session: Database session
         item_id: The tracker item ID
-        new_status: Target Kanban column
+        new_status: Target Kanban column (column slug)
         new_position: Target position within column (0-indexed)
 
     Returns:
         Moved TrackerItem if found, None otherwise
     """
-    if new_status not in VALID_STATUSES:
+    valid_statuses = await get_valid_statuses(session)
+    if new_status not in valid_statuses:
         logger.warning(f"Invalid status: {new_status}")
         return None
 
@@ -373,7 +685,7 @@ async def get_tracker_items_count(
 
     Args:
         session: Database session
-        status: Optional status filter
+        status: Optional status filter (column slug)
 
     Returns:
         Count of matching items
@@ -381,7 +693,8 @@ async def get_tracker_items_count(
     stmt = select(func.count(TrackerItem.id))
 
     if status:
-        if status not in VALID_STATUSES:
+        valid_statuses = await get_valid_statuses(session)
+        if status not in valid_statuses:
             return 0
         stmt = stmt.where(TrackerItem.status == status)
 
@@ -399,10 +712,11 @@ async def get_tracker_stats(
         Dict with counts per status and total
     """
     stats = {"total": 0}
+    columns = await get_tracker_columns(session)
 
-    for status in VALID_STATUSES:
-        count = await get_tracker_items_count(session, status)
-        stats[status] = count
+    for column in columns:
+        count = await get_tracker_items_count(session, column.slug)
+        stats[column.slug] = count
         stats["total"] += count
 
     return stats

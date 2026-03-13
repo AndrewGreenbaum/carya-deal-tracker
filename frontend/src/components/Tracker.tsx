@@ -2,7 +2,7 @@
  * Tracker - Kanban-style CRM for managing deal pipeline
  *
  * Features:
- * - 4 columns: Watching, Reached Out, In Conversation, Closing SPV
+ * - Configurable columns (add, rename, reorder, delete)
  * - Drag-and-drop between columns
  * - Manual company entry
  * - Links to deals from Dashboard
@@ -27,20 +27,24 @@ import { Plus, RefreshCw } from 'lucide-react';
 import { TrackerColumn } from './TrackerColumn';
 import { TrackerCard } from './TrackerCard';
 import { TrackerModal } from './TrackerModal';
-import type { TrackerItem, TrackerStatus, TrackerStats } from '../types';
-import { TRACKER_STATUS_LABELS } from '../types';
+import { TrackerColumnModal } from './TrackerColumnModal';
+import type { TrackerItem, TrackerStatus, TrackerStats, TrackerColumn as TrackerColumnType } from '../types';
 import {
   fetchTrackerItems,
+  fetchTrackerColumns,
   createTrackerItem,
   updateTrackerItem,
   moveTrackerItem,
   deleteTrackerItem,
+  createTrackerColumn,
+  updateTrackerColumn,
+  moveTrackerColumn,
+  deleteTrackerColumn,
 } from '../api/deals';
-
-const COLUMNS: TrackerStatus[] = ['watching', 'reached_out', 'in_conversation', 'closing_spv', 'spv_complete', 'spv_rejected'];
 
 export function Tracker() {
   const [items, setItems] = useState<TrackerItem[]>([]);
+  const [columns, setColumns] = useState<TrackerColumnType[]>([]);
   const [stats, setStats] = useState<TrackerStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +52,9 @@ export function Tracker() {
   const [modalItem, setModalItem] = useState<TrackerItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  // Column modal state
+  const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
+  const [editingColumn, setEditingColumn] = useState<TrackerColumnType | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -59,6 +66,16 @@ export function Tracker() {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+
+  const loadColumns = useCallback(async () => {
+    try {
+      const response = await fetchTrackerColumns();
+      setColumns(response.columns.sort((a, b) => a.position - b.position));
+    } catch (err) {
+      console.error('Failed to load columns:', err);
+      // Don't set error - columns are secondary, items are primary
+    }
+  }, []);
 
   const loadItems = useCallback(async () => {
     try {
@@ -74,9 +91,13 @@ export function Tracker() {
     }
   }, []);
 
+  const loadAll = useCallback(async () => {
+    await Promise.all([loadColumns(), loadItems()]);
+  }, [loadColumns, loadItems]);
+
   useEffect(() => {
-    loadItems();
-  }, [loadItems]);
+    loadAll();
+  }, [loadAll]);
 
   const getItemsByStatus = (status: TrackerStatus): TrackerItem[] => {
     return items
@@ -103,7 +124,8 @@ export function Tracker() {
     const overId = over.id;
     let overStatus: TrackerStatus;
 
-    if (COLUMNS.includes(overId as TrackerStatus)) {
+    const columnSlugs = columns.map((c) => c.slug);
+    if (columnSlugs.includes(overId as string)) {
       overStatus = overId as TrackerStatus;
     } else {
       const overItem = items.find((i) => i.id === overId);
@@ -134,7 +156,8 @@ export function Tracker() {
     let targetStatus: TrackerStatus;
     let targetPosition: number;
 
-    if (COLUMNS.includes(over.id as TrackerStatus)) {
+    const columnSlugs = columns.map((c) => c.slug);
+    if (columnSlugs.includes(over.id as string)) {
       // Dropped on a column
       targetStatus = over.id as TrackerStatus;
       const columnItems = getItemsByStatus(targetStatus);
@@ -237,6 +260,76 @@ export function Tracker() {
     }
   };
 
+  // Column management handlers
+  const handleAddColumn = () => {
+    setEditingColumn(null);
+    setIsColumnModalOpen(true);
+  };
+
+  const handleEditColumn = (column: TrackerColumnType) => {
+    setEditingColumn(column);
+    setIsColumnModalOpen(true);
+  };
+
+  const handleSaveColumn = async (data: { displayName: string; color: string }) => {
+    try {
+      if (editingColumn) {
+        await updateTrackerColumn(editingColumn.id, data);
+      } else {
+        await createTrackerColumn(data);
+      }
+      setIsColumnModalOpen(false);
+      setEditingColumn(null);
+      loadColumns();
+    } catch (err) {
+      console.error('Failed to save column:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save column');
+    }
+  };
+
+  const handleMoveColumnLeft = async (column: TrackerColumnType) => {
+    if (column.position <= 0) return;
+    try {
+      await moveTrackerColumn(column.id, column.position - 1);
+      loadColumns();
+    } catch (err) {
+      console.error('Failed to move column:', err);
+      setError(err instanceof Error ? err.message : 'Failed to move column');
+    }
+  };
+
+  const handleMoveColumnRight = async (column: TrackerColumnType) => {
+    if (column.position >= columns.length - 1) return;
+    try {
+      await moveTrackerColumn(column.id, column.position + 1);
+      loadColumns();
+    } catch (err) {
+      console.error('Failed to move column:', err);
+      setError(err instanceof Error ? err.message : 'Failed to move column');
+    }
+  };
+
+  const handleDeleteColumn = async (column: TrackerColumnType) => {
+    if (columns.length <= 1) {
+      setError('Cannot delete the last column');
+      return;
+    }
+    const itemCount = items.filter((i) => i.status === column.slug).length;
+    const confirmed = window.confirm(
+      itemCount > 0
+        ? `Delete "${column.displayName}"? ${itemCount} item(s) will move to the first column.`
+        : `Delete "${column.displayName}"?`
+    );
+    if (!confirmed) return;
+    try {
+      await deleteTrackerColumn(column.id);
+      loadAll();
+    } catch (err) {
+      console.error('Failed to delete column:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete column');
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3">
@@ -258,7 +351,7 @@ export function Tracker() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={loadItems}
+            onClick={loadAll}
             className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
             title="Refresh"
           >
@@ -297,19 +390,32 @@ export function Tracker() {
           onDragEnd={handleDragEnd}
         >
           <div className="flex gap-4 min-h-full" style={{ minWidth: 'max-content' }}>
-            {COLUMNS.map((status) => {
-              const columnItems = getItemsByStatus(status);
+            {columns.map((column) => {
+              const columnItems = getItemsByStatus(column.slug);
               return (
                 <TrackerColumn
-                  key={status}
-                  id={status}
-                  title={TRACKER_STATUS_LABELS[status]}
+                  key={column.slug}
+                  column={column}
                   items={columnItems}
                   count={columnItems.length}
+                  isFirst={column.position === 0}
+                  isLast={column.position === columns.length - 1}
                   onEditItem={handleEditItem}
+                  onEditColumn={handleEditColumn}
+                  onMoveLeft={handleMoveColumnLeft}
+                  onMoveRight={handleMoveColumnRight}
+                  onDeleteColumn={handleDeleteColumn}
                 />
               );
             })}
+            {/* Add Column Button */}
+            <button
+              onClick={handleAddColumn}
+              className="flex flex-col items-center justify-center w-72 shrink-0 h-32 border-2 border-dashed border-slate-700 rounded-lg text-slate-500 hover:border-slate-600 hover:text-slate-400 transition-colors"
+            >
+              <Plus className="w-6 h-6 mb-1" />
+              <span className="text-sm">Add Column</span>
+            </button>
           </div>
 
           <DragOverlay>
@@ -320,7 +426,7 @@ export function Tracker() {
         </DndContext>
       </div>
 
-      {/* Modal */}
+      {/* Item Modal */}
       {isModalOpen && (
         <TrackerModal
           item={modalItem}
@@ -328,6 +434,18 @@ export function Tracker() {
           onClose={() => setIsModalOpen(false)}
           onSave={handleSaveItem}
           onDelete={modalItem ? () => handleDeleteItem(modalItem.id) : undefined}
+        />
+      )}
+
+      {/* Column Modal */}
+      {isColumnModalOpen && (
+        <TrackerColumnModal
+          column={editingColumn}
+          onClose={() => {
+            setIsColumnModalOpen(false);
+            setEditingColumn(null);
+          }}
+          onSave={handleSaveColumn}
         />
       )}
     </div>

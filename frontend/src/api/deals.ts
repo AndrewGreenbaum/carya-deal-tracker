@@ -705,7 +705,94 @@ import type {
   TrackerItem,
   TrackerItemsResponse,
   TrackerStatus,
+  TrackerStats,
+  TrackerColumn,
+  TrackerColumnsResponse,
 } from '../types';
+
+// ============================================
+// Tracker Column API Types & Functions
+// ============================================
+
+interface TrackerColumnApiResponse {
+  id: number;
+  slug: string;
+  display_name: string;
+  color: string;
+  position: number;
+  is_active: boolean;
+}
+
+interface TrackerColumnsApiResponse {
+  columns: TrackerColumnApiResponse[];
+  item_counts: Record<string, number>;
+}
+
+function mapTrackerColumn(api: TrackerColumnApiResponse): TrackerColumn {
+  return {
+    id: api.id,
+    slug: api.slug,
+    displayName: api.display_name,
+    color: api.color,
+    position: api.position,
+    isActive: api.is_active,
+  };
+}
+
+export async function fetchTrackerColumns(): Promise<TrackerColumnsResponse> {
+  const data = await apiGet<TrackerColumnsApiResponse>('/tracker/columns', false);
+  return {
+    columns: data.columns.map(mapTrackerColumn),
+    itemCounts: data.item_counts,
+  };
+}
+
+export async function createTrackerColumn(column: {
+  displayName: string;
+  color?: string;
+  slug?: string;
+}): Promise<TrackerColumn> {
+  const data = await apiPost<TrackerColumnApiResponse>('/tracker/columns', {
+    display_name: column.displayName,
+    color: column.color || 'slate',
+    slug: column.slug,
+  });
+  invalidateCache('GET:/tracker/columns');
+  return mapTrackerColumn(data);
+}
+
+export async function updateTrackerColumn(
+  columnId: number,
+  updates: Partial<{ displayName: string; color: string }>
+): Promise<TrackerColumn> {
+  const data = await apiPut<TrackerColumnApiResponse>(`/tracker/columns/${columnId}`, {
+    display_name: updates.displayName,
+    color: updates.color,
+  });
+  invalidateCache('GET:/tracker/columns');
+  return mapTrackerColumn(data);
+}
+
+export async function moveTrackerColumn(
+  columnId: number,
+  position: number
+): Promise<TrackerColumn> {
+  const data = await apiPut<TrackerColumnApiResponse>(`/tracker/columns/${columnId}/move`, {
+    position,
+  });
+  invalidateCache('GET:/tracker/columns');
+  return mapTrackerColumn(data);
+}
+
+export async function deleteTrackerColumn(columnId: number): Promise<void> {
+  await apiDelete(`/tracker/columns/${columnId}`);
+  invalidateCache('GET:/tracker/columns');
+  invalidateCache('GET:/tracker');
+}
+
+// ============================================
+// Tracker Item API Types & Functions
+// ============================================
 
 interface TrackerItemApiResponse {
   id: number;
@@ -727,15 +814,7 @@ interface TrackerItemApiResponse {
 interface TrackerItemsApiResponse {
   items: TrackerItemApiResponse[];
   total: number;
-  stats: {
-    total: number;
-    watching: number;
-    reached_out: number;
-    in_conversation: number;
-    closing_spv: number;
-    spv_complete: number;
-    spv_rejected: number;
-  };
+  stats: Record<string, number>;
 }
 
 function mapTrackerItem(api: TrackerItemApiResponse): TrackerItem {
@@ -769,7 +848,7 @@ export async function fetchTrackerItems(status?: TrackerStatus): Promise<Tracker
   return {
     items: data.items.map(mapTrackerItem),
     total: data.total,
-    stats: data.stats,
+    stats: data.stats as TrackerStats, // Backend always includes 'total'
   };
 }
 

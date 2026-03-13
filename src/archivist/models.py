@@ -236,17 +236,36 @@ class ThesisDrift(SQLModel, table=True):
     calculated_at: datetime = Field(default_factory=utc_now_naive)
 
 
+class TrackerColumn(SQLModel, table=True):
+    """Configurable Kanban column for the tracker.
+
+    Allows users to:
+    - Rename columns
+    - Reorder columns (change position)
+    - Add new columns
+    - Delete columns (soft delete via is_active)
+
+    Colors are Tailwind color names: slate, blue, amber, emerald, green, red, purple, pink
+    """
+    __tablename__ = "tracker_columns"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    slug: str = Field(unique=True, index=True, max_length=50)
+    display_name: str = Field(max_length=100)
+    color: str = Field(default="slate", max_length=20)
+    position: int = Field(default=0)
+    is_active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    updated_at: datetime = Field(default_factory=utc_now_naive)
+
+
 class TrackerItem(SQLModel, table=True):
     """CRM tracker item for managing deal pipeline.
 
     Represents a company being tracked through the investment pipeline.
     Can be linked to an existing Deal or created manually.
 
-    Status columns (Kanban):
-    - watching: Monitoring, not yet reached out
-    - reached_out: Initial contact made
-    - in_conversation: Active dialogue ongoing
-    - closing_spv: Finalizing SPV/investment
+    Status field references TrackerColumn.slug for the column the item belongs to.
     """
     __tablename__ = "tracker_items"
 

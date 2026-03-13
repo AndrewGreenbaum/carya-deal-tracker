@@ -362,7 +362,23 @@ export const STAGE_LABELS: Record<InvestmentStage, string> = {
 // Tracker CRM Types
 // ============================================
 
-export type TrackerStatus = 'watching' | 'reached_out' | 'in_conversation' | 'closing_spv' | 'spv_complete' | 'spv_rejected';
+// TrackerStatus is now a string to support dynamic columns
+export type TrackerStatus = string;
+
+// Configurable column type
+export interface TrackerColumn {
+  id: number;
+  slug: string;
+  displayName: string;
+  color: string;
+  position: number;
+  isActive: boolean;
+}
+
+export interface TrackerColumnsResponse {
+  columns: TrackerColumn[];
+  itemCounts: Record<string, number>;
+}
 
 export interface TrackerItem {
   id: number;
@@ -383,12 +399,7 @@ export interface TrackerItem {
 
 export interface TrackerStats {
   total: number;
-  watching: number;
-  reached_out: number;
-  in_conversation: number;
-  closing_spv: number;
-  spv_complete: number;
-  spv_rejected: number;
+  [key: string]: number; // Dynamic columns
 }
 
 export interface TrackerItemsResponse {
@@ -397,7 +408,29 @@ export interface TrackerItemsResponse {
   stats: TrackerStats;
 }
 
-export const TRACKER_STATUS_LABELS: Record<TrackerStatus, string> = {
+// Available colors for columns
+export const TRACKER_COLORS = [
+  'slate', 'blue', 'amber', 'emerald', 'green', 'red', 'purple', 'pink', 'cyan', 'orange',
+] as const;
+
+export type TrackerColor = typeof TRACKER_COLORS[number];
+
+// Color class mappings for Tailwind
+export const TRACKER_COLOR_CLASSES: Record<string, { dot: string; bg: string; border: string }> = {
+  slate: { dot: 'bg-slate-500', bg: 'bg-slate-500/20', border: 'border-slate-500/30' },
+  blue: { dot: 'bg-blue-500', bg: 'bg-blue-500/20', border: 'border-blue-500/30' },
+  amber: { dot: 'bg-amber-500', bg: 'bg-amber-500/20', border: 'border-amber-500/30' },
+  emerald: { dot: 'bg-emerald-500', bg: 'bg-emerald-500/20', border: 'border-emerald-500/30' },
+  green: { dot: 'bg-green-500', bg: 'bg-green-500/20', border: 'border-green-500/30' },
+  red: { dot: 'bg-red-500', bg: 'bg-red-500/20', border: 'border-red-500/30' },
+  purple: { dot: 'bg-purple-500', bg: 'bg-purple-500/20', border: 'border-purple-500/30' },
+  pink: { dot: 'bg-pink-500', bg: 'bg-pink-500/20', border: 'border-pink-500/30' },
+  cyan: { dot: 'bg-cyan-500', bg: 'bg-cyan-500/20', border: 'border-cyan-500/30' },
+  orange: { dot: 'bg-orange-500', bg: 'bg-orange-500/20', border: 'border-orange-500/30' },
+};
+
+// Legacy constants for backward compatibility
+export const TRACKER_STATUS_LABELS: Record<string, string> = {
   watching: 'Watching',
   reached_out: 'Reached Out',
   in_conversation: 'In Conversation',
@@ -406,7 +439,7 @@ export const TRACKER_STATUS_LABELS: Record<TrackerStatus, string> = {
   spv_rejected: 'SPV Rejected',
 };
 
-export const TRACKER_STATUS_COLORS: Record<TrackerStatus, string> = {
+export const TRACKER_STATUS_COLORS: Record<string, string> = {
   watching: 'slate',
   reached_out: 'blue',
   in_conversation: 'amber',

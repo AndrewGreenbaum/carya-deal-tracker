@@ -54,7 +54,15 @@ from .archivist.tracker_storage import (
     delete_tracker_item,
     create_tracker_from_deal,
     get_tracker_stats,
-    VALID_STATUSES,
+    # Column management
+    get_tracker_columns,
+    get_tracker_column,
+    create_tracker_column,
+    update_tracker_column,
+    move_tracker_column,
+    delete_tracker_column,
+    get_column_item_counts,
+    AVAILABLE_COLORS,
 )
 from .common.brave_client import close_brave_client
 from .archivist.models import Fund
@@ -4158,6 +4166,54 @@ class AddDealToTrackerRequest(BaseModel):
     status: str = "watching"
 
 
+# ----- Tracker Column Models -----
+
+class TrackerColumnResponse(BaseModel):
+    """Response model for a tracker column."""
+    id: int
+    slug: str
+    display_name: str
+    color: str
+    position: int
+    is_active: bool = True
+
+
+class TrackerColumnsResponse(BaseModel):
+    """Response model for list of tracker columns."""
+    columns: List[TrackerColumnResponse]
+    item_counts: Dict[str, int]
+
+
+class CreateTrackerColumnRequest(BaseModel):
+    """Request model for creating a tracker column."""
+    display_name: str
+    color: str = "slate"
+    slug: Optional[str] = None  # Auto-generated if not provided
+
+
+class UpdateTrackerColumnRequest(BaseModel):
+    """Request model for updating a tracker column."""
+    display_name: Optional[str] = None
+    color: Optional[str] = None
+
+
+class MoveTrackerColumnRequest(BaseModel):
+    """Request model for moving a tracker column."""
+    position: int
+
+
+def _map_tracker_column(column) -> TrackerColumnResponse:
+    """Map TrackerColumn model to response."""
+    return TrackerColumnResponse(
+        id=column.id,
+        slug=column.slug,
+        display_name=column.display_name,
+        color=column.color,
+        position=column.position,
+        is_active=column.is_active,
+    )
+
+
 def _map_tracker_item(item) -> TrackerItemResponse:
     """Map TrackerItem model to response."""
     return TrackerItemResponse(
@@ -4176,6 +4232,163 @@ def _map_tracker_item(item) -> TrackerItemResponse:
         created_at=item.created_at.isoformat(),
         updated_at=item.updated_at.isoformat(),
     )
+
+
+# ----- Tracker Column Endpoints -----
+
+@app.get("/tracker/columns", response_model=TrackerColumnsResponse)
+async def list_tracker_columns():
+    """
+    List all tracker columns ordered by position.
+
+    Returns column configuration for the Kanban board.
+    """
+    try:
+        async with get_session() as session:
+            columns = await get_tracker_columns(session)
+            item_counts = await get_column_item_counts(session)
+            return TrackerColumnsResponse(
+                columns=[_map_tracker_column(col) for col in columns],
+                item_counts=item_counts,
+            )
+    except Exception as e:
+        logger.error("Failed to list tracker columns: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/tracker/columns", response_model=TrackerColumnResponse)
+async def create_new_tracker_column(
+    request: CreateTrackerColumnRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Create a new tracker column.
+
+    Column is added at the end (rightmost position).
+    """
+    if not request.display_name or not request.display_name.strip():
+        raise HTTPException(status_code=400, detail="Display name is required")
+
+    if request.color and request.color not in AVAILABLE_COLORS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid color. Must be one of: {', '.join(sorted(AVAILABLE_COLORS))}"
+        )
+
+    try:
+        async with get_session() as session:
+            column = await create_tracker_column(
+                session,
+                display_name=request.display_name.strip(),
+                color=request.color,
+                slug=request.slug,
+            )
+            return _map_tracker_column(column)
+    except Exception as e:
+        logger.error("Failed to create tracker column: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.put("/tracker/columns/{column_id}", response_model=TrackerColumnResponse)
+async def update_existing_tracker_column(
+    column_id: int,
+    request: UpdateTrackerColumnRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Update a tracker column's display name or color.
+    """
+    if request.display_name is not None and not request.display_name.strip():
+        raise HTTPException(status_code=400, detail="Display name cannot be empty")
+
+    if request.color is not None and request.color not in AVAILABLE_COLORS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid color. Must be one of: {', '.join(sorted(AVAILABLE_COLORS))}"
+        )
+
+    try:
+        async with get_session() as session:
+            column = await update_tracker_column(
+                session,
+                column_id=column_id,
+                display_name=request.display_name.strip() if request.display_name else None,
+                color=request.color,
+            )
+            if not column:
+                raise HTTPException(status_code=404, detail="Tracker column not found")
+            return _map_tracker_column(column)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to update tracker column: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.put("/tracker/columns/{column_id}/move", response_model=TrackerColumnResponse)
+async def move_existing_tracker_column(
+    column_id: int,
+    request: MoveTrackerColumnRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Move a tracker column to a new position.
+
+    Position is 0-indexed (0 = leftmost).
+    """
+    try:
+        async with get_session() as session:
+            column = await move_tracker_column(
+                session,
+                column_id=column_id,
+                new_position=request.position,
+            )
+            if not column:
+                raise HTTPException(status_code=404, detail="Tracker column not found")
+            return _map_tracker_column(column)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to move tracker column: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.delete("/tracker/columns/{column_id}")
+async def delete_existing_tracker_column(
+    column_id: int,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Delete a tracker column.
+
+    All items in this column are moved to the first (leftmost) column.
+    Cannot delete the last remaining column.
+    """
+    try:
+        async with get_session() as session:
+            # Get column first to check item count
+            column = await get_tracker_column(session, column_id)
+            if not column:
+                raise HTTPException(status_code=404, detail="Tracker column not found")
+
+            success = await delete_tracker_column(session, column_id)
+            if not success:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot delete the last column"
+                )
+            return {"message": f"Column '{column.display_name}' deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete tracker column: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/tracker/colors")
+async def list_available_colors():
+    """List available colors for tracker columns."""
+    return {"colors": sorted(AVAILABLE_COLORS)}
 
 
 # ----- Tracker CRM Endpoints -----
