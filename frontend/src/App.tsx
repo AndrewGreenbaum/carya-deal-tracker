@@ -367,19 +367,21 @@ function App() {
       <div className="flex-1 flex overflow-hidden relative">
         {/* Sidebar */}
         <div
-          className={`transition-all duration-300 ease-in-out ${
-            sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-64'
+          className={`transition-all duration-300 ease-in-out shrink-0 ${
+            sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-64 overflow-visible'
           }`}
         >
-          <CommandSidebar
-            filters={filters}
-            onFiltersChange={setFilters}
-            funds={funds}
-            currentView={currentView}
-            onViewChange={setCurrentView}
-            onOpenFeedback={() => setFeedbackOpen(true)}
-            onOpenAircraft={() => setAircraftTrackerOpen(true)}
-          />
+          <div className="w-64 h-full">
+            <CommandSidebar
+              filters={filters}
+              onFiltersChange={setFilters}
+              funds={funds}
+              currentView={currentView}
+              onViewChange={setCurrentView}
+              onOpenFeedback={() => setFeedbackOpen(true)}
+              onOpenAircraft={() => setAircraftTrackerOpen(true)}
+            />
+          </div>
         </div>
 
         {/* Sidebar Toggle Button - subtle, appears on hover */}
