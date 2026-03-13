@@ -359,7 +359,7 @@ export function Tracker() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
         <div>
@@ -407,7 +407,7 @@ export function Tracker() {
       )}
 
       {/* Kanban Board */}
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 min-h-0 overflow-auto p-6">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
