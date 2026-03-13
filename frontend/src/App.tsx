@@ -12,6 +12,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { CommandHeader } from './components/CommandHeader';
 import { CommandSidebar } from './components/CommandSidebar';
 import { StatsCards } from './components/StatsCards';
@@ -123,6 +124,7 @@ function App() {
   // View state
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Data state (deals stored in pagination.deals to avoid redundancy)
   const [funds, setFunds] = useState<Fund[]>([]);
@@ -362,17 +364,38 @@ function App() {
       />
 
       {/* Main Layout */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         {/* Sidebar */}
-        <CommandSidebar
-          filters={filters}
-          onFiltersChange={setFilters}
-          funds={funds}
-          currentView={currentView}
-          onViewChange={setCurrentView}
-          onOpenFeedback={() => setFeedbackOpen(true)}
-          onOpenAircraft={() => setAircraftTrackerOpen(true)}
-        />
+        <div
+          className={`transition-all duration-300 ease-in-out ${
+            sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-64'
+          }`}
+        >
+          <CommandSidebar
+            filters={filters}
+            onFiltersChange={setFilters}
+            funds={funds}
+            currentView={currentView}
+            onViewChange={setCurrentView}
+            onOpenFeedback={() => setFeedbackOpen(true)}
+            onOpenAircraft={() => setAircraftTrackerOpen(true)}
+          />
+        </div>
+
+        {/* Sidebar Toggle Button */}
+        <button
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          className={`absolute top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-5 h-12 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-r transition-all duration-300 ${
+            sidebarCollapsed ? 'left-0' : 'left-64'
+          }`}
+          title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+        >
+          {sidebarCollapsed ? (
+            <ChevronRight className="w-4 h-4 text-slate-400" />
+          ) : (
+            <ChevronLeft className="w-4 h-4 text-slate-400" />
+          )}
+        </button>
 
         {/* Main Content */}
         <main className="flex-1 flex flex-col overflow-hidden">
