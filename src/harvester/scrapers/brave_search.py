@@ -9,13 +9,21 @@ OPTIMIZED:
 - Parallel query execution (3x concurrency)
 - TTL caching for partner queries (1 hour)
 - Reduced scrape time: 42s → ~15s
+
+FIX (2026-01): Added full article fetching to get complete article
+content instead of just search snippets. This enables proper LLM
+extraction of lead investor and deal details.
 """
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any, Tuple
+
+import httpx
+from bs4 import BeautifulSoup
 
 from ..base_scraper import NormalizedArticle
 from ...common.brave_client import get_brave_client, get_query_cache
@@ -25,6 +33,24 @@ logger = logging.getLogger(__name__)
 
 # Memory safety limit (Brave API max is 100 per request)
 MAX_RESULTS_PER_QUERY = 100
+
+# Article fetching settings
+MAX_CONCURRENT_ARTICLES = 5
+ARTICLE_FETCH_TIMEOUT = 10.0
+ARTICLE_RATE_LIMIT_DELAY = 0.3
+
+# Article content selectors (ordered by specificity)
+ARTICLE_SELECTORS = [
+    # News site specific
+    '[data-testid="article-body"]',
+    '.article__body', '.article-content', '.article-text',
+    '.story-body', '.story-content', '.story__body',
+    '.post-content', '.post-body', '.post__content',
+    '.entry-content', '.entry-body',
+    # Generic content areas
+    '[role="article"]', 'article', '.content', '#content',
+    'main', '.main-content', '#main-content',
+]
 
 # Fund name variations for search queries (primary name + alternates)
 # Core 18 tracked funds
@@ -257,10 +283,69 @@ class BraveSearchScraper:
             logger.warning("BRAVE_SEARCH_KEY not configured - BraveSearchScraper will return empty results")
 
     async def __aenter__(self):
+        self._http_client = httpx.AsyncClient(
+            timeout=ARTICLE_FETCH_TIMEOUT,
+            follow_redirects=True,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        pass  # Client is shared, don't close it
+        if hasattr(self, '_http_client'):
+            await self._http_client.aclose()
+
+    async def fetch_full_article(self, url: str, max_retries: int = 2) -> Optional[str]:
+        """Fetch full article content from URL.
+
+        This is critical for proper deal extraction - search snippets are too
+        short for the LLM to accurately determine lead investor status.
+        """
+        for attempt in range(max_retries):
+            try:
+                resp = await self._http_client.get(url, headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; BudTracker/1.0)",
+                    "Accept": "text/html,application/xhtml+xml",
+                })
+                if resp.status_code != 200:
+                    logger.debug(f"HTTP {resp.status_code} for {url}")
+                    return None
+
+                soup = BeautifulSoup(resp.text, 'html.parser')
+
+                # Remove noise elements
+                for tag in soup.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside']):
+                    tag.decompose()
+
+                # Try article content selectors
+                for selector in ARTICLE_SELECTORS:
+                    element = soup.select_one(selector)
+                    if element:
+                        text = element.get_text(separator=' ', strip=True)
+                        # Clean up whitespace
+                        text = re.sub(r'\s+', ' ', text)
+                        if len(text) > 200:  # Minimum viable content
+                            logger.debug(f"Extracted {len(text)} chars from {url}")
+                            return text[:4000]  # Truncate to 4000 chars
+
+                # Fallback: get body text
+                body = soup.find('body')
+                if body:
+                    text = body.get_text(separator=' ', strip=True)
+                    text = re.sub(r'\s+', ' ', text)
+                    if len(text) > 200:
+                        return text[:4000]
+
+                return None
+
+            except httpx.TimeoutException:
+                logger.debug(f"Timeout fetching {url} (attempt {attempt + 1})")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1)
+            except Exception as e:
+                logger.debug(f"Error fetching {url}: {e}")
+                return None
+
+        return None
 
     def _build_fund_query(self, fund_slug: str, query_type: str = "lead") -> str:
         """Build optimized search query for a specific fund."""
@@ -553,11 +638,25 @@ class BraveSearchScraper:
         self,
         result: BraveSearchResult,
         fund_slug: str = "",
+        fetch_full_content: bool = True,
     ) -> NormalizedArticle:
-        """Convert search result to NormalizedArticle."""
-        text_parts = [result.description]
-        text_parts.extend(result.extra_snippets)
-        text = "\n\n".join(filter(None, text_parts))
+        """Convert search result to NormalizedArticle.
+
+        If fetch_full_content is True (default), fetches the full article HTML
+        and extracts text. This is critical for proper LLM extraction - snippets
+        are too short to determine lead investor status accurately.
+        """
+        # Try to fetch full article content
+        text = None
+        if fetch_full_content:
+            text = await self.fetch_full_article(result.url)
+
+        # Fallback to search snippets if fetch failed
+        if not text:
+            text_parts = [result.description]
+            text_parts.extend(result.extra_snippets)
+            text = "\n\n".join(filter(None, text_parts))
+            logger.debug(f"Using snippet for {result.url} ({len(text)} chars)")
 
         return NormalizedArticle(
             url=result.url,
