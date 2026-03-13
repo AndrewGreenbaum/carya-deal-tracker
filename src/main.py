@@ -1558,6 +1558,8 @@ class BraveSearchResponse(BaseModel):
     queries_executed: int
     results_found: int
     articles_generated: int
+    deals_extracted: Optional[int] = None  # Added - count of deals found by LLM
+    deals_saved: Optional[int] = None  # Added - count of new deals saved
 
 
 @app.post("/scrapers/brave-search", response_model=BraveSearchResponse)
@@ -2760,6 +2762,8 @@ async def run_all_sources(
     # Brave Search (if configured) - 2x coverage with participation + stealth
     if settings.brave_search_key:
         try:
+            from .scheduler.jobs import process_external_articles
+
             freshness = "pd" if days <= 1 else ("pw" if days <= 7 else "pm")
             async with BraveSearchScraper() as scraper:
                 articles = await scraper.scrape_all(
@@ -2767,15 +2771,22 @@ async def run_all_sources(
                     include_enterprise=True,
                     include_participation=True,
                     include_stealth=True,
+                    include_partner_names=True,  # Critical for disabled fund scrapers
                 )
 
-            # 18 lead + 18 participation + 1 enterprise + 1 stealth = 38 queries
+            # Process articles through extraction pipeline
+            # FIX: Was just counting articles, not actually extracting deals!
+            stats = await process_external_articles(articles, "brave_search")
+
             results["brave_search"] = BraveSearchResponse(
                 queries_executed=38,
                 results_found=len(articles),
                 articles_generated=len(articles),
+                deals_extracted=stats.get("deals_extracted", 0),
+                deals_saved=stats.get("deals_saved", 0),
             )
-        except Exception:
+        except Exception as e:
+            logger.error(f"Brave Search error: {e}")
             results["brave_search"] = None
     else:
         results["brave_search"] = None
