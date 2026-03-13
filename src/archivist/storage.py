@@ -352,31 +352,43 @@ async def get_or_create_company(
     website: Optional[str] = None,
     linkedin_url: Optional[str] = None,
 ) -> PortfolioCompany:
-    """Get existing company or create new one."""
-    stmt = select(PortfolioCompany).where(PortfolioCompany.name == name)
-    result = await session.execute(stmt)
-    company = result.scalar_one_or_none()
+    """
+    Get existing company or create new one.
 
-    if company:
-        # Update existing company with new info if we have it
-        if website and not company.website:
-            company.website = website
-        if linkedin_url and not company.linkedin_url:
-            company.linkedin_url = linkedin_url
-        if description and not company.description:
-            company.description = description
-        company.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        return company
+    Uses INSERT ... ON CONFLICT to prevent race conditions where concurrent
+    requests could create duplicate companies (e.g., 4 articles about
+    Knight FinTech creating 4 separate company records).
 
-    company = PortfolioCompany(
+    The unique constraint is on LOWER(name), so this handles case-insensitive
+    matching (e.g., "Knight FinTech" and "knight fintech" are the same).
+    """
+    from sqlalchemy import func
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Use INSERT ... ON CONFLICT for atomic upsert
+    # The unique index is on LOWER(name), so we use that for conflict detection
+    stmt = pg_insert(PortfolioCompany).values(
         name=name,
         description=description,
         sector=sector,
         website=website,
         linkedin_url=linkedin_url,
-    )
-    session.add(company)
-    await session.flush()
+        created_at=now,
+        updated_at=now,
+    ).on_conflict_do_update(
+        index_elements=[func.lower(PortfolioCompany.name)],
+        set_={
+            # Only update fields if new value is provided AND existing is null
+            'website': func.coalesce(PortfolioCompany.website, website),
+            'linkedin_url': func.coalesce(PortfolioCompany.linkedin_url, linkedin_url),
+            'description': func.coalesce(PortfolioCompany.description, description),
+            'updated_at': now,
+        }
+    ).returning(PortfolioCompany)
+
+    result = await session.execute(stmt)
+    company = result.scalar_one()
     return company
 
 
