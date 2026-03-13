@@ -879,6 +879,26 @@ export async function createTrackerItem(item: {
   return mapTrackerItem(data);
 }
 
+interface BulkCreateResponse {
+  created: TrackerItemApiResponse[];
+  count: number;
+}
+
+export async function bulkCreateTrackerItems(
+  companyNames: string[],
+  status: TrackerStatus = 'watching'
+): Promise<{ created: TrackerItem[]; count: number }> {
+  const data = await apiPost<BulkCreateResponse>('/tracker/bulk', {
+    company_names: companyNames,
+    status,
+  });
+  invalidateCache('GET:/tracker');
+  return {
+    created: data.created.map(mapTrackerItem),
+    count: data.count,
+  };
+}
+
 export async function updateTrackerItem(
   itemId: number,
   updates: Partial<{

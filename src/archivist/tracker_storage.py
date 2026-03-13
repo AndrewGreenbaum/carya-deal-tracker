@@ -438,6 +438,72 @@ async def create_tracker_item(
     return item
 
 
+async def bulk_create_tracker_items(
+    session: AsyncSession,
+    company_names: list[str],
+    status: str = "watching",
+) -> list[TrackerItem]:
+    """
+    Create multiple tracker items at once.
+
+    All items are added to the same status column (default: watching).
+    Skips empty names and duplicates within the batch.
+
+    Args:
+        session: Database session
+        company_names: List of company names to add
+        status: Initial Kanban column (default: watching)
+
+    Returns:
+        List of created TrackerItem objects
+    """
+    # Validate status
+    valid_statuses = await get_valid_statuses(session)
+    if status not in valid_statuses:
+        columns = await get_tracker_columns(session)
+        if columns:
+            status = columns[0].slug
+            logger.warning(f"Invalid status for bulk create, defaulting to '{status}'")
+        else:
+            status = "watching"
+
+    # Clean and dedupe names
+    seen = set()
+    cleaned_names = []
+    for name in company_names:
+        clean_name = name.strip()
+        if clean_name and clean_name.lower() not in seen:
+            seen.add(clean_name.lower())
+            cleaned_names.append(clean_name)
+
+    if not cleaned_names:
+        return []
+
+    # Get current max position in target column
+    stmt = (
+        select(func.max(TrackerItem.position))
+        .where(TrackerItem.status == status)
+    )
+    result = await session.execute(stmt)
+    max_pos = result.scalar_one_or_none() or -1
+
+    # Create all items
+    created_items = []
+    for i, name in enumerate(cleaned_names):
+        item = TrackerItem(
+            company_name=name,
+            status=status,
+            position=max_pos + 1 + i,
+        )
+        session.add(item)
+        created_items.append(item)
+
+    await session.flush()
+
+    logger.info(f"Bulk created {len(created_items)} tracker items in '{status}'")
+    return created_items
+
+
 async def update_tracker_item(
     session: AsyncSession,
     item_id: int,

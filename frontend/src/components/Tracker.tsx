@@ -22,17 +22,19 @@ import {
   type DragOverEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { Plus, RefreshCw } from 'lucide-react';
+import { Plus, RefreshCw, Upload } from 'lucide-react';
 
 import { TrackerColumn } from './TrackerColumn';
 import { TrackerCard } from './TrackerCard';
 import { TrackerModal } from './TrackerModal';
 import { TrackerColumnModal } from './TrackerColumnModal';
+import { TrackerBulkAddModal } from './TrackerBulkAddModal';
 import type { TrackerItem, TrackerStatus, TrackerStats, TrackerColumn as TrackerColumnType } from '../types';
 import {
   fetchTrackerItems,
   fetchTrackerColumns,
   createTrackerItem,
+  bulkCreateTrackerItems,
   updateTrackerItem,
   moveTrackerItem,
   deleteTrackerItem,
@@ -55,6 +57,8 @@ export function Tracker() {
   // Column modal state
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
   const [editingColumn, setEditingColumn] = useState<TrackerColumnType | null>(null);
+  // Bulk add modal state
+  const [isBulkAddModalOpen, setIsBulkAddModalOpen] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -330,6 +334,21 @@ export function Tracker() {
     }
   };
 
+  // Bulk add handler
+  const handleBulkAdd = async (companyNames: string[]) => {
+    const result = await bulkCreateTrackerItems(companyNames, 'watching');
+    // Optimistically add items to state without full reload
+    setItems((prev) => [...prev, ...result.created]);
+    // Update stats
+    if (stats) {
+      setStats({
+        ...stats,
+        total: stats.total + result.count,
+        watching: (stats.watching || 0) + result.count,
+      });
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3">
@@ -356,6 +375,13 @@ export function Tracker() {
             title="Refresh"
           >
             <RefreshCw className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setIsBulkAddModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded font-medium transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            Bulk Add
           </button>
           <button
             onClick={handleCreateNew}
@@ -446,6 +472,14 @@ export function Tracker() {
             setEditingColumn(null);
           }}
           onSave={handleSaveColumn}
+        />
+      )}
+
+      {/* Bulk Add Modal */}
+      {isBulkAddModalOpen && (
+        <TrackerBulkAddModal
+          onClose={() => setIsBulkAddModalOpen(false)}
+          onSubmit={handleBulkAdd}
         />
       )}
     </div>

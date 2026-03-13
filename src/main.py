@@ -49,6 +49,7 @@ from .archivist.tracker_storage import (
     get_tracker_items,
     get_tracker_item,
     create_tracker_item,
+    bulk_create_tracker_items,
     update_tracker_item,
     move_tracker_item,
     delete_tracker_item,
@@ -4141,6 +4142,18 @@ class CreateTrackerItemRequest(BaseModel):
     status: str = "watching"
 
 
+class BulkCreateTrackerItemsRequest(BaseModel):
+    """Request model for bulk creating tracker items."""
+    company_names: List[str]
+    status: str = "watching"
+
+
+class BulkCreateTrackerItemsResponse(BaseModel):
+    """Response model for bulk create operation."""
+    created: List[TrackerItemResponse]
+    count: int
+
+
 class UpdateTrackerItemRequest(BaseModel):
     """Request model for updating a tracker item."""
     company_name: Optional[str] = None
@@ -4458,6 +4471,33 @@ async def create_new_tracker_item(
             return _map_tracker_item(item)
     except Exception as e:
         logger.error("Failed to create tracker item: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/tracker/bulk", response_model=BulkCreateTrackerItemsResponse)
+async def bulk_create_tracker_items_endpoint(
+    request: BulkCreateTrackerItemsRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Bulk create tracker items from a list of company names.
+
+    All items are added to the specified status column (default: watching).
+    Duplicate names within the batch are automatically deduplicated.
+    """
+    try:
+        async with get_session() as session:
+            items = await bulk_create_tracker_items(
+                session,
+                company_names=request.company_names,
+                status=request.status,
+            )
+            return BulkCreateTrackerItemsResponse(
+                created=[_map_tracker_item(item) for item in items],
+                count=len(items),
+            )
+    except Exception as e:
+        logger.error("Failed to bulk create tracker items: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

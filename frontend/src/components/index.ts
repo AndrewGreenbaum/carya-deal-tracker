@@ -20,6 +20,7 @@ export { TrackerColumn } from './TrackerColumn';
 export { TrackerCard } from './TrackerCard';
 export { TrackerModal } from './TrackerModal';
 export { TrackerColumnModal } from './TrackerColumnModal';
+export { TrackerBulkAddModal } from './TrackerBulkAddModal';
 
 // Documentation
 export { ClaudeDocs } from './ClaudeDocs';
