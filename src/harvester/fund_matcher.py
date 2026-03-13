@@ -105,6 +105,15 @@ PARTNER_NAMES: dict[str, list[str]] = {
     ],
     "founders_fund": [
         "peter thiel",
+        "keith rabois",
+        "brian singerman",
+        "delian asparouhov",
+        "trae stephens",
+    ],
+    "khosla": [
+        "vinod khosla",
+        "samir kaul",
+        "sven strohband",
     ],
     "greylock": [
         "reid hoffman",

@@ -73,32 +73,56 @@ EXCLUSION_TERMS = {
 # NOT: "Name" term1 OR term2 (parses as ("Name" term1) OR term2)
 PARTNER_QUERIES = {
     # DISABLED SCRAPER - needs full partner coverage
+    # Benchmark partners: https://www.benchmark.com/people
     "benchmark": [
         '"Benchmark Capital" AND (leads OR "led by" OR investment) AND funding',
+        '"Benchmark" AND (leads OR "led the") AND (Series OR seed OR funding)',
         '"Bill Gurley" AND (leads OR investment OR funding) AND startup',
         '"Peter Fenton" AND (leads OR investment OR funding) AND startup',
+        '"Sarah Tavel" AND (leads OR investment OR funding) AND startup',
+        '"Eric Vishria" AND (leads OR investment OR funding) AND startup',
+        '"Chetan Puttagunta" AND (leads OR investment OR funding) AND startup',
+        '"Miles Grimshaw" AND (leads OR investment OR funding) AND startup',
     ],
     # DISABLED SCRAPER - needs full partner coverage
+    # First Round partners: https://firstround.com/team
     "first_round": [
         '"First Round Capital" AND (leads OR "led by") AND funding',
+        '"First Round" AND (leads OR "led the") AND (Series OR seed OR funding)',
         '"Josh Kopelman" AND (leads OR investment OR funding) AND startup',
         '"Todd Jackson" AND (leads OR investment OR funding) AND startup',
+        '"Phin Barnes" AND (leads OR investment OR funding) AND startup',
+        '"Bill Trenchard" AND (leads OR investment OR funding) AND startup',
+        '"Rob Hayes" AND (leads OR investment OR funding) AND startup',
+        '"Howard Morgan" AND (leads OR investment OR funding) AND startup',
     ],
     # DISABLED SCRAPER - needs full partner coverage
+    # Khosla partners: https://www.khoslaventures.com/team
     "khosla": [
         '"Khosla Ventures" AND (leads OR "led by") AND funding',
+        '"Khosla" AND (leads OR "led the") AND (Series OR seed OR funding)',
         '"Vinod Khosla" AND (leads OR investment OR funding) AND startup',
+        '"Samir Kaul" AND (leads OR investment OR funding) AND startup',
+        '"Sven Strohband" AND (leads OR investment OR funding) AND startup',
     ],
     # DISABLED SCRAPER - needs full partner coverage
+    # Thrive partners: https://www.thrivecap.com (limited public info)
     "thrive": [
         '"Thrive Capital" AND (leads OR "led by") AND funding',
+        '"Thrive Capital" AND (leads OR "led the") AND (Series OR seed)',
         '"Josh Kushner" AND (leads OR investment OR funding) AND startup',
         '"Kareem Zaki" AND (leads OR investment OR funding) AND startup',
+        '"Josh Miller" AND "Thrive" AND (leads OR investment OR funding)',
     ],
     # WEAK SCRAPER - needs partner backup
+    # Founders Fund partners: https://foundersfund.com/team
     "founders_fund": [
         '"Founders Fund" AND (leads OR "led by") AND funding',
+        '"Founders Fund" AND (leads OR "led the") AND (Series OR seed)',
         '"Keith Rabois" AND (leads OR investment OR funding) AND startup',
+        '"Brian Singerman" AND (leads OR investment OR funding) AND startup',
+        '"Delian Asparouhov" AND (leads OR investment OR funding) AND startup',
+        '"Trae Stephens" AND (leads OR investment OR funding) AND startup',
     ],
 }
 
