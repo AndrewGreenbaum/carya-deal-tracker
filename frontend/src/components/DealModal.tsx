@@ -197,6 +197,26 @@ export const DealModal = memo(function DealModal({ deal, onClose, onDealUpdated 
             >
               <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
+            {/* Flag Button - tiny icon */}
+            <button
+              onClick={handleFlag}
+              disabled={flagStatus === 'loading' || flagStatus === 'success'}
+              className={`p-1.5 rounded transition-colors ${
+                flagStatus === 'success'
+                  ? 'text-red-400 cursor-default'
+                  : flagStatus === 'loading'
+                  ? 'text-slate-600 cursor-wait'
+                  : 'text-slate-500 hover:bg-slate-800 hover:text-red-400'
+              }`}
+              aria-label="Flag deal"
+              title={flagStatus === 'success' ? 'Flagged!' : 'Flag for review'}
+            >
+              {flagStatus === 'loading' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Flag className="w-3.5 h-3.5" aria-hidden="true" />
+              )}
+            </button>
             <button
               ref={closeButtonRef}
               onClick={onClose}
@@ -407,28 +427,6 @@ export const DealModal = memo(function DealModal({ deal, onClose, onDealUpdated 
         <div className="px-6 py-4 border-t border-slate-800 flex justify-end gap-3">
           <button onClick={onClose} className="btn-secondary">
             Close
-          </button>
-          {/* Flag Button */}
-          <button
-            onClick={handleFlag}
-            disabled={flagStatus === 'loading' || flagStatus === 'success'}
-            className={`flex items-center gap-2 px-3 py-2 rounded font-medium transition-colors ${
-              flagStatus === 'success'
-                ? 'bg-red-600/20 text-red-400 border border-red-600/50 cursor-default'
-                : flagStatus === 'error'
-                ? 'bg-red-600 hover:bg-red-500 text-white'
-                : flagStatus === 'loading'
-                ? 'bg-slate-700 text-slate-400 cursor-wait'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-red-600/50 hover:text-red-400'
-            }`}
-            title={flagStatus === 'success' ? 'Flagged for review' : 'Report an error with this company'}
-          >
-            {flagStatus === 'loading' ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Flag className={`w-4 h-4 ${flagStatus === 'success' ? 'text-red-400' : ''}`} />
-            )}
-            {flagStatus === 'success' ? 'Flagged!' : flagStatus === 'error' ? 'Retry' : 'Flag'}
           </button>
           {/* Track Button */}
           <button
