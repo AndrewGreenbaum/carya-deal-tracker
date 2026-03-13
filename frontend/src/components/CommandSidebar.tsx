@@ -207,7 +207,7 @@ export function CommandSidebar({
       </div>
 
       {/* Tracked Funds List */}
-      <div className="p-4 flex-1 min-h-0 overflow-y-auto">
+      <div className="p-4 flex-1 min-h-0 overflow-y-scroll">
         <div className="flex items-center justify-between mb-3">
           <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">
             Tracked Funds [{displayFunds.length}]
