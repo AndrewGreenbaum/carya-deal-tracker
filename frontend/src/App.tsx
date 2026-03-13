@@ -382,18 +382,18 @@ function App() {
           />
         </div>
 
-        {/* Sidebar Toggle Button */}
+        {/* Sidebar Toggle Button - subtle, appears on hover */}
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className={`absolute top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-5 h-12 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-r transition-all duration-300 ${
+          className={`absolute top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-4 h-8 bg-slate-900/80 hover:bg-slate-700 border border-slate-800 hover:border-slate-600 rounded-r text-slate-600 hover:text-slate-300 opacity-40 hover:opacity-100 transition-all duration-300 ${
             sidebarCollapsed ? 'left-0' : 'left-64'
           }`}
           title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
         >
           {sidebarCollapsed ? (
-            <ChevronRight className="w-4 h-4 text-slate-400" />
+            <ChevronRight className="w-3 h-3" />
           ) : (
-            <ChevronLeft className="w-4 h-4 text-slate-400" />
+            <ChevronLeft className="w-3 h-3" />
           )}
         </button>
 
