@@ -1091,6 +1091,7 @@ async def extract_funding_deal(
         result = await extract_deal(
             article_text=request.text,
             source_url=request.source_url or "",
+            source_name=source_name,
             fund_context=fund_context
         )
 

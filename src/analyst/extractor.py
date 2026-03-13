@@ -733,6 +733,7 @@ Pay special attention to whether our tracked funds LED vs merely PARTICIPATED.""
 async def extract_deal(
     article_text: str,
     source_url: str = "",
+    source_name: str = "unknown",
     fund_context: Optional[FundConfig] = None,
     skip_funding_check: bool = False,
     skip_dedup_check: bool = False
@@ -748,6 +749,7 @@ async def extract_deal(
     Args:
         article_text: The article content to analyze
         source_url: URL of the source article
+        source_name: Source identifier for token logging (e.g., "brave_search", "a16z")
         fund_context: Optional fund-specific extraction context
         skip_funding_check: If True, skip the funding keyword check
         skip_dedup_check: If True, skip the duplicate content check
@@ -854,12 +856,13 @@ async def extract_deal(
                     await log_token_usage(
                         input_tokens=usage.input_tokens,
                         output_tokens=usage.output_tokens,
+                        source_name=source_name,
                         article_url=source_url,
                         model=settings.llm_model,
                         cache_read_tokens=cache_read,
                         cache_write_tokens=cache_write
                     )
-                    logger.info(f"[TOKEN DEBUG] log_token_usage completed successfully")
+                    logger.info(f"[TOKEN DEBUG] log_token_usage completed successfully for source={source_name}")
                 except Exception as e:
                     logger.error(f"[TOKEN DEBUG] log_token_usage raised: {e}", exc_info=True)
             else:
@@ -1007,6 +1010,7 @@ async def extract_deal_batch(
             return await extract_deal(
                 article_text=article["text"],
                 source_url=article.get("source_url", ""),
+                source_name=article.get("fund_slug", "unknown"),
                 fund_context=fund_context
             )
 
@@ -1045,6 +1049,7 @@ async def extract_deal_batch(
 async def extract_article(
     article_text: str,
     source_url: str = "",
+    source_name: str = "unknown",
     title: str = "",
     fund_context: Optional[FundConfig] = None
 ) -> Optional[ArticleAnalysis]:
@@ -1054,6 +1059,7 @@ async def extract_article(
     Args:
         article_text: The article content to analyze
         source_url: URL of the source article
+        source_name: Source identifier for token logging (e.g., "brave_search", "a16z")
         title: Article title
         fund_context: Optional fund-specific extraction context
 
@@ -1087,6 +1093,7 @@ async def extract_article(
                 await log_token_usage(
                     input_tokens=usage.input_tokens,
                     output_tokens=usage.output_tokens,
+                    source_name=source_name,
                     article_url=source_url,
                     model=settings.llm_model,
                     cache_read_tokens=cache_read,

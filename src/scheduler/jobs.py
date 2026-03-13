@@ -736,6 +736,7 @@ async def process_external_articles(
                 extraction = await extract_deal(
                     article_text=article.text,
                     source_url=article.url,
+                    source_name=source_name,
                     fund_context=fund_config,
                 )
 

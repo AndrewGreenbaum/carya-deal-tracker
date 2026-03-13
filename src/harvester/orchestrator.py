@@ -214,6 +214,7 @@ async def process_article(
         extraction = await extract_deal(
             article_text=article.text,
             source_url=article.url,
+            source_name=fund_config.slug,
             fund_context=fund_config,
         )
 
