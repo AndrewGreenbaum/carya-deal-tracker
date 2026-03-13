@@ -87,175 +87,177 @@ export function CommandSidebar({
 
   return (
     <aside className="w-64 h-full bg-[#0d0d10] border-r border-slate-800 flex flex-col shrink-0">
-      {/* Navigation */}
-      <nav className="p-4 border-b border-slate-800">
-        <div className="space-y-1">
-          <NavItem
-            icon={<Home className="w-4 h-4" />}
-            label="Dashboard"
-            active={currentView === 'dashboard'}
-            onClick={() => onViewChange('dashboard')}
-          />
-          <NavItem
-            icon={<Kanban className="w-4 h-4" />}
-            label="Tracker"
-            active={currentView === 'tracker'}
-            onClick={() => onViewChange('tracker')}
-          />
-        </div>
-      </nav>
+      {/* Scrollable content area - entire sidebar scrolls */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {/* Navigation */}
+        <nav className="p-4 border-b border-slate-800">
+          <div className="space-y-1">
+            <NavItem
+              icon={<Home className="w-4 h-4" />}
+              label="Dashboard"
+              active={currentView === 'dashboard'}
+              onClick={() => onViewChange('dashboard')}
+            />
+            <NavItem
+              icon={<Kanban className="w-4 h-4" />}
+              label="Tracker"
+              active={currentView === 'tracker'}
+              onClick={() => onViewChange('tracker')}
+            />
+          </div>
+        </nav>
 
-      {/* Search */}
-      <div className="p-4 border-b border-slate-800">
-        <div className="text-[10px] uppercase text-slate-500 font-bold mb-2 tracking-widest">
-          Search
-        </div>
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <input
-            type="text"
-            placeholder="Search companies..."
-            value={filters.searchQuery || ''}
-            onChange={(e) => onFiltersChange({ ...filters, searchQuery: e.target.value })}
-            className="w-full bg-slate-900 border border-slate-800 rounded pl-8 pr-8 py-1.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/50"
-          />
-          {filters.searchQuery && (
-            <button
-              onClick={() => onFiltersChange({ ...filters, searchQuery: '' })}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="p-4 border-b border-slate-800">
-        <div className="text-[10px] uppercase text-slate-500 font-bold mb-3 tracking-widest">
-          Filters
-        </div>
-        <div className="space-y-2">
-          <FilterCheckbox
-            label="All AI Deals"
-            checked={filters.aiDealsOnly}
-            onChange={() => toggleFilter('aiDealsOnly')}
-          />
-          <FilterCheckbox
-            label="Enterprise AI Only"
-            checked={filters.enterpriseAiOnly}
-            onChange={() => toggleFilter('enterpriseAiOnly')}
-          />
-          <FilterCheckbox
-            label="Lead Investors Only"
-            checked={filters.leadOnly}
-            onChange={() => toggleFilter('leadOnly')}
-          />
-          <FilterCheckbox
-            label="Show Rejected"
-            checked={filters.showRejected}
-            onChange={() => toggleFilter('showRejected')}
-          />
-
-          {/* Category Dropdown */}
-          <div className="mt-3">
-            <button
-              onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
-              className="w-full flex items-center justify-between text-sm text-slate-400 hover:text-white py-1.5 px-2 bg-slate-900 rounded border border-slate-800"
-            >
-              <span>
-                {filters.selectedCategory
-                  ? CATEGORY_LABELS[filters.selectedCategory]
-                  : 'All Categories'}
-              </span>
-              {showCategoryDropdown ? (
-                <ChevronUp className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </button>
-
-            {showCategoryDropdown && (
-              <div className="mt-1 bg-slate-900 border border-slate-800 rounded overflow-hidden">
-                <button
-                  onClick={() => setCategory(undefined)}
-                  className={`w-full text-left text-xs px-2 py-1.5 hover:bg-slate-800 ${
-                    !filters.selectedCategory ? 'text-emerald-400' : 'text-slate-400'
-                  }`}
-                >
-                  All Categories
-                </button>
-                {(Object.keys(CATEGORY_LABELS) as EnterpriseCategory[])
-                  .filter((c) => c !== 'not_ai')
-                  .map((category) => (
-                    <button
-                      key={category}
-                      onClick={() => setCategory(category)}
-                      className={`w-full text-left text-xs px-2 py-1.5 hover:bg-slate-800 ${
-                        filters.selectedCategory === category
-                          ? 'text-emerald-400'
-                          : 'text-slate-400'
-                      }`}
-                    >
-                      {CATEGORY_LABELS[category]}
-                    </button>
-                  ))}
-              </div>
+        {/* Search */}
+        <div className="p-4 border-b border-slate-800">
+          <div className="text-[10px] uppercase text-slate-500 font-bold mb-2 tracking-widest">
+            Search
+          </div>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+            <input
+              type="text"
+              placeholder="Search companies..."
+              value={filters.searchQuery || ''}
+              onChange={(e) => onFiltersChange({ ...filters, searchQuery: e.target.value })}
+              className="w-full bg-slate-900 border border-slate-800 rounded pl-8 pr-8 py-1.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/50"
+            />
+            {filters.searchQuery && (
+              <button
+                onClick={() => onFiltersChange({ ...filters, searchQuery: '' })}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
             )}
           </div>
         </div>
-      </div>
 
-      {/* Tracked Funds List */}
-      <div className="p-4 flex-1 min-h-0 overflow-y-scroll">
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">
-            Tracked Funds [{displayFunds.length}]
+        {/* Filters */}
+        <div className="p-4 border-b border-slate-800">
+          <div className="text-[10px] uppercase text-slate-500 font-bold mb-3 tracking-widest">
+            Filters
           </div>
-          {filters.selectedFund && (
-            <button
-              onClick={() => setFund(undefined)}
-              className="text-[10px] text-emerald-400 hover:underline"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-        <ul className="space-y-1 text-xs text-slate-400" role="listbox" aria-label="Tracked funds filter">
-          {displayFunds.map((fund) => (
-            <li key={fund.slug} role="presentation">
+          <div className="space-y-2">
+            <FilterCheckbox
+              label="All AI Deals"
+              checked={filters.aiDealsOnly}
+              onChange={() => toggleFilter('aiDealsOnly')}
+            />
+            <FilterCheckbox
+              label="Enterprise AI Only"
+              checked={filters.enterpriseAiOnly}
+              onChange={() => toggleFilter('enterpriseAiOnly')}
+            />
+            <FilterCheckbox
+              label="Lead Investors Only"
+              checked={filters.leadOnly}
+              onChange={() => toggleFilter('leadOnly')}
+            />
+            <FilterCheckbox
+              label="Show Rejected"
+              checked={filters.showRejected}
+              onChange={() => toggleFilter('showRejected')}
+            />
+
+            {/* Category Dropdown */}
+            <div className="mt-3">
               <button
-                type="button"
-                role="option"
-                aria-selected={fund.slug === filters.selectedFund}
-                onClick={() => setFund(fund.slug === filters.selectedFund ? undefined : fund.slug)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setFund(fund.slug === filters.selectedFund ? undefined : fund.slug);
-                  }
-                }}
-                className={`w-full flex items-center justify-between px-2 py-1.5 rounded text-left transition-colors cursor-pointer ${
-                  fund.slug === filters.selectedFund
-                    ? 'bg-emerald-500/10 text-emerald-400 border-l-2 border-emerald-500'
-                    : 'hover:bg-slate-800 hover:text-white'
-                } ${!fund.isActive ? 'opacity-50' : ''}`}
+                onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
+                className="w-full flex items-center justify-between text-sm text-slate-400 hover:text-white py-1.5 px-2 bg-slate-900 rounded border border-slate-800"
               >
-                <span>{fund.name}</span>
-                {fund.lastScraped && (
-                  <span className="text-[9px] text-slate-600">
-                    {formatTimeAgo(fund.lastScraped)}
-                  </span>
+                <span>
+                  {filters.selectedCategory
+                    ? CATEGORY_LABELS[filters.selectedCategory]
+                    : 'All Categories'}
+                </span>
+                {showCategoryDropdown ? (
+                  <ChevronUp className="w-4 h-4" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
                 )}
               </button>
-            </li>
-          ))}
-        </ul>
 
+              {showCategoryDropdown && (
+                <div className="mt-1 bg-slate-900 border border-slate-800 rounded overflow-hidden">
+                  <button
+                    onClick={() => setCategory(undefined)}
+                    className={`w-full text-left text-xs px-2 py-1.5 hover:bg-slate-800 ${
+                      !filters.selectedCategory ? 'text-emerald-400' : 'text-slate-400'
+                    }`}
+                  >
+                    All Categories
+                  </button>
+                  {(Object.keys(CATEGORY_LABELS) as EnterpriseCategory[])
+                    .filter((c) => c !== 'not_ai')
+                    .map((category) => (
+                      <button
+                        key={category}
+                        onClick={() => setCategory(category)}
+                        className={`w-full text-left text-xs px-2 py-1.5 hover:bg-slate-800 ${
+                          filters.selectedCategory === category
+                            ? 'text-emerald-400'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        {CATEGORY_LABELS[category]}
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Tracked Funds List */}
+        <div className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">
+              Tracked Funds [{displayFunds.length}]
+            </div>
+            {filters.selectedFund && (
+              <button
+                onClick={() => setFund(undefined)}
+                className="text-[10px] text-emerald-400 hover:underline"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <ul className="space-y-1 text-xs text-slate-400" role="listbox" aria-label="Tracked funds filter">
+            {displayFunds.map((fund) => (
+              <li key={fund.slug} role="presentation">
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={fund.slug === filters.selectedFund}
+                  onClick={() => setFund(fund.slug === filters.selectedFund ? undefined : fund.slug)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setFund(fund.slug === filters.selectedFund ? undefined : fund.slug);
+                    }
+                  }}
+                  className={`w-full flex items-center justify-between px-2 py-1.5 rounded text-left transition-colors cursor-pointer ${
+                    fund.slug === filters.selectedFund
+                      ? 'bg-emerald-500/10 text-emerald-400 border-l-2 border-emerald-500'
+                      : 'hover:bg-slate-800 hover:text-white'
+                  } ${!fund.isActive ? 'opacity-50' : ''}`}
+                >
+                  <span>{fund.name}</span>
+                  {fund.lastScraped && (
+                    <span className="text-[9px] text-slate-600">
+                      {formatTimeAgo(fund.lastScraped)}
+                    </span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
 
-      {/* Footer Actions */}
-      <div className="p-4 border-t border-slate-800 flex items-center justify-center gap-2">
+      {/* Footer Actions - fixed at bottom */}
+      <div className="p-4 border-t border-slate-800 flex items-center justify-center gap-2 shrink-0">
         <button
           onClick={onOpenAircraft}
           className="p-2 hover:bg-emerald-500/10 text-slate-400 hover:text-emerald-400 rounded transition-colors group"
