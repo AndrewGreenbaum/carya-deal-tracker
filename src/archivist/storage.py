@@ -896,6 +896,96 @@ async def get_deal_with_details(session: AsyncSession, deal_id: int) -> Optional
     return result.scalar_one_or_none()
 
 
+async def update_deal(
+    session: AsyncSession,
+    deal_id: int,
+    company_name: Optional[str] = None,
+    website: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
+    round_type: Optional[str] = None,
+    amount: Optional[str] = None,
+    amount_usd: Optional[int] = None,
+    announced_date: Optional[date] = None,
+    is_lead_confirmed: Optional[bool] = None,
+    lead_partner_name: Optional[str] = None,
+    enterprise_category: Optional[str] = None,
+    is_enterprise_ai: Optional[bool] = None,
+    founders_json: Optional[str] = None,
+) -> Optional[Deal]:
+    """
+    Update a deal and its associated company.
+
+    Updates both Deal and PortfolioCompany records.
+    Only updates fields that are explicitly provided (non-None).
+
+    Args:
+        session: Database session
+        deal_id: The deal to update
+        company_name: New company name
+        website: Company website URL
+        linkedin_url: Company LinkedIn URL
+        round_type: Round type (seed, series_a, etc.)
+        amount: Amount string (e.g., "$50M")
+        amount_usd: Normalized amount in USD
+        announced_date: Deal announcement date
+        is_lead_confirmed: Whether tracked fund led
+        lead_partner_name: Partner who led the deal
+        enterprise_category: AI category classification
+        is_enterprise_ai: Whether B2B Enterprise AI
+        founders_json: JSON string of founders
+
+    Returns:
+        Updated Deal or None if not found
+    """
+    # Fetch deal with company
+    stmt = select(Deal).where(Deal.id == deal_id)
+    result = await session.execute(stmt)
+    deal = result.scalar_one_or_none()
+
+    if not deal:
+        return None
+
+    # Fetch associated company
+    company_stmt = select(PortfolioCompany).where(PortfolioCompany.id == deal.company_id)
+    company_result = await session.execute(company_stmt)
+    company = company_result.scalar_one_or_none()
+
+    # Update company fields
+    if company:
+        if company_name is not None:
+            company.name = company_name
+        if website is not None:
+            company.website = website
+        if linkedin_url is not None:
+            company.linkedin_url = linkedin_url
+        company.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Update deal fields
+    if round_type is not None:
+        deal.round_type = round_type
+    if amount is not None:
+        deal.amount = amount
+    if amount_usd is not None:
+        deal.amount_usd = amount_usd
+    if announced_date is not None:
+        deal.announced_date = announced_date
+    if is_lead_confirmed is not None:
+        deal.is_lead_confirmed = is_lead_confirmed
+    if lead_partner_name is not None:
+        deal.lead_partner_name = lead_partner_name
+    if enterprise_category is not None:
+        deal.enterprise_category = enterprise_category
+    if is_enterprise_ai is not None:
+        deal.is_enterprise_ai = is_enterprise_ai
+    if founders_json is not None:
+        deal.founders_json = founders_json
+
+    deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    await session.flush()
+    return deal
+
+
 async def seed_funds(session: AsyncSession) -> None:
     """Seed the database with all 18 tracked funds."""
     for slug, config in FUND_REGISTRY.items():

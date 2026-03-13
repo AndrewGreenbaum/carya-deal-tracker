@@ -359,6 +359,46 @@ export function getExportUrl(filters: Omit<DealFilters, 'limit' | 'offset'> = {}
   return `${API_BASE}/deals/export${queryString ? '?' + queryString : ''}`;
 }
 
+export interface UpdateDealRequest {
+  companyName?: string;
+  website?: string;
+  linkedinUrl?: string;
+  roundType?: string;
+  amount?: string;
+  announcedDate?: string; // ISO format: YYYY-MM-DD
+  isLeadConfirmed?: boolean;
+  leadPartnerName?: string;
+  enterpriseCategory?: string;
+  isEnterpriseAi?: boolean;
+  founders?: Array<{ name: string; title?: string; linkedinUrl?: string }>;
+}
+
+export async function updateDeal(dealId: string, updates: UpdateDealRequest): Promise<Deal> {
+  // Convert camelCase to snake_case for API
+  const body: Record<string, unknown> = {};
+  if (updates.companyName !== undefined) body.company_name = updates.companyName;
+  if (updates.website !== undefined) body.website = updates.website;
+  if (updates.linkedinUrl !== undefined) body.linkedin_url = updates.linkedinUrl;
+  if (updates.roundType !== undefined) body.round_type = updates.roundType;
+  if (updates.amount !== undefined) body.amount = updates.amount;
+  if (updates.announcedDate !== undefined) body.announced_date = updates.announcedDate;
+  if (updates.isLeadConfirmed !== undefined) body.is_lead_confirmed = updates.isLeadConfirmed;
+  if (updates.leadPartnerName !== undefined) body.lead_partner_name = updates.leadPartnerName;
+  if (updates.enterpriseCategory !== undefined) body.enterprise_category = updates.enterpriseCategory;
+  if (updates.isEnterpriseAi !== undefined) body.is_enterprise_ai = updates.isEnterpriseAi;
+  if (updates.founders !== undefined) {
+    body.founders = updates.founders.map((f) => ({
+      name: f.name,
+      title: f.title,
+      linkedin_url: f.linkedinUrl,
+    }));
+  }
+
+  const data = await apiPut<DealApiResponse>(`/deals/${dealId}`, body);
+  invalidateCache('GET:/deals');
+  return mapDeal(data);
+}
+
 // ============================================
 // Stealth Detection Endpoints
 // ============================================

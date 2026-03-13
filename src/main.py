@@ -349,6 +349,21 @@ class PaginatedDealsResponse(BaseModel):
     has_more: bool
 
 
+class UpdateDealRequest(BaseModel):
+    """Request body for updating a deal."""
+    company_name: Optional[str] = None
+    website: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    round_type: Optional[str] = None
+    amount: Optional[str] = None
+    announced_date: Optional[str] = None  # ISO format: YYYY-MM-DD
+    is_lead_confirmed: Optional[bool] = None
+    lead_partner_name: Optional[str] = None
+    enterprise_category: Optional[str] = None
+    is_enterprise_ai: Optional[bool] = None
+    founders: Optional[List[dict]] = None  # List of {name, title, linkedin_url}
+
+
 # ----- Endpoints -----
 
 @app.get("/health", response_model=HealthResponse)
@@ -837,6 +852,139 @@ async def export_deals_csv(
 
     except Exception as e:
         logger.error("Request failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.put("/deals/{deal_id}", response_model=DealResponse)
+async def update_deal_endpoint(
+    deal_id: int,
+    request: UpdateDealRequest,
+):
+    """
+    Update a deal and its associated company.
+
+    All fields are optional - only provided fields will be updated.
+    """
+    from .archivist.storage import update_deal
+    from datetime import date as date_type
+
+    try:
+        async with get_session() as session:
+            # Parse announced_date if provided
+            announced_date = None
+            if request.announced_date:
+                try:
+                    announced_date = date_type.fromisoformat(request.announced_date)
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid date format: {request.announced_date}. Use YYYY-MM-DD."
+                    )
+
+            # Convert founders list to JSON string if provided
+            founders_json = None
+            if request.founders is not None:
+                founders_json = json.dumps(request.founders)
+
+            # Update the deal
+            deal = await update_deal(
+                session=session,
+                deal_id=deal_id,
+                company_name=request.company_name,
+                website=request.website,
+                linkedin_url=request.linkedin_url,
+                round_type=request.round_type,
+                amount=request.amount,
+                announced_date=announced_date,
+                is_lead_confirmed=request.is_lead_confirmed,
+                lead_partner_name=request.lead_partner_name,
+                enterprise_category=request.enterprise_category,
+                is_enterprise_ai=request.is_enterprise_ai,
+                founders_json=founders_json,
+            )
+
+            if not deal:
+                raise HTTPException(status_code=404, detail=f"Deal {deal_id} not found")
+
+            await session.commit()
+
+            # Reload with relationships
+            stmt = (
+                select(Deal)
+                .where(Deal.id == deal_id)
+                .options(
+                    selectinload(Deal.company),
+                    selectinload(Deal.investors),
+                    selectinload(Deal.articles),
+                )
+            )
+            result = await session.execute(stmt)
+            deal = result.scalar_one()
+
+            # Build response
+            investor_roles = []
+            lead_investor_name = None
+            for inv in deal.investors:
+                if inv.is_lead:
+                    investor_roles.append("lead")
+                    if inv.is_tracked_fund:
+                        lead_investor_name = inv.investor_name
+                else:
+                    investor_roles.append("non_lead")
+
+            if not investor_roles:
+                investor_roles = ["stealth"]
+
+            # Parse founders
+            founders = None
+            if deal.founders_json:
+                try:
+                    founders_data = json.loads(deal.founders_json)
+                    founders = [
+                        FounderResponse(
+                            name=f.get("name", "Unknown"),
+                            title=f.get("title"),
+                            linkedin_url=f.get("linkedin_url") if is_valid_url(f.get("linkedin_url")) else None,
+                        )
+                        for f in founders_data
+                    ]
+                except json.JSONDecodeError:
+                    founders = None
+
+            # Get source info
+            source_url = None
+            source_name = None
+            if deal.articles:
+                first_article = deal.articles[0]
+                source_url = first_article.url
+                source_name = first_article.source_fund_slug or first_article.title
+
+            return DealResponse(
+                id=str(deal.id),
+                startup_name=deal.company.name if deal.company else "Unknown",
+                investor_roles=investor_roles,
+                investment_stage=deal.round_type,
+                amount_invested=deal.amount or "Undisclosed",
+                date=deal.announced_date.isoformat() if deal.announced_date else "",
+                next_steps=None,
+                enterprise_category=deal.enterprise_category,
+                is_enterprise_ai=deal.is_enterprise_ai,
+                is_ai_deal=getattr(deal, 'is_ai_deal', deal.is_enterprise_ai),
+                lead_investor=lead_investor_name,
+                lead_partner=deal.lead_partner_name,
+                verification_snippet=deal.verification_snippet,
+                lead_evidence_weak=getattr(deal, 'lead_evidence_weak', False),
+                company_website=deal.company.website if deal.company and is_valid_url(deal.company.website) else None,
+                company_linkedin=deal.company.linkedin_url if deal.company and is_valid_url(deal.company.linkedin_url) else None,
+                source_url=source_url,
+                source_name=source_name,
+                founders=founders,
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to update deal %s: %s", deal_id, e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
