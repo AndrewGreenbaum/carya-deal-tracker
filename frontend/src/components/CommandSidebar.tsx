@@ -86,7 +86,7 @@ export function CommandSidebar({
   });
 
   return (
-    <aside className="w-64 bg-[#0d0d10] border-r border-slate-800 flex flex-col shrink-0">
+    <aside className="w-64 h-full bg-[#0d0d10] border-r border-slate-800 flex flex-col shrink-0">
       {/* Navigation */}
       <nav className="p-4 border-b border-slate-800">
         <div className="space-y-1">
@@ -207,7 +207,7 @@ export function CommandSidebar({
       </div>
 
       {/* Tracked Funds List */}
-      <div className="p-4 flex-1 overflow-y-auto scrollbar-hide">
+      <div className="p-4 flex-1 min-h-0 overflow-y-auto">
         <div className="flex items-center justify-between mb-3">
           <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">
             Tracked Funds [{displayFunds.length}]

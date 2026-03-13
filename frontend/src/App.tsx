@@ -367,11 +367,11 @@ function App() {
       <div className="flex-1 flex overflow-hidden relative">
         {/* Sidebar */}
         <div
-          className={`transition-all duration-300 ease-in-out shrink-0 ${
-            sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-64 overflow-visible'
+          className={`h-full transition-all duration-300 ease-in-out shrink-0 ${
+            sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-64'
           }`}
         >
-          <div className="w-64 h-full">
+          <div className="w-64 h-full overflow-hidden">
             <CommandSidebar
               filters={filters}
               onFiltersChange={setFilters}
