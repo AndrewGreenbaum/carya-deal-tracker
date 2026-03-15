@@ -2776,7 +2776,8 @@ async def run_all_sources(
 
             # Process articles through extraction pipeline
             # FIX: Was just counting articles, not actually extracting deals!
-            stats = await process_external_articles(articles, "brave_search")
+            # Skip title filter - Brave queries are already targeted at funding news
+            stats = await process_external_articles(articles, "brave_search", skip_title_filter=True)
 
             results["brave_search"] = BraveSearchResponse(
                 queries_executed=38,

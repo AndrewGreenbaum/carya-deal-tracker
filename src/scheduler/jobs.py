@@ -917,7 +917,8 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
                     include_partner_names=True,  # Critical for Benchmark, Khosla, First Round
                 )
 
-            stats = await process_external_articles(articles, "brave_search", scan_job_id)
+            # Skip title filter - Brave queries are already targeted at funding news
+            stats = await process_external_articles(articles, "brave_search", scan_job_id, skip_title_filter=True)
             results["brave_search"] = stats
             total_deals_saved += stats["deals_saved"]
 
