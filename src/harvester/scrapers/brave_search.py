@@ -176,6 +176,39 @@ PARTNER_QUERIES = {
         '"Delian Asparouhov" AND (startup OR investment OR funding OR venture)',
         '"Trae Stephens" AND (startup OR investment OR funding OR venture)',
     ],
+    # LOW COVERAGE - needs partner queries (only 1 deal)
+    # GV partners: https://gv.com/team
+    "gv": [
+        # Fund-level queries - be very specific to avoid NYSE:GV noise
+        '"Google Ventures" AND (funding OR raises OR raised OR investment)',
+        '"Google Ventures" AND "Series A" AND startup',
+        '"Google Ventures" AND "Series B" AND startup',
+        '"Google Ventures" AND (leads OR led) AND funding',
+        'GV AND "venture capital" AND (funding OR investment OR startup)',
+        # Partner queries
+        '"David Krane" AND GV AND (investment OR funding OR startup)',
+        '"Tyson Clark" AND GV AND (investment OR funding OR startup)',
+        '"Tom Hulme" AND GV AND (investment OR funding)',
+        '"Blake Byers" AND GV AND (investment OR funding OR startup)',
+        '"Karim Faris" AND GV AND (investment OR startup)',
+    ],
+    # LOW COVERAGE - needs partner queries (only 1 deal)
+    # Greylock partners: https://greylock.com/team
+    "greylock": [
+        # Fund-level queries
+        '"Greylock Partners" AND (funding OR raises OR raised OR investment)',
+        '"Greylock" AND "Series A" AND (startup OR funding)',
+        '"Greylock" AND "Series B" AND (startup OR funding)',
+        '"Greylock" AND (leads OR led) AND funding',
+        '"Greylock" AND (backs OR backed OR invests) AND startup',
+        # Partner queries
+        '"Reid Hoffman" AND (startup OR investment OR funding OR venture)',
+        '"Asheem Chandna" AND (startup OR investment OR funding OR Greylock)',
+        '"Sarah Guo" AND (startup OR investment OR funding OR venture)',
+        '"Seth Rosenberg" AND (startup OR investment OR funding OR Greylock)',
+        '"Saam Motamedi" AND (startup OR investment OR funding OR Greylock)',
+        '"Mike Duboe" AND (startup OR investment OR funding OR venture)',
+    ],
 }
 
 # Enterprise AI keywords
