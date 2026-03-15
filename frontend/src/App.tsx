@@ -26,7 +26,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Tracker } from './components/Tracker';
 import { AdminFeedback } from './components/AdminFeedback';
 import { TokenUsage } from './components/TokenUsage';
-import { ClaudeDocs } from './components/ClaudeDocs';
+import { MindMapDocs } from './components/MindMapDocs';
 import { AircraftTracker } from './components/AircraftTracker';
 import { ScansPage } from './components/ScansPage';
 import {
@@ -111,9 +111,9 @@ function App() {
     return <AdminFeedback />;
   }
 
-  // Check for claude docs page URL
+  // Check for claude docs page URL - renders as visual radial mind map
   if (window.location.pathname === '/claude') {
-    return <ClaudeDocs />;
+    return <MindMapDocs />;
   }
 
   // Check for scans page URL

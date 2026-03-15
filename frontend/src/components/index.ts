@@ -25,6 +25,8 @@ export { TrackerBulkAddModal } from './TrackerBulkAddModal';
 
 // Documentation
 export { ClaudeDocs } from './ClaudeDocs';
+export { TreeDocs } from './TreeDocs';
+export { MindMapDocs } from './MindMapDocs';
 
 // Scans
 export { ScansPage } from './ScansPage';
