@@ -425,79 +425,120 @@ async def find_duplicate_deal(
     """
     Check if a similar deal already exists.
 
-    Match criteria (TWO-TIER approach):
+    Match criteria (THREE-TIER approach):
 
     TIER 1 - Strict Match (same company + same round + similar amount):
     - Company names match (using smart fuzzy matching)
     - Same round type
-    - Same normalized amount (within 20% tolerance) OR one/both amounts missing
+    - Same normalized amount (within 15% tolerance) OR one/both amounts missing
     - Date within 365 days (1 year) OR deals from last 365 days if no date
 
     TIER 2 - Same-Day Match (catches same-day duplicates from multiple sources):
     - Company names match exactly (case-insensitive)
-    - Same round type
     - Same announced date (exact match)
-    - Any amount (news sources often report different numbers)
+    - Any round type, any amount (news sources often report different details)
+
+    TIER 3 - Amount Match (catches same deal with different round type extraction):
+    - Company names match (fuzzy)
+    - Same normalized amount (within 10% - tighter for cross-round matching)
+    - Date within 30 days (narrower window for cross-round)
+    - ANY round type (LLM often extracts "series_a" vs "growth" for same deal)
 
     Returns existing Deal if found, None otherwise.
 
     OPTIMIZED:
-    - Single query with JOIN (no N+1 problem)
-    - LIMIT clause to prevent scanning thousands of rows
+    - TIER 3 uses targeted amount_usd filter for efficient matching
+    - TIER 1/2 use general query with LIMIT
     - Date fallback for deals without announced_date
     """
-    from sqlalchemy import or_, func
+    from sqlalchemy import or_, func, and_
 
     # Normalize inputs for comparison
     normalized_amount = normalize_amount(amount)
     normalized_company = normalize_company_name(company_name)
 
-    # Build query with JOIN to get company name in one query (fixes N+1)
+    # =========================================================================
+    # TIER 3 FIRST: Targeted amount-based query (most efficient for cross-round)
+    # Uses amount_usd column for SQL filtering before Python name matching
+    # =========================================================================
+    if normalized_amount:
+        # Calculate 10% tolerance range for SQL WHERE clause
+        amount_low = int(normalized_amount * 0.90)
+        amount_high = int(normalized_amount * 1.10)
+
+        tier3_stmt = (
+            select(Deal, PortfolioCompany)
+            .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
+            .where(Deal.amount_usd.between(amount_low, amount_high))
+        )
+
+        # Date filter for TIER 3: within 30 days OR recent if no date
+        if announced_date:
+            date_start = announced_date - timedelta(days=30)
+            date_end = announced_date + timedelta(days=30)
+            recent_cutoff_dt = (datetime.now(timezone.utc) - timedelta(days=60)).replace(tzinfo=None)
+            tier3_stmt = tier3_stmt.where(
+                or_(
+                    Deal.announced_date.between(date_start, date_end),
+                    (Deal.announced_date.is_(None) & (Deal.created_at >= recent_cutoff_dt))
+                )
+            )
+        else:
+            # No date: only check recent deals (last 60 days)
+            recent_cutoff_dt = (datetime.now(timezone.utc) - timedelta(days=60)).replace(tzinfo=None)
+            tier3_stmt = tier3_stmt.where(
+                or_(
+                    Deal.announced_date >= (date.today() - timedelta(days=60)),
+                    (Deal.announced_date.is_(None) & (Deal.created_at >= recent_cutoff_dt))
+                )
+            )
+
+        tier3_stmt = tier3_stmt.limit(100)  # Amount filter is selective enough
+        tier3_result = await session.execute(tier3_stmt)
+        tier3_candidates = tier3_result.all()
+
+        for deal, company in tier3_candidates:
+            if company_names_match(company_name, company.name):
+                logger.info(
+                    f"Found duplicate deal (TIER 3 cross-round): '{company_name}' {round_type} "
+                    f"matches '{company.name}' {deal.round_type} "
+                    f"(deal #{deal.id}, {deal.amount}, amount_usd={deal.amount_usd})"
+                )
+                return deal
+
+    # =========================================================================
+    # TIER 1 & 2: General query for strict round match and same-day duplicates
+    # =========================================================================
     stmt = (
         select(Deal, PortfolioCompany)
         .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
-        .where(Deal.round_type == round_type)
     )
 
     # Date filter with fallback for missing dates - 1-year window
-    # FIX: Use timezone-aware datetimes to match database (asyncpg requires consistency)
-    # FIX: Expanded from 30 days to 365 days to catch articles about older deals
-    # (e.g., article today about deal announced 3 months ago should still dedupe)
     if announced_date:
-        # Look within 365 days of the announced date (was 30 days - too narrow)
         date_start = announced_date - timedelta(days=365)
         date_end = announced_date + timedelta(days=365)
-        # Include deals with matching date OR deals with NULL date (recent ones)
-        # FIX: Strip timezone to match TIMESTAMP WITHOUT TIME ZONE column
         recent_cutoff_dt = (datetime.now(timezone.utc) - timedelta(days=365)).replace(tzinfo=None)
         stmt = stmt.where(
             or_(
                 Deal.announced_date.between(date_start, date_end),
-                # Also check deals with NULL date created recently
                 (Deal.announced_date.is_(None) & (Deal.created_at >= recent_cutoff_dt))
             )
         )
     else:
-        # No date provided: only look at recent deals (last 1 year / 365 days)
-        # This prevents matching against ancient deals
         recent_cutoff = date.today() - timedelta(days=365)
-        # FIX: Strip timezone to match TIMESTAMP WITHOUT TIME ZONE column
         recent_cutoff_dt = (datetime.now(timezone.utc) - timedelta(days=365)).replace(tzinfo=None)
         stmt = stmt.where(
             or_(
                 Deal.announced_date >= recent_cutoff,
-                # Also include NULL dates created recently
                 (Deal.announced_date.is_(None) & (Deal.created_at >= recent_cutoff_dt))
             )
         )
 
-    # LIMIT to prevent scanning too many rows
-    # FIX: Reduced from 300 to 100 - still catches duplicates (sorted by relevance)
-    # Saves 3x row scans per duplicate check (15,000 → 5,000 scans/day)
-    stmt = stmt.limit(100)
+    stmt = stmt.limit(200)
 
     result = await session.execute(stmt)
-    candidates = result.all()  # Returns list of (Deal, PortfolioCompany) tuples
+    candidates = result.all()
 
     for deal, company in candidates:
         existing_normalized = normalize_company_name(company.name)
@@ -511,28 +552,29 @@ async def find_duplicate_deal(
                 )
                 return deal
 
-        # TIER 1: Fuzzy company name match with amount tolerance
+        # Skip if company names don't match (required for TIER 1)
         if not company_names_match(company_name, company.name):
             continue
 
-        # Amount match: within 15% tolerance (balanced to catch duplicates while avoiding false positives)
-        # 20% was too broad: $50M and $60M would match
-        # 10% was too tight: $45M and $50M wouldn't match (same deal, different sources)
-        # 15% is the sweet spot: catches rounding differences while avoiding false merges
-        # If either amount is missing, we still consider it a potential match
-        if normalized_amount and deal.amount:
-            existing_amount = normalize_amount(deal.amount)
-            if existing_amount:
-                tolerance = max(normalized_amount, existing_amount) * 0.15  # 15% tolerance
-                if abs(normalized_amount - existing_amount) > tolerance:
-                    continue
-
-        # Found a match!
-        logger.info(
-            f"Found duplicate deal: '{company_name}' matches existing '{company.name}' "
-            f"(deal #{deal.id}, {deal.round_type}, {deal.amount})"
-        )
-        return deal
+        # TIER 1: Same round type + amount match
+        if deal.round_type == round_type:
+            if normalized_amount and deal.amount:
+                existing_amount = normalize_amount(deal.amount)
+                if existing_amount:
+                    tolerance = max(normalized_amount, existing_amount) * 0.15
+                    if abs(normalized_amount - existing_amount) <= tolerance:
+                        logger.info(
+                            f"Found duplicate deal (TIER 1): '{company_name}' matches '{company.name}' "
+                            f"(deal #{deal.id}, {deal.round_type}, {deal.amount})"
+                        )
+                        return deal
+            else:
+                # One or both amounts missing - still a match if same round type
+                logger.info(
+                    f"Found duplicate deal (TIER 1, no amount): '{company_name}' matches '{company.name}' "
+                    f"(deal #{deal.id}, {deal.round_type})"
+                )
+                return deal
 
     return None
 
