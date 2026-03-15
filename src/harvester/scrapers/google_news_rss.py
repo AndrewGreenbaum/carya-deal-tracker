@@ -342,12 +342,12 @@ class GoogleNewsRSSScraper:
             ]
             text = "\n".join(part for part in text_parts if part)
 
-            # Use source_url if available, otherwise use Google News URL
-            # This helps with deduplication (same article from different queries)
-            url = article.source_url if article.source_url else article.url
-
+            # IMPORTANT: Use Google News URL (unique per article), NOT source_url
+            # source_url is just the domain (e.g., "https://fortune.com")
+            # Google News URL is unique: "https://news.google.com/rss/articles/CBMi..."
+            # This ensures proper deduplication in the database
             normalized.append(NormalizedArticle(
-                url=url,
+                url=article.url,  # Google News URL - unique per article
                 title=article.title,
                 text=text,
                 published_date=published_date,
