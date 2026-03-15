@@ -4795,13 +4795,8 @@ async def move_tracker_item_position(
     Move a tracker item to a new status/position (drag-drop).
 
     Called when user drags a card to a different column or reorders within a column.
+    Status validation is handled by move_tracker_item using dynamic column slugs.
     """
-    if request.status not in VALID_STATUSES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid status. Must be one of: {', '.join(VALID_STATUSES)}"
-        )
-
     try:
         async with get_session() as session:
             item = await move_tracker_item(session, item_id, request.status, request.position)
@@ -4844,13 +4839,8 @@ async def add_deal_to_tracker(
 
     Copies deal info (company, round, amount, lead investor) and links to the deal.
     Returns error if deal not found or already tracked.
+    Status validation is handled by create_tracker_from_deal using dynamic column slugs.
     """
-    if request.status not in VALID_STATUSES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid status. Must be one of: {', '.join(VALID_STATUSES)}"
-        )
-
     try:
         async with get_session() as session:
             item = await create_tracker_from_deal(session, request.deal_id, request.status)
