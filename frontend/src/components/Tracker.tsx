@@ -117,35 +117,10 @@ export function Tracker() {
     }
   };
 
-  const handleDragOver = (event: DragOverEvent) => {
-    const { active, over } = event;
-    if (!over) return;
-
-    const activeItem = items.find((i) => i.id === active.id);
-    if (!activeItem) return;
-
-    // Check if we're over a column or another card
-    const overId = over.id;
-    let overStatus: TrackerStatus;
-
-    const columnSlugs = columns.map((c) => c.slug);
-    if (columnSlugs.includes(overId as string)) {
-      overStatus = overId as TrackerStatus;
-    } else {
-      const overItem = items.find((i) => i.id === overId);
-      if (!overItem) return;
-      overStatus = overItem.status;
-    }
-
-    if (activeItem.status !== overStatus) {
-      // Move to new column - update local state optimistically
-      setItems((prev) => {
-        const updatedItems = prev.map((item) =>
-          item.id === activeItem.id ? { ...item, status: overStatus } : item
-        );
-        return updatedItems;
-      });
-    }
+  const handleDragOver = (_event: DragOverEvent) => {
+    // Don't update state during drag - causes flickering and race conditions
+    // The visual feedback is handled by dnd-kit's DragOverlay
+    // State is updated only in handleDragEnd after drop completes
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -154,8 +129,8 @@ export function Tracker() {
 
     if (!over) return;
 
-    const activeItem = items.find((i) => i.id === active.id);
-    if (!activeItem) return;
+    const draggedItem = items.find((i) => i.id === active.id);
+    if (!draggedItem) return;
 
     let targetStatus: TrackerStatus;
     let targetPosition: number;
@@ -177,10 +152,18 @@ export function Tracker() {
       targetPosition = overIndex >= 0 ? overIndex : columnItems.length;
     }
 
-    // Update local state optimistically
+    // Skip if no actual change
+    if (draggedItem.status === targetStatus && draggedItem.position === targetPosition) {
+      return;
+    }
+
+    // Store previous state for rollback
+    const previousItems = [...items];
+
+    // Update local state optimistically (instant feedback)
     setItems((prev) => {
       const updated = prev.map((item) =>
-        item.id === activeItem.id
+        item.id === draggedItem.id
           ? { ...item, status: targetStatus, position: targetPosition }
           : item
       );
@@ -198,13 +181,15 @@ export function Tracker() {
       });
     });
 
-    // Sync with backend
+    // Sync with backend (async, don't block UI)
     try {
-      await moveTrackerItem(activeItem.id, targetStatus, targetPosition);
+      await moveTrackerItem(draggedItem.id, targetStatus, targetPosition);
     } catch (err) {
       console.error('Failed to move item:', err);
-      // Reload to get correct state
-      loadItems();
+      // Rollback to previous state instead of full reload
+      setItems(previousItems);
+      setError('Failed to move item. Please try again.');
+      setTimeout(() => setError(null), 3000);
     }
   };
 
