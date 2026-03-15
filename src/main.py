@@ -1616,10 +1616,17 @@ async def run_brave_search_scraper_endpoint(
         if include_early_signals:
             queries_executed += 12  # 12 early signal queries
 
+        # Process articles through extraction pipeline
+        # Skip title filter - Brave queries are already targeted at funding news
+        from .scheduler.jobs import process_external_articles
+        stats = await process_external_articles(articles, "brave_search", skip_title_filter=True)
+
         return BraveSearchResponse(
             queries_executed=queries_executed,
             results_found=len(articles),  # Before dedup
             articles_generated=len(articles),
+            deals_extracted=stats.get("deals_extracted", 0),
+            deals_saved=stats.get("deals_saved", 0),
         )
 
     except Exception as e:
