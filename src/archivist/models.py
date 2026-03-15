@@ -14,7 +14,7 @@ from datetime import datetime, date, timezone
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Column, DateTime, BigInteger
 import uuid
 
 
@@ -86,7 +86,7 @@ class Deal(SQLModel, table=True):
     # Round details
     round_type: str  # seed, series_a, series_b, etc.
     amount: Optional[str] = None  # "$50M"
-    amount_usd: Optional[int] = None  # 50000000 (normalized)
+    amount_usd: Optional[int] = Field(default=None, sa_column=Column(BigInteger))  # 50000000 (normalized, BIGINT for >$2.1B deals)
     valuation: Optional[str] = None
     announced_date: Optional[date] = None
 

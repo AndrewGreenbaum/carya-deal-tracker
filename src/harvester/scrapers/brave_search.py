@@ -150,15 +150,18 @@ PARTNER_QUERIES = {
     ],
     # DISABLED SCRAPER - needs full partner coverage
     # Thrive partners: https://www.thrivecap.com (limited public info)
+    # FIX (2026-01): Added "leads" queries for headline matching
     "thrive": [
         # Fund-level queries (BROAD - catch any funding mention)
         '"Thrive Capital" AND (funding OR raises OR raised OR investment)',
+        '"Thrive Capital" AND (leads OR led) AND (funding OR investment OR round)',
         '"Thrive Capital" AND "Series A" AND (startup OR million)',
         '"Thrive Capital" AND "Series B" AND (startup OR million)',
         '"Thrive Capital" AND "seed" AND (startup OR million)',
         '"Thrive Capital" AND (backs OR backed OR invests)',
         # Partner queries (any investment mention)
         '"Josh Kushner" AND (startup OR investment OR funding OR venture)',
+        '"Josh Kushner" AND (leads OR led) AND (funding OR investment)',
         '"Kareem Zaki" AND (startup OR investment OR funding OR "Thrive")',
         '"Josh Miller" AND "Thrive Capital" AND (investment OR funding)',
     ],

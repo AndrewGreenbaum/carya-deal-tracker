@@ -33,13 +33,35 @@ _current_scan_id: Optional[str] = None
 
 # Session-based content hash cache (cleared between runs)
 # Prevents duplicate Claude calls for same article content
-_content_hash_cache: Set[str] = set()
+# FIX (2026-01): Now stores (hash, length) to prefer longer content
+_content_hash_cache: dict[str, int] = {}  # hash -> content length
 _content_hash_lock = asyncio.Lock()  # FIX: Async-safe cache access
+
+# Minimum content length improvement to replace cached version
+# If new content is 2x longer, it's worth re-processing
+MIN_LENGTH_IMPROVEMENT_RATIO = 2.0
 
 from .schemas import DealExtraction, ArticleAnalysis, LeadStatus, RoundType, EnterpriseCategory
 from ..config.settings import settings
-from ..config.funds import FUND_REGISTRY, FundConfig
+from ..config.funds import FUND_REGISTRY, FundConfig, ScraperType
 # Note: match_fund_name is imported lazily in _verify_tracked_fund to avoid circular import
+
+# External-only funds that need more lenient processing
+# These funds don't have working website scrapers, so deals come from news sources
+# with shorter/less reliable content
+EXTERNAL_ONLY_FUNDS = frozenset({
+    "thrive", "benchmark", "first_round",  # ScraperType.EXTERNAL
+    "greylock", "gv", "redpoint", "founders_fund",  # Low coverage from website scrapers
+})
+
+# Source names that are external (used for auto-detection)
+EXTERNAL_SOURCE_NAMES = frozenset({
+    "google_news", "brave_search", "sec_edgar", "news_aggregator",
+})
+
+# Lower confidence threshold for external sources
+# Standard is 0.5, but external sources often have less context
+EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD = 0.35
 
 # FIX #42: Initialize module-level constants from settings (not hardcoded)
 API_TIMEOUT_SECONDS = settings.llm_timeout
@@ -145,6 +167,14 @@ EXAMPLE 2: "Acme raises $50M Series B led by Sequoia"
 EXAMPLE 3: "ResolveAI raises $30M Series A; competes with Traversal, which raised $48M"
 → Extract ResolveAI (the PRIMARY subject raising funds)
 → IGNORE Traversal (background mention, not primary subject)
+
+HEADLINE-ONLY CONTENT:
+Some articles may only contain a headline with minimal context. Extract what you can:
+- "Thrive Capital Leads $34M Investment Round" → tracked_fund=Thrive, amount=34M, is_lead=True
+- "Acme raises $50M in Series B funding" → company=Acme, amount=50M, round=series_b
+- Set confidence_score=0.4-0.6 for headline-only (less context = lower confidence)
+- If company name is missing from headline → startup_name="<UNKNOWN>", is_new_announcement=False
+- Headlines with clear lead language ("leads", "led") ARE sufficient for is_lead=True
 
 Return ONE deal per article (the primary/new announcement, not historical mentions).
 Output valid JSON matching the schema."""
@@ -272,11 +302,12 @@ async def log_token_usage(
 
 # Keywords that indicate funding content (for early exit optimization)
 # Split into strong (must have) and supporting (help confirm) keywords
+# FIX (2026-01): Added "leads" for headline-only content like "Thrive Capital Leads $34M"
 STRONG_FUNDING_KEYWORDS = [
-    "raised", "funding", "series", "seed round", "led by", "investment round",
-    "secures", "closes round", "announces funding"
+    "raised", "raises", "funding", "series", "seed round", "led by", "leads",
+    "investment round", "secures", "closes round", "announces funding"
 ]
-AMOUNT_KEYWORDS = ["million", "billion", "$"]
+AMOUNT_KEYWORDS = ["million", "billion", "$", "mn", "m funding"]  # "mn" = Indian format
 SUPPORTING_KEYWORDS = [
     "investment", "round", "venture", "capital", "investor",
     "announces", "valuation", "pre-seed", "series a", "series b", "series c"
@@ -325,24 +356,42 @@ async def _is_duplicate_content(text: str) -> bool:
     """
     Check if we've already processed this content in this session.
 
-    Returns True if duplicate (should skip), False if new.
+    Returns True if duplicate (should skip), False if new or if this version
+    is significantly longer than the cached version.
+
+    FIX (2026-01): Now prefers longer content. If a headline-only version was
+    processed first, a full article version will still be processed. This fixes
+    the issue where Google News headlines blocked Brave Search full articles.
 
     FIX: Made async with lock for thread-safety in concurrent extraction.
     """
     content_hash = _compute_content_hash(text)
+    text_len = len(text) if text else 0
     text_preview = text[:100].replace('\n', ' ') if text else "(empty)"
 
     async with _content_hash_lock:
         if content_hash in _content_hash_cache:
-            logger.warning(
+            cached_len = _content_hash_cache[content_hash]
+
+            # If new content is significantly longer, process it anyway
+            # This catches cases where headline was processed before full article
+            if text_len > cached_len * MIN_LENGTH_IMPROVEMENT_RATIO:
+                logger.info(
+                    f"Replacing short cache entry with longer content - "
+                    f"hash={content_hash}, cached_len={cached_len}, new_len={text_len}"
+                )
+                _content_hash_cache[content_hash] = text_len
+                return False  # Process this longer version
+
+            logger.debug(
                 f"Duplicate content detected - hash={content_hash}, "
-                f"cache_size={len(_content_hash_cache)}, "
+                f"cache_size={len(_content_hash_cache)}, len={text_len}, "
                 f"text_preview='{text_preview}...'"
             )
             return True
 
-        logger.debug(f"New content - hash={content_hash}, adding to cache (size={len(_content_hash_cache)})")
-        _content_hash_cache.add(content_hash)
+        logger.debug(f"New content - hash={content_hash}, len={text_len}, adding to cache (size={len(_content_hash_cache)})")
+        _content_hash_cache[content_hash] = text_len
         return False
 
 
@@ -350,7 +399,7 @@ def clear_content_hash_cache() -> None:
     """Clear the content hash cache. Call between scrape runs."""
     global _content_hash_cache
     cache_size = len(_content_hash_cache)
-    _content_hash_cache.clear()
+    _content_hash_cache = {}
     logger.info(f"Content hash cache cleared (had {cache_size} entries)")
 
 
@@ -587,11 +636,17 @@ def _looks_like_article_title(text: str) -> bool:
 def _is_background_mention(
     company_name: str,
     article_text: str,
+    is_external_source: bool = False,
 ) -> tuple[bool, str]:
     """
     Check if extracted company is likely a background mention, not the article's subject.
 
     Only call this when is_new_announcement=True (already checked at call site).
+
+    Args:
+        company_name: The extracted company name
+        article_text: Full article text
+        is_external_source: If True, use lenient checking (for external-only funds)
 
     Returns:
         (is_background, reason): True if background mention, with explanation
@@ -600,8 +655,21 @@ def _is_background_mention(
     - If company name not in first 500 chars (headline/lede), likely background
     - 500 chars accounts for wire service headers, bylines, dates
     - Exception: Very short articles where everything is "first 500 chars"
+    - FIX (2026-01): Skip this check for external sources (Thrive, Benchmark, etc.)
+      as they often have less structured content
     """
     if not company_name or not article_text:
+        return False, ""
+
+    # FIX (2026-01): Skip background check for external sources
+    # These often have fund name in headline but company name later in article
+    if is_external_source:
+        logger.debug(f"Skipping background check for external source: {company_name}")
+        return False, ""
+
+    # FIX (2026-01): Increase short article threshold to 1500 chars
+    # Many legitimate funding articles are 800-1500 chars
+    if len(article_text) < 1500:
         return False, ""
 
     # Get the headline/lede (at least 500 chars to account for wire headers/bylines)
@@ -615,16 +683,12 @@ def _is_background_mention(
 
     company_lower = company_name.lower().strip()
 
-    # Short articles (<800 chars) - skip this check (increased from 500 to match 400 char headline)
-    if len(article_text) < 800:
-        return False, ""
-
     # Check if company name appears in headline/lede
     if company_lower not in headline_area:
         # Check for partial match (e.g., "Traversal" in "Traversal AI")
         company_words = company_lower.split()
         main_word = company_words[0] if company_words else company_lower
-        if len(main_word) >= 2 and main_word not in headline_area:
+        if len(main_word) >= 4 and main_word not in headline_area:  # FIX: Require 4+ chars (was 2)
             return True, f"Company '{company_name}' not in article headline - likely background mention"
 
     return False, ""
@@ -736,7 +800,8 @@ async def extract_deal(
     source_name: str = "unknown",
     fund_context: Optional[FundConfig] = None,
     skip_funding_check: bool = False,
-    skip_dedup_check: bool = False
+    skip_dedup_check: bool = False,
+    is_external_source: bool = False,
 ) -> Optional[DealExtraction]:
     """
     Extract a single funding deal from article text.
@@ -753,10 +818,21 @@ async def extract_deal(
         fund_context: Optional fund-specific extraction context
         skip_funding_check: If True, skip the funding keyword check
         skip_dedup_check: If True, skip the duplicate content check
+        is_external_source: If True, use lenient processing for external-only funds
 
     Returns:
         DealExtraction with structured deal information, or None if duplicate
     """
+    # Auto-detect external source if not explicitly set
+    # Check fund slug (for external-only funds like thrive, benchmark)
+    if not is_external_source and source_name in EXTERNAL_ONLY_FUNDS:
+        is_external_source = True
+    # Check source name (for external sources like google_news, brave_search)
+    if not is_external_source and source_name in EXTERNAL_SOURCE_NAMES:
+        is_external_source = True
+    # Check URL patterns (fallback for external source detection)
+    if not is_external_source and ('news.google' in source_url or 'brave' in source_url.lower()):
+        is_external_source = True
     # Content hash dedup: Skip if we've already processed identical content in this run
     # Cache is cleared ONCE at job start in scheduler/jobs.py for cross-source dedup
     if not skip_dedup_check and await _is_duplicate_content(article_text):
@@ -913,10 +989,12 @@ async def extract_deal(
                 )
 
             # Post-process: check if company is background mention (not in headline)
+            # FIX (2026-01): Skip for external sources to avoid false rejections
             if response and response.is_new_announcement:
                 is_background, reason = _is_background_mention(
                     response.startup_name,
                     article_text,
+                    is_external_source=is_external_source,
                 )
                 if is_background:
                     logger.warning(

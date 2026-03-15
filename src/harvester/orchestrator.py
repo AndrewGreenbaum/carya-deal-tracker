@@ -71,7 +71,10 @@ from .scrapers.general_catalyst import GeneralCatalystScraper
 from .scrapers.first_round import FirstRoundScraper
 from ..config.funds import FUND_REGISTRY, FundConfig, ScraperType
 from ..config.settings import settings
-from ..analyst.extractor import extract_deal, set_extraction_context, clear_extraction_context
+from ..analyst.extractor import (
+    extract_deal, set_extraction_context, clear_extraction_context,
+    EXTERNAL_ONLY_FUNDS, EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD
+)
 from ..archivist.storage import save_deal
 from ..archivist.database import get_session
 from ..archivist.models import Article
@@ -210,12 +213,21 @@ async def process_article(
         Status values are defined in ExtractionStatus enum
     """
     try:
+        # FIX (2026-01): Detect if this is an external-only fund source
+        # External sources get lower confidence threshold and skip background checks
+        is_external_source = (
+            fund_config.slug in EXTERNAL_ONLY_FUNDS or
+            'google_news' in article.tags or
+            fund_config.scraper_type == ScraperType.EXTERNAL
+        )
+
         # Extract deal information using Claude
         extraction = await extract_deal(
             article_text=article.text,
             source_url=article.url,
             source_name=fund_config.slug,
             fund_context=fund_config,
+            is_external_source=is_external_source,
         )
 
         # FIX 1: Handle None return (API failures, timeouts, etc.)
@@ -249,12 +261,20 @@ async def process_article(
             )
             return False, ExtractionStatus.INVALID_COMPANY_NAME.value
 
-        # Skip low-confidence extractions (threshold from settings)
-        if extraction.confidence_score < settings.extraction_confidence_threshold:
+        # FIX (2026-01): Use lower confidence threshold for external-only funds
+        # These funds often have less structured content but are still valid deals
+        confidence_threshold = (
+            EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD if is_external_source
+            else settings.extraction_confidence_threshold
+        )
+
+        # Skip low-confidence extractions
+        if extraction.confidence_score < confidence_threshold:
             # FIX #50: DEBUG level for per-article messages (reduces log noise)
             logger.debug(
                 f"Skipping low-confidence extraction: {extraction.startup_name} - "
-                f"Score: {extraction.confidence_score:.2f} < {settings.extraction_confidence_threshold} - "
+                f"Score: {extraction.confidence_score:.2f} < {confidence_threshold} "
+                f"({'external' if is_external_source else 'standard'}) - "
                 f"URL: {article.url}"
             )
             return False, ExtractionStatus.LOW_CONFIDENCE.value

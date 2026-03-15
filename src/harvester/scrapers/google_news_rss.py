@@ -16,111 +16,268 @@ Target funds (external-only or low coverage):
 
 RSS Format:
 https://news.google.com/rss/search?q="Fund+Name"+funding&hl=en-US&gl=US&ceid=US:en
+
+FIX (2026-01): Added full article fetching to get complete content instead of
+just headlines. This enables proper LLM extraction of lead status and deal details.
 """
 
 import asyncio
+import base64
 import feedparser
 import httpx
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
-from typing import List, Optional
-from urllib.parse import urlencode
+from typing import List, Optional, Tuple
+from urllib.parse import urlencode, urlparse, parse_qs, unquote
 from bs4 import BeautifulSoup
 
 from ..base_scraper import NormalizedArticle
+from ...config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Article fetching settings
+MAX_CONCURRENT_ARTICLES = 5
+ARTICLE_FETCH_TIMEOUT = 15.0
+ARTICLE_RATE_LIMIT_DELAY = 0.3
+
+# Article content selectors (ordered by specificity)
+ARTICLE_SELECTORS = [
+    # News site specific
+    '[data-testid="article-body"]',
+    '.article__body', '.article-content', '.article-text',
+    '.story-body', '.story-content', '.story__body',
+    '.post-content', '.post-body', '.post__content',
+    '.entry-content', '.entry-body',
+    # Generic content areas
+    '[role="article"]', 'article', '.content', '#content',
+    'main', '.main-content', '#main-content',
+]
 
 
 # External-only funds that need Google News coverage
 # These funds either have no portfolio page or their scrapers aren't working
+# FIX (2026-01): Expanded queries for better coverage of missed deals
 GOOGLE_NEWS_FUNDS = {
     # EXTERNAL scraper type (no portfolio page)
     "thrive": {
         "name": "Thrive Capital",
         "queries": [
+            # Primary fund queries
             '"Thrive Capital" funding',
             '"Thrive Capital" leads investment',
             '"Thrive Capital" Series',
+            '"Thrive Capital" raises',
+            '"Thrive Capital" led',
+            # Partner-specific queries
             '"Josh Kushner" investment startup',
+            '"Josh Kushner" leads funding',
+            '"Kareem Zaki" investment',
+            # Additional deal discovery patterns
+            'raises million "Thrive Capital"',
+            '"led by Thrive"',
         ],
-        "exclude": ["Thrive Global", "Thrive IT", "Thrive Market", "Thrive Wellness"],
+        "exclude": ["Thrive Global", "Thrive IT", "Thrive Market", "Thrive Wellness", "Arianna Huffington"],
     },
     "benchmark": {
         "name": "Benchmark Capital",
         "queries": [
+            # Primary fund queries
             '"Benchmark Capital" funding',
             '"Benchmark" leads investment startup',
             '"Benchmark" Series A',
+            '"Benchmark" Series B',
+            '"led by Benchmark"',
+            # Partner-specific queries (most deals come through partners)
             '"Bill Gurley" investment',
+            '"Bill Gurley" leads',
             '"Peter Fenton" investment',
+            '"Peter Fenton" leads',
             '"Sarah Tavel" investment',
+            '"Sarah Tavel" leads',
+            '"Eric Vishria" investment',
+            '"Miles Grimshaw" investment',
         ],
-        "exclude": ["Benchmark Electronics", "Benchmark International"],
+        "exclude": ["Benchmark Electronics", "Benchmark International", "Benchmark Mineral"],
     },
     # HTML scraper but site doesn't announce deals
     "first_round": {
         "name": "First Round Capital",
         "queries": [
+            # Primary fund queries
             '"First Round Capital" funding',
+            '"First Round Capital" leads',
             '"First Round" leads seed',
+            '"First Round" Series A',
+            '"led by First Round"',
+            # Partner-specific queries
             '"Josh Kopelman" investment',
+            '"Josh Kopelman" leads',
+            '"Todd Jackson" investment',
+            '"Phin Barnes" investment',
         ],
-        "exclude": ["first round pick", "NFL", "NBA"],
+        "exclude": ["first round pick", "NFL", "NBA", "first round draft", "playoff"],
     },
     # PLAYWRIGHT but may have issues
     "greylock": {
         "name": "Greylock",
         "queries": [
+            # Primary fund queries
             '"Greylock" funding startup',
             '"Greylock Partners" leads',
             '"Greylock" Series A',
+            '"Greylock" Series B',
+            '"led by Greylock"',
+            # Partner-specific queries
             '"Reid Hoffman" investment startup',
+            '"Reid Hoffman" leads',
+            '"David Sze" investment',
+            '"Sarah Guo" investment',
+            '"Asheem Chandna" investment',
         ],
         "exclude": [],
     },
     "gv": {
         "name": "GV (Google Ventures)",
         "queries": [
+            # Primary fund queries
             '"Google Ventures" funding',
             '"Google Ventures" leads investment',
             '"GV" venture capital funding',
+            '"GV" leads Series',
+            '"led by GV"',
+            '"led by Google Ventures"',
+            # Partner queries
+            '"David Krane" investment',
         ],
-        "exclude": ["NYSE:GV", "Visionary Holdings"],
+        "exclude": ["NYSE:GV", "Visionary Holdings", "stock ticker GV", "GV stock"],
     },
     "founders_fund": {
         "name": "Founders Fund",
         "queries": [
+            # Primary fund queries
             '"Founders Fund" funding',
             '"Founders Fund" leads investment',
+            '"Founders Fund" Series',
+            '"led by Founders Fund"',
+            # Partner-specific queries
             '"Keith Rabois" investment startup',
+            '"Keith Rabois" leads',
             '"Peter Thiel" investment startup',
+            '"Peter Thiel" leads',
+            '"Trae Stephens" investment',
         ],
         "exclude": [],
     },
     "redpoint": {
         "name": "Redpoint Ventures",
         "queries": [
+            # Primary fund queries
             '"Redpoint Ventures" funding',
             '"Redpoint" leads investment',
             '"Redpoint" Series A',
+            '"Redpoint" Series B',
+            '"led by Redpoint"',
+            # Partner queries
+            '"Satish Dharmaraj" investment',
+            '"Tomasz Tunguz" investment',
         ],
-        "exclude": ["Redpoint Bio"],
+        "exclude": ["Redpoint Bio", "Redpoint Biopharmaceutical"],
     },
 }
+
+
+def extract_real_url_from_google_news(google_news_url: str) -> Optional[str]:
+    """
+    Extract the actual article URL from a Google News redirect URL.
+
+    Google News URLs look like:
+    - Old format: https://news.google.com/rss/articles/CBMiWWh0dHBzOi8v...
+    - New format: https://news.google.com/rss/articles/CBMieEFVX3lxTFB...
+
+    The actual URL is encoded in various ways in the path.
+
+    Returns:
+        The actual article URL, or None if extraction fails.
+    """
+    try:
+        if '/articles/' not in google_news_url:
+            return None
+
+        # Get the encoded part after /articles/
+        match = re.search(r'/articles/([^?]+)', google_news_url)
+        if not match:
+            return None
+
+        encoded = match.group(1)
+
+        # Method 1: Try direct base64 decode (old format - URL directly encoded)
+        for padding in ['', '=', '==', '===']:
+            try:
+                encoded_fixed = encoded.replace('-', '+').replace('_', '/')
+                decoded = base64.b64decode(encoded_fixed + padding)
+                decoded_str = decoded.decode('utf-8', errors='ignore')
+
+                # Look for http URL in decoded string
+                url_match = re.search(r'(https?://[^\s<>"\'\\x00-\\x1f]+)', decoded_str)
+                if url_match:
+                    url = url_match.group(1)
+                    # Clean up any trailing garbage
+                    url = re.sub(r'["\'>)\x00-\x1f]+$', '', url)
+                    # Validate it looks like a real URL
+                    if url.startswith('http') and len(url) > 25 and '.' in url:
+                        return url
+            except Exception:
+                continue
+
+        # Method 2: Try nested decoding (new format - sometimes double encoded)
+        for padding1 in ['', '=', '==']:
+            try:
+                first_decode = base64.b64decode(
+                    encoded.replace('-', '+').replace('_', '/') + padding1
+                )
+                # Look for another base64 string
+                inner_match = re.search(rb'[A-Za-z0-9+/]{20,}={0,2}', first_decode)
+                if inner_match:
+                    inner_encoded = inner_match.group(0).decode('ascii')
+                    for padding2 in ['', '=', '==']:
+                        try:
+                            inner_decoded = base64.b64decode(inner_encoded + padding2)
+                            url_match = re.search(
+                                r'(https?://[^\s<>"\'\\x00-\\x1f]+)',
+                                inner_decoded.decode('utf-8', errors='ignore')
+                            )
+                            if url_match:
+                                url = url_match.group(1)
+                                url = re.sub(r'["\'>)\x00-\x1f]+$', '', url)
+                                if url.startswith('http') and len(url) > 25:
+                                    return url
+                        except Exception:
+                            continue
+            except Exception:
+                continue
+
+        return None
+
+    except Exception as e:
+        logger.debug(f"Failed to extract real URL from {google_news_url}: {e}")
+        return None
 
 
 @dataclass
 class GoogleNewsArticle:
     """Single article from Google News RSS."""
     title: str
-    url: str  # Google News URL (can't resolve to actual article)
+    url: str  # Google News URL (unique identifier)
+    real_url: Optional[str]  # Actual article URL (extracted from redirect)
     source_url: str  # Source domain URL (e.g., https://www.bisnow.com)
     description: str
     published: Optional[datetime]
     source: str
     fund_slug: str
+    full_text: Optional[str] = None  # Full article content (fetched separately)
 
 
 class GoogleNewsRSSScraper:
@@ -131,28 +288,168 @@ class GoogleNewsRSSScraper:
     1. Indexes more news sources
     2. Better freshness/recency
     3. More comprehensive for specific entity searches
+
+    FIX (2026-01): Now fetches full article content instead of just using headlines.
     """
 
-    def __init__(self, funds: Optional[List[str]] = None):
+    def __init__(self, funds: Optional[List[str]] = None, fetch_full_articles: bool = True):
         """
         Initialize with list of fund slugs to monitor.
 
         Args:
             funds: List of fund slugs. If None, uses all GOOGLE_NEWS_FUNDS.
+            fetch_full_articles: If True, fetch full article content from source URLs.
         """
         self.funds = funds or list(GOOGLE_NEWS_FUNDS.keys())
+        self.fetch_full_articles = fetch_full_articles
         self.client = httpx.AsyncClient(
             timeout=30,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; BudTracker/1.0)"},
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             follow_redirects=True,
         )
+        # Separate client for article fetching with longer timeout
+        self._article_client: Optional[httpx.AsyncClient] = None
 
     async def __aenter__(self):
+        self._article_client = httpx.AsyncClient(
+            timeout=ARTICLE_FETCH_TIMEOUT,
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            follow_redirects=True,
+        )
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.client.aclose()
+        if self._article_client:
+            await self._article_client.aclose()
+
+    async def fetch_article_content(self, url: str, max_retries: int = 2) -> Optional[str]:
+        """
+        Fetch full article content from URL.
+
+        This is critical for proper deal extraction - headlines alone are not
+        sufficient for the LLM to accurately determine lead investor status.
+
+        Args:
+            url: The article URL to fetch
+            max_retries: Number of retry attempts
+
+        Returns:
+            Article text content, or None if fetch fails
+        """
+        if not self._article_client:
+            return None
+
+        for attempt in range(max_retries):
+            try:
+                resp = await self._article_client.get(url)
+                if resp.status_code != 200:
+                    logger.debug(f"HTTP {resp.status_code} for {url}")
+                    return None
+
+                soup = BeautifulSoup(resp.text, 'lxml')
+
+                # Remove noise elements
+                for tag in soup.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside', 'iframe', 'noscript']):
+                    tag.decompose()
+
+                # Try article content selectors
+                for selector in ARTICLE_SELECTORS:
+                    element = soup.select_one(selector)
+                    if element:
+                        text = element.get_text(separator=' ', strip=True)
+                        # Clean up whitespace
+                        text = re.sub(r'\s+', ' ', text)
+                        if len(text) > 200:  # Minimum viable content
+                            logger.debug(f"Extracted {len(text)} chars from {url}")
+                            return text[:4000]  # Truncate to 4000 chars
+
+                # Fallback: get body text
+                body = soup.find('body')
+                if body:
+                    text = body.get_text(separator=' ', strip=True)
+                    text = re.sub(r'\s+', ' ', text)
+                    if len(text) > 200:
+                        return text[:4000]
+
+                return None
+
+            except httpx.TimeoutException:
+                logger.debug(f"Timeout fetching {url} (attempt {attempt + 1})")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1)
+            except Exception as e:
+                logger.debug(f"Error fetching {url}: {e}")
+                return None
+
+        return None
+
+    async def resolve_google_news_url(self, google_news_url: str) -> Optional[str]:
+        """
+        Resolve a Google News URL to the actual article URL.
+
+        Google News URLs use JavaScript redirects that can't be followed by httpx.
+        This method tries to decode the URL from the base64-encoded path.
+
+        Args:
+            google_news_url: The Google News URL
+
+        Returns:
+            The actual article URL, or None if resolution fails
+        """
+        # Try to extract URL from the encoded path
+        extracted = extract_real_url_from_google_news(google_news_url)
+        if extracted:
+            return extracted
+
+        # Google News uses JS redirects - can't follow without browser
+        return None
+
+    async def search_for_article_url(self, title: str, source: str) -> Optional[str]:
+        """
+        Use web search to find the actual article URL based on title.
+
+        When Google News URL resolution fails, we can search for the article
+        by its title to find the original URL.
+
+        Args:
+            title: Article title
+            source: Source publication name
+
+        Returns:
+            The actual article URL, or None if not found
+        """
+        if not self._article_client or not title:
+            return None
+
+        try:
+            # Build a search query
+            search_query = f'"{title}" site:{source.lower().replace(" ", "")}.com'
+
+            # Use DuckDuckGo HTML search (no API key needed)
+            params = {'q': search_query, 'kl': 'us-en'}
+            resp = await self._article_client.get(
+                f'https://html.duckduckgo.com/html/',
+                params=params
+            )
+
+            if resp.status_code != 200:
+                return None
+
+            # Parse results to find article URL
+            html = resp.text
+            # Look for result links
+            results = re.findall(r'href="([^"]+)"[^>]*class="result__url"', html)
+            if results:
+                return unquote(results[0])
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Failed to search for article: {e}")
+            return None
 
     def _build_feed_url(self, query: str) -> str:
         """Build Google News RSS URL for a query."""
@@ -230,9 +527,13 @@ class GoogleNewsRSSScraper:
                 if isinstance(source_entry, dict):
                     source_url = source_entry.get('href', '')
 
+                # Extract real URL from Google News redirect URL
+                real_url = extract_real_url_from_google_news(link)
+
                 items.append(GoogleNewsArticle(
                     title=title,
                     url=link,
+                    real_url=real_url,
                     source_url=source_url,
                     description=description[:1000],
                     published=pub_date,
@@ -307,10 +608,9 @@ class GoogleNewsRSSScraper:
         """
         Full scraping pipeline for Google News RSS.
 
-        NOTE: Google News URLs use JavaScript redirects that httpx can't follow.
-        Instead of trying to fetch full articles (which fails), we use the RSS
-        data directly. The title + description is usually sufficient for the
-        LLM to extract deal information.
+        FIX (2026-01): Now fetches full article content for better LLM extraction.
+        Previously only used headlines which caused external-only funds (Thrive,
+        Benchmark, First Round) to have 0 deals despite web searches finding real ones.
 
         Args:
             days_back: How many days back to look (default 30)
@@ -323,31 +623,49 @@ class GoogleNewsRSSScraper:
         if not articles:
             return []
 
+        # Fetch full article content if enabled
+        if self.fetch_full_articles:
+            articles = await self._fetch_all_article_content(articles)
+
         normalized = []
+        articles_with_content = 0
+        articles_headline_only = 0
+
         for article in articles:
             # Use today as fallback for missing dates
             published_date = article.published.date() if article.published else date.today()
 
-            # Build text from RSS data - include fund name context for better matching
-            # Format: Title + Source + Description (provides enough context for LLM)
+            # Build text - prefer full article content, fallback to headline
             fund_config = GOOGLE_NEWS_FUNDS.get(article.fund_slug, {})
             fund_name = fund_config.get("name", article.fund_slug)
 
-            text_parts = [
-                f"Headline: {article.title}",
-                f"Source: {article.source}" if article.source else "",
-                f"Fund: {fund_name}",  # Add fund context for LLM
-                "",
-                article.description if article.description else "",
-            ]
-            text = "\n".join(part for part in text_parts if part)
+            if article.full_text and len(article.full_text) > 200:
+                # Full article content available - much better for LLM extraction
+                text = f"""Headline: {article.title}
+Source: {article.source or 'Unknown'}
+Fund Context: {fund_name}
 
-            # IMPORTANT: Use Google News URL (unique per article), NOT source_url
-            # source_url is just the domain (e.g., "https://fortune.com")
-            # Google News URL is unique: "https://news.google.com/rss/articles/CBMi..."
-            # This ensures proper deduplication in the database
+Article Content:
+{article.full_text}"""
+                articles_with_content += 1
+            else:
+                # Fallback to headline + description (less reliable)
+                text_parts = [
+                    f"Headline: {article.title}",
+                    f"Source: {article.source}" if article.source else "",
+                    f"Fund: {fund_name}",
+                    "",
+                    article.description if article.description else "",
+                ]
+                text = "\n".join(part for part in text_parts if part)
+                articles_headline_only += 1
+
+            # Use real URL if available, otherwise Google News URL
+            # Real URL is better for deduplication against other sources
+            article_url = article.real_url if article.real_url else article.url
+
             normalized.append(NormalizedArticle(
-                url=article.url,  # Google News URL - unique per article
+                url=article_url,
                 title=article.title,
                 text=text,
                 published_date=published_date,
@@ -357,8 +675,73 @@ class GoogleNewsRSSScraper:
                 fetched_at=datetime.now(timezone.utc),
             ))
 
-        logger.info(f"Google News: Normalized {len(normalized)} articles (no full-text fetch, using RSS data)")
+        logger.info(
+            f"Google News: Normalized {len(normalized)} articles "
+            f"({articles_with_content} with full content, {articles_headline_only} headline-only)"
+        )
         return normalized
+
+    async def _fetch_all_article_content(self, articles: List[GoogleNewsArticle]) -> List[GoogleNewsArticle]:
+        """
+        Fetch full content for all articles in parallel.
+
+        NOTE: Google News URLs use JavaScript redirects that can't be followed.
+        We try to decode the actual URL from the base64 path, but this often fails
+        with newer Google News URL formats. In those cases, articles will be
+        processed with headline-only content.
+
+        Args:
+            articles: List of GoogleNewsArticle with URLs
+
+        Returns:
+            Same articles with full_text populated where possible
+        """
+        if not articles:
+            return articles
+
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_ARTICLES)
+
+        async def fetch_with_limit(article: GoogleNewsArticle) -> GoogleNewsArticle:
+            async with semaphore:
+                # Try to get URL from decoding or resolution
+                url_to_fetch = article.real_url
+
+                if not url_to_fetch:
+                    # Try to resolve the Google News URL
+                    url_to_fetch = await self.resolve_google_news_url(article.url)
+                    if url_to_fetch:
+                        article.real_url = url_to_fetch
+
+                if url_to_fetch:
+                    content = await self.fetch_article_content(url_to_fetch)
+                    if content:
+                        article.full_text = content
+                        logger.debug(f"Fetched {len(content)} chars for: {article.title[:50]}...")
+
+                await asyncio.sleep(ARTICLE_RATE_LIMIT_DELAY)
+                return article
+
+        tasks = [fetch_with_limit(article) for article in articles]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Filter out exceptions and return successful results
+        fetched_articles = []
+        success_count = 0
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning(f"Article fetch failed: {result}")
+            else:
+                fetched_articles.append(result)
+                if result.full_text:
+                    success_count += 1
+
+        # Log summary - headline-only articles are still valuable
+        headline_only = len(fetched_articles) - success_count
+        logger.info(
+            f"Google News: {success_count} with full content, "
+            f"{headline_only} headline-only (still processed)"
+        )
+        return fetched_articles
 
 
 # Convenience function

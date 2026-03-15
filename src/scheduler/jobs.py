@@ -120,7 +120,7 @@ async def clear_global_seen_urls() -> None:
 # TOKEN OPTIMIZATION CONSTANTS
 # =============================================================================
 
-MAX_ARTICLES_PER_SOURCE = 15  # Reduced from 25 to save ~340K tokens/run
+MAX_ARTICLES_PER_SOURCE = 100  # Increased for external sources (headline-only = cheaper processing)
 
 
 def is_non_announcement_title(title: str) -> bool:
@@ -614,7 +614,7 @@ async def process_external_articles(
     Returns:
         Dict with processing stats
     """
-    from ..analyst.extractor import extract_deal, set_extraction_context, clear_extraction_context
+    from ..analyst.extractor import extract_deal, set_extraction_context, clear_extraction_context, EXTERNAL_SOURCE_NAMES, EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD
     from ..archivist.storage import save_deal
     from ..archivist.database import get_session
     from ..archivist.models import Article
@@ -764,7 +764,14 @@ async def process_external_articles(
                     return None
 
                 # Skip low-confidence extractions
-                if extraction.confidence_score < settings.extraction_confidence_threshold:
+                # Use lower threshold for external sources (headline-only, less context)
+                is_external = source_name in EXTERNAL_SOURCE_NAMES
+                confidence_threshold = (
+                    EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD if is_external
+                    else settings.extraction_confidence_threshold
+                )
+                if extraction.confidence_score < confidence_threshold:
+                    logger.debug(f"[{source_name}] Low confidence ({extraction.confidence_score:.2f} < {confidence_threshold:.2f}): {extraction.startup_name}")
                     return None
 
                 # Save to database
