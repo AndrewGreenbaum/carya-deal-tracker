@@ -1,11 +1,8 @@
 /**
  * TrackerCard - A draggable card in the Tracker Kanban
- *
- * Uses @dnd-kit/sortable for drag-and-drop
- * Entire card is draggable, click only fires if not dragging
+ * Uses @dnd-kit/sortable with distance activation (8px) to prevent click conflicts
  */
 
-import { useRef } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, ExternalLink, Calendar, Link } from 'lucide-react';
@@ -27,53 +24,12 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
     isDragging: isSortableDragging,
   } = useSortable({ id: item.id });
 
-  // Track drag state to prevent click after drag
-  const dragStartedRef = useRef(false);
-  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
-
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   };
 
   const isCurrentlyDragging = isDragging || isSortableDragging;
-
-  // Track when drag starts
-  if (isCurrentlyDragging && !dragStartedRef.current) {
-    dragStartedRef.current = true;
-  }
-
-  // Reset drag state when not dragging
-  if (!isCurrentlyDragging && dragStartedRef.current) {
-    // Delay reset to prevent click from firing
-    setTimeout(() => {
-      dragStartedRef.current = false;
-    }, 50);
-  }
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
-  };
-
-  const handleClick = (e: React.MouseEvent) => {
-    // Don't open modal if we were dragging
-    if (dragStartedRef.current) {
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
-
-    // Check if mouse moved significantly (indicates drag attempt)
-    if (mouseDownPosRef.current) {
-      const dx = Math.abs(e.clientX - mouseDownPosRef.current.x);
-      const dy = Math.abs(e.clientY - mouseDownPosRef.current.y);
-      if (dx > 5 || dy > 5) {
-        return; // Mouse moved, was probably dragging
-      }
-    }
-
-    onClick?.();
-  };
 
   return (
     <div
@@ -88,8 +44,7 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
         hover:border-slate-600 hover:bg-slate-750 transition-all select-none
         ${isCurrentlyDragging ? 'opacity-50 shadow-lg ring-2 ring-emerald-500/30 cursor-grabbing' : ''}
       `}
-      onMouseDown={handleMouseDown}
-      onClick={handleClick}
+      onClick={() => !isCurrentlyDragging && onClick?.()}
     >
       {/* Header with drag handle indicator */}
       <div className="flex items-start gap-2">
