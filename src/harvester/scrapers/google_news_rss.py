@@ -22,16 +22,13 @@ import asyncio
 import feedparser
 import httpx
 import logging
-import re
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
-from typing import List, Optional, Dict
-from urllib.parse import urlencode, urlparse, parse_qs
+from typing import List, Optional
+from urllib.parse import urlencode
 from bs4 import BeautifulSoup
 
 from ..base_scraper import NormalizedArticle
-from ..fund_matcher import match_fund_name
-from ...config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +115,8 @@ GOOGLE_NEWS_FUNDS = {
 class GoogleNewsArticle:
     """Single article from Google News RSS."""
     title: str
-    url: str  # Actual article URL (after redirect extraction)
+    url: str  # Google News URL (can't resolve to actual article)
+    source_url: str  # Source domain URL (e.g., https://www.bisnow.com)
     description: str
     published: Optional[datetime]
     source: str
@@ -165,24 +163,6 @@ class GoogleNewsRSSScraper:
             "ceid": "US:en",
         }
         return f"https://news.google.com/rss/search?{urlencode(params)}"
-
-    def _extract_real_url(self, google_url: str) -> str:
-        """
-        Extract the real article URL from Google News redirect URL.
-
-        Google News RSS returns URLs like:
-        https://news.google.com/rss/articles/CBMi...
-
-        These redirect to the actual article. We extract from the redirect
-        or follow the redirect to get the real URL.
-        """
-        # Try to extract from URL parameter first
-        parsed = urlparse(google_url)
-        if parsed.netloc == "news.google.com":
-            # Google News URLs need to be followed to get real URL
-            # For now, return as-is and let the fetch handle redirect
-            return google_url
-        return google_url
 
     def _should_exclude(self, text: str, fund_slug: str) -> bool:
         """Check if article should be excluded based on fund-specific rules."""
@@ -244,9 +224,16 @@ class GoogleNewsRSSScraper:
                         title = parts[0]
                         source = parts[1]
 
+                # Get source URL from RSS entry (e.g., https://www.bisnow.com)
+                source_entry = entry.get('source', {})
+                source_url = ""
+                if isinstance(source_entry, dict):
+                    source_url = source_entry.get('href', '')
+
                 items.append(GoogleNewsArticle(
                     title=title,
                     url=link,
+                    source_url=source_url,
                     description=description[:1000],
                     published=pub_date,
                     source=source,
@@ -263,21 +250,31 @@ class GoogleNewsRSSScraper:
             return []
 
     async def fetch_all_funds(self, days_back: int = 30) -> List[GoogleNewsArticle]:
-        """Fetch Google News for all configured funds."""
+        """Fetch Google News for all configured funds with rate limiting."""
         all_items: List[GoogleNewsArticle] = []
         seen_urls: set = set()
+        seen_titles: set = set()  # Also dedupe by title (same article, different queries)
         cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
 
-        # Build all queries
-        tasks = []
+        # Build all queries with fund context
+        queries_with_context = []
         for fund_slug in self.funds:
             fund_config = GOOGLE_NEWS_FUNDS.get(fund_slug, {})
             queries = fund_config.get("queries", [])
-
             for query in queries:
-                tasks.append(self.fetch_feed(query, fund_slug))
+                queries_with_context.append((query, fund_slug))
 
-        # Fetch all in parallel with small delays
+        # Rate-limited parallel fetching using semaphore
+        MAX_CONCURRENT = 5  # Limit concurrent requests to avoid rate limiting
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+
+        async def fetch_with_limit(query: str, fund_slug: str) -> List[GoogleNewsArticle]:
+            async with semaphore:
+                result = await self.fetch_feed(query, fund_slug)
+                await asyncio.sleep(0.2)  # Small delay between requests
+                return result
+
+        tasks = [fetch_with_limit(q, f) for q, f in queries_with_context]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for result in results:
@@ -286,8 +283,13 @@ class GoogleNewsRSSScraper:
                 continue
 
             for item in result:
-                # Skip duplicates
+                # Skip duplicates by URL
                 if item.url in seen_urls:
+                    continue
+
+                # Skip duplicates by title (same article from different queries)
+                title_key = item.title.lower().strip()
+                if title_key in seen_titles:
                     continue
 
                 # Skip old articles
@@ -295,68 +297,20 @@ class GoogleNewsRSSScraper:
                     continue
 
                 seen_urls.add(item.url)
+                seen_titles.add(title_key)
                 all_items.append(item)
 
-        logger.info(f"Google News: Found {len(all_items)} articles for {len(self.funds)} funds")
+        logger.info(f"Google News: Found {len(all_items)} unique articles for {len(self.funds)} funds")
         return all_items
-
-    async def fetch_full_article(self, url: str) -> Optional[str]:
-        """
-        Fetch full article content, following Google News redirects.
-
-        Google News RSS URLs redirect to the actual article. We follow
-        the redirect and extract the article text.
-        """
-        try:
-            # Follow redirects to get real URL
-            response = await self.client.get(url, timeout=15)
-            response.raise_for_status()
-
-            # Get the final URL after redirects
-            final_url = str(response.url)
-
-            soup = BeautifulSoup(response.text, 'lxml')
-
-            # Remove unwanted elements
-            for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'iframe']):
-                tag.decompose()
-
-            # Try common article content selectors
-            selectors = [
-                '[data-testid="article-body"]',
-                '.article-body', '.article-content', '.article__body',
-                '.story-body', '.story-content',
-                '.post-content', '.entry-content',
-                '[role="article"]', 'article',
-                '.content', 'main',
-            ]
-
-            for selector in selectors:
-                content = soup.select_one(selector)
-                if content:
-                    text = content.get_text(separator='\n', strip=True)
-                    if len(text) > 200:
-                        return text[:8000]
-
-            # Fallback to body
-            body = soup.find('body')
-            if body:
-                text = body.get_text(separator='\n', strip=True)
-                if len(text) > 200:
-                    return text[:8000]
-
-            return None
-
-        except httpx.HTTPError as e:
-            logger.debug(f"HTTP error fetching article {url}: {e}")
-            return None
-        except Exception as e:
-            logger.debug(f"Error fetching article {url}: {e}")
-            return None
 
     async def scrape_all(self, days_back: int = 30) -> List[NormalizedArticle]:
         """
         Full scraping pipeline for Google News RSS.
+
+        NOTE: Google News URLs use JavaScript redirects that httpx can't follow.
+        Instead of trying to fetch full articles (which fails), we use the RSS
+        data directly. The title + description is usually sufficient for the
+        LLM to extract deal information.
 
         Args:
             days_back: How many days back to look (default 30)
@@ -369,38 +323,31 @@ class GoogleNewsRSSScraper:
         if not articles:
             return []
 
-        # Parallel article fetching with rate limiting
-        MAX_CONCURRENT = 5
-        semaphore = asyncio.Semaphore(MAX_CONCURRENT)
-
-        async def fetch_with_limit(article: GoogleNewsArticle) -> tuple:
-            async with semaphore:
-                full_text = await self.fetch_full_article(article.url)
-                await asyncio.sleep(0.3)  # Rate limiting
-                return (article, full_text)
-
-        tasks = [fetch_with_limit(article) for article in articles]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
         normalized = []
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Article fetch failed: {result}")
-                continue
-
-            article, full_text = result
-
+        for article in articles:
             # Use today as fallback for missing dates
-            published_date = None
-            if article.published:
-                published_date = article.published.date()
-            else:
-                published_date = date.today()
+            published_date = article.published.date() if article.published else date.today()
 
-            text = full_text or f"{article.title}\n\n{article.description}"
+            # Build text from RSS data - include fund name context for better matching
+            # Format: Title + Source + Description (provides enough context for LLM)
+            fund_config = GOOGLE_NEWS_FUNDS.get(article.fund_slug, {})
+            fund_name = fund_config.get("name", article.fund_slug)
+
+            text_parts = [
+                f"Headline: {article.title}",
+                f"Source: {article.source}" if article.source else "",
+                f"Fund: {fund_name}",  # Add fund context for LLM
+                "",
+                article.description if article.description else "",
+            ]
+            text = "\n".join(part for part in text_parts if part)
+
+            # Use source_url if available, otherwise use Google News URL
+            # This helps with deduplication (same article from different queries)
+            url = article.source_url if article.source_url else article.url
 
             normalized.append(NormalizedArticle(
-                url=article.url,
+                url=url,
                 title=article.title,
                 text=text,
                 published_date=published_date,
@@ -410,7 +357,7 @@ class GoogleNewsRSSScraper:
                 fetched_at=datetime.now(timezone.utc),
             ))
 
-        logger.info(f"Google News: Normalized {len(normalized)} articles")
+        logger.info(f"Google News: Normalized {len(normalized)} articles (no full-text fetch, using RSS data)")
         return normalized
 
 
