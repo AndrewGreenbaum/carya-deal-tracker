@@ -160,20 +160,20 @@ export const DealModal = memo(function DealModal({ deal, onClose, onDealUpdated 
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop - instant, no animation */}
       <div
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 animate-fade-in"
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40"
         onClick={handleBackdropClick}
         aria-hidden="true"
       />
 
-      {/* Modal Content */}
+      {/* Modal Content - instant, no animation */}
       <div
         ref={modalRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="deal-modal-title"
-        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl mx-4 bg-[#0a0a0c] border border-slate-800 rounded-lg shadow-2xl animate-slide-up"
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl mx-4 bg-[#0a0a0c] border border-slate-800 rounded-lg shadow-2xl"
       >
         {/* Header */}
         <div className="flex items-start justify-between p-6 border-b border-slate-800">
