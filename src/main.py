@@ -1926,6 +1926,52 @@ async def run_fortune_scraper_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+class GoogleNewsResponse(BaseModel):
+    articles_found: int
+    fund_matches: int
+    funds_covered: List[str]
+
+
+@app.post("/scrapers/google-news", response_model=GoogleNewsResponse)
+async def run_google_news_scraper_endpoint(
+    days_back: int = Query(30, ge=1, le=90, description="Days to look back (default 30)"),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run Google News RSS scraper for external-only funds.
+
+    Provides coverage for funds without scrapable portfolio pages:
+    - Thrive Capital (0 deals - EXTERNAL)
+    - Benchmark (0 deals - EXTERNAL)
+    - First Round (0 deals - site doesn't announce)
+    - Greylock, GV, Founders Fund, Redpoint (low coverage)
+
+    Creates RSS feeds from Google News for each fund's name and partners.
+    FREE - no API key required.
+    """
+    from .harvester.scrapers.google_news_rss import GoogleNewsRSSScraper, GOOGLE_NEWS_FUNDS
+    from .scheduler.jobs import process_external_articles
+
+    try:
+        async with GoogleNewsRSSScraper() as scraper:
+            articles = await scraper.scrape_all(days_back=days_back)
+
+        # Process through extraction pipeline
+        stats = await process_external_articles(articles, "google_news", skip_title_filter=True)
+
+        cache.invalidate("deals")
+
+        return GoogleNewsResponse(
+            articles_found=len(articles),
+            fund_matches=len([a for a in articles if a.fund_slug]),
+            funds_covered=list(GOOGLE_NEWS_FUNDS.keys()),
+        )
+
+    except Exception as e:
+        logger.error("Request failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 # ----- Community/Early Signal Scrapers -----
 
 class YCombinatorResponse(BaseModel):
@@ -2723,6 +2769,7 @@ class AllSourcesResponse(BaseModel):
     axios_prorata: Optional[AxiosProRataResponse] = None
     strictlyvc: Optional[StrictlyVCResponse] = None
     prwire: Optional[PRWireResponse] = None  # PRNewswire, GlobeNewswire
+    google_news: Optional[GoogleNewsResponse] = None  # External-only fund coverage
     # Tier 1 Stealth Detection
     portfolio_diff: Optional[PortfolioDiffResponse] = None
     uspto_trademarks: Optional[USPTOTrademarkResponse] = None
@@ -3033,6 +3080,22 @@ async def run_all_sources(
     except Exception as e:
         logger.warning(f"PR wire RSS error: {e}")
         results["prwire"] = None
+
+    # Google News RSS (external-only fund coverage - Thrive, Benchmark, etc.)
+    try:
+        from .harvester.scrapers.google_news_rss import GoogleNewsRSSScraper, GOOGLE_NEWS_FUNDS
+        async with GoogleNewsRSSScraper() as scraper:
+            articles = await scraper.scrape_all(days_back=days)
+        # Process through extraction pipeline
+        stats = await process_external_articles(articles, "google_news", skip_title_filter=True)
+        results["google_news"] = GoogleNewsResponse(
+            articles_found=len(articles),
+            fund_matches=len([a for a in articles if a.fund_slug]),
+            funds_covered=list(GOOGLE_NEWS_FUNDS.keys()),
+        )
+    except Exception as e:
+        logger.warning(f"Google News RSS error: {e}")
+        results["google_news"] = None
 
     # ----- Tier 1 Stealth Detection -----
 

@@ -65,6 +65,9 @@ from .strictlyvc import StrictlyVCScraper, run_strictlyvc_scraper
 # PR Wire RSS (PRNewswire, GlobeNewswire, BusinessWire)
 from .prwire_rss import PRWireRSSScraper, scrape_prwire_feeds
 
+# Google News RSS (external-only fund coverage)
+from .google_news_rss import GoogleNewsRSSScraper, run_google_news_scraper
+
 __all__ = [
     # Original 5
     "A16ZScraper",
@@ -145,4 +148,7 @@ __all__ = [
     # PR Wire RSS
     "PRWireRSSScraper",
     "scrape_prwire_feeds",
+    # Google News RSS
+    "GoogleNewsRSSScraper",
+    "run_google_news_scraper",
 ]

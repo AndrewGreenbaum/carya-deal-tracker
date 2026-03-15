@@ -1126,6 +1126,19 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             logger.error("PR Wire RSS scraping failed: %s", e)
             return source_name, {"error": str(e)}
 
+    async def scrape_google_news() -> tuple:
+        """Scrape Google News RSS for external-only funds (Thrive, Benchmark, etc.)."""
+        source_name = "google_news"
+        try:
+            from ..harvester.scrapers.google_news_rss import GoogleNewsRSSScraper
+            async with GoogleNewsRSSScraper() as scraper:
+                articles = await scraper.scrape_all(days_back=days)
+            stats = await process_external_articles(articles, source_name, scan_job_id, skip_title_filter=True)
+            return source_name, stats
+        except Exception as e:
+            logger.error("Google News RSS scraping failed: %s", e)
+            return source_name, {"error": str(e)}
+
     async def scrape_ycombinator() -> tuple:
         """Scrape Y Combinator (Demo Day companies)."""
         source_name = "ycombinator"
@@ -1238,6 +1251,7 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
         scrape_axios(),
         scrape_strictlyvc(),
         scrape_prwire(),
+        scrape_google_news(),  # External-only fund coverage (Thrive, Benchmark, etc.)
         scrape_ycombinator(),
         scrape_github(),
         scrape_hackernews(),

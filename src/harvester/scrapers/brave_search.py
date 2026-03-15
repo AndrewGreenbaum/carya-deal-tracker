@@ -381,24 +381,30 @@ class BraveSearchScraper:
         return None
 
     def _build_fund_query(self, fund_slug: str, query_type: str = "lead") -> str:
-        """Build optimized search query for a specific fund."""
+        """Build optimized search query for a specific fund.
+
+        IMPORTANT: Keep queries SHORT to avoid Brave API 422 errors.
+        Use minimal OR clauses - the LLM will determine lead status from full article.
+        """
         fund_names = FUND_SEARCH_NAMES.get(fund_slug, [])
         if not fund_names:
             return ""
 
-        name_query = " OR ".join([f'"{name}"' for name in fund_names])
-        # FIXED: Use first 6 keywords (was 4) - now includes "Series B" and "Series C"
-        funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:6]])
+        # Use only primary fund name to keep query short
+        name_query = f'"{fund_names[0]}"'
+        # Minimal funding keywords - LLM extracts details from full article
+        funding_query = 'funding OR raises OR "Series A" OR "Series B"'
         exclusions = EXCLUSION_TERMS.get(fund_slug, [])
         exclusion_query = " ".join(exclusions) if exclusions else ""
 
         if query_type == "lead":
-            # FIXED: Use all lead phrases, not just first 6 (was missing "leads", "led" single words)
-            lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES])
-            query = f'({name_query}) AND ({lead_query}) AND ({funding_query})'
+            # SIMPLIFIED: Just 3 core lead phrases to avoid 422 errors
+            # The LLM will determine lead status from full article content
+            lead_query = '"led by" OR leads OR led'
+            query = f'{name_query} AND ({lead_query}) AND ({funding_query})'
         else:
-            participation_query = " OR ".join([f'"{phrase}"' for phrase in PARTICIPATION_PHRASES[:4]])
-            query = f'({name_query}) AND ({participation_query}) AND ({funding_query})'
+            participation_query = 'backs OR invests OR invested'
+            query = f'{name_query} AND ({participation_query}) AND ({funding_query})'
 
         if exclusion_query:
             query = f'{query} {exclusion_query}'
@@ -406,22 +412,25 @@ class BraveSearchScraper:
         return query
 
     def _build_enterprise_query(self, category: str = None) -> str:
-        """Build Enterprise AI funding query."""
+        """Build Enterprise AI funding query.
+
+        IMPORTANT: Keep queries SHORT to avoid Brave API 422 errors.
+        """
         if category and category in ENTERPRISE_CATEGORY_QUERIES:
             keywords = ENTERPRISE_CATEGORY_QUERIES[category]
         else:
-            keywords = " OR ".join([f'"{kw}"' for kw in ENTERPRISE_KEYWORDS[:6]])
+            # Simplified: Just core enterprise AI terms
+            keywords = '"enterprise AI" OR "AI startup" OR "AI infrastructure"'
 
-        # Use all lead phrases for broader coverage
-        lead_query = " OR ".join([f'"{phrase}"' for phrase in LEAD_PHRASES])
-        funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:6]])
-        return f'({keywords}) AND ({funding_query}) AND ({lead_query})'
+        # Simplified lead + funding query
+        return f'({keywords}) AND (funding OR raises) AND (led OR leads)'
 
     def _build_stealth_query(self) -> str:
-        """Build query for stealth startup funding news."""
-        stealth_query = " OR ".join([f'"{kw}"' for kw in STEALTH_KEYWORDS[:3]])
-        funding_query = " OR ".join([f'"{kw}"' for kw in FUNDING_KEYWORDS[:4]])
-        return f'({stealth_query}) AND ({funding_query}) AND ("AI" OR "startup")'
+        """Build query for stealth startup funding news.
+
+        IMPORTANT: Keep queries SHORT to avoid Brave API 422 errors.
+        """
+        return '"stealth startup" OR "emerges from stealth" AND funding'
 
     def _parse_news_results(self, data: Optional[Dict[str, Any]]) -> List[BraveSearchResult]:
         """Parse Brave news API response with validation."""
@@ -557,6 +566,9 @@ class BraveSearchScraper:
 
         return results
 
+    # Funds with disabled/weak website scrapers that need web search for coverage
+    EXTERNAL_ONLY_FUNDS = {"benchmark", "thrive", "first_round", "khosla", "founders_fund", "gv", "greylock"}
+
     async def search_partner_names_parallel(
         self,
         freshness: str = "pw",
@@ -566,9 +578,9 @@ class BraveSearchScraper:
 
         OPTIMIZED:
         - Uses batch queries with 3x concurrency
-        - Caches results for 1 hour (partner searches are stable)
-        Before: 47 queries × 0.5s = 23.5s
-        After: 47 queries / 3 × 0.3s ≈ 5s (+ cache hits = 0s)
+        - External-only funds use BOTH News AND Web APIs
+        - Other funds use News API only (have working website scrapers)
+        - Caches results for 12 hours
         """
         # Build all queries upfront
         queries: List[Tuple[str, str, int, str, bool]] = []
@@ -576,9 +588,13 @@ class BraveSearchScraper:
 
         for fund_slug, partner_queries in PARTNER_QUERIES.items():
             for query in partner_queries:
-                # API cost is per-query not per-result, so maximize coverage
-                queries.append((query, "news", 25, freshness, True))  # use_cache=True
+                # Always search news API
+                queries.append((query, "news", 25, freshness, True))
                 query_to_fund[query] = fund_slug
+
+                # External-only funds also get web search for max coverage
+                if fund_slug in self.EXTERNAL_ONLY_FUNDS:
+                    queries.append((query, "web", 25, freshness, True))
 
         # Execute in parallel with caching
         client = get_brave_client()
@@ -595,6 +611,7 @@ class BraveSearchScraper:
                     results[fund_slug] = []
                     fund_seen_urls[fund_slug] = set()
 
+                # Parse results (works for both news and web responses)
                 for result in self._parse_news_results(data):
                     if result.url not in fund_seen_urls[fund_slug]:
                         fund_seen_urls[fund_slug].add(result.url)
@@ -773,8 +790,11 @@ class BraveSearchScraper:
                     all_articles.append(article)
 
         # Parallel partner names search with caching
+        # Use past month (pm) for partner queries - external-only funds need longer coverage
+        # Partner queries are for funds without working website scrapers
         if include_partner_names:
-            partner_results = await self.search_partner_names_parallel(freshness)
+            partner_freshness = "pm" if freshness in ("pd", "pw") else freshness
+            partner_results = await self.search_partner_names_parallel(partner_freshness)
             for fund_slug, results in partner_results.items():
                 for result in results:
                     if result.url not in seen_urls:
