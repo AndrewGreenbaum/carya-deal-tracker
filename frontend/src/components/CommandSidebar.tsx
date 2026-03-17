@@ -86,12 +86,12 @@ export function CommandSidebar({
   });
 
   return (
-    <aside className="w-64 h-full bg-[#0d0d10] border-r border-slate-800 flex flex-col shrink-0">
+    <aside className="w-64 h-full bg-[#0a0a0d] border-r border-slate-800/60 flex flex-col shrink-0">
       {/* Scrollable content area - entire sidebar scrolls */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {/* Navigation */}
-        <nav className="p-4 border-b border-slate-800">
-          <div className="space-y-1">
+        <nav className="px-5 py-6 border-b border-slate-800/40">
+          <div className="space-y-2">
             <NavItem
               icon={<Home className="w-4 h-4" />}
               label="Dashboard"
@@ -108,23 +108,23 @@ export function CommandSidebar({
         </nav>
 
         {/* Search */}
-        <div className="p-4 border-b border-slate-800">
-          <div className="text-[10px] uppercase text-slate-500 font-bold mb-2 tracking-widest">
+        <div className="px-5 py-6 border-b border-slate-800/40">
+          <div className="text-[10px] uppercase text-slate-600 font-semibold mb-3 tracking-widest">
             Search
           </div>
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
             <input
               type="text"
               placeholder="Search companies..."
               value={filters.searchQuery || ''}
               onChange={(e) => onFiltersChange({ ...filters, searchQuery: e.target.value })}
-              className="w-full bg-slate-900 border border-slate-800 rounded pl-8 pr-8 py-1.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/50"
+              className="w-full bg-slate-900/50 border border-slate-700/50 rounded pl-8 pr-8 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-800/60"
             />
             {filters.searchQuery && (
               <button
                 onClick={() => onFiltersChange({ ...filters, searchQuery: '' })}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -133,11 +133,11 @@ export function CommandSidebar({
         </div>
 
         {/* Filters */}
-        <div className="p-4 border-b border-slate-800">
-          <div className="text-[10px] uppercase text-slate-500 font-bold mb-3 tracking-widest">
+        <div className="px-5 py-6 border-b border-slate-800/40">
+          <div className="text-[10px] uppercase text-slate-600 font-semibold mb-4 tracking-widest">
             Filters
           </div>
-          <div className="space-y-2">
+          <div className="space-y-3">
             <FilterCheckbox
               label="All AI Deals"
               checked={filters.aiDealsOnly}
@@ -160,10 +160,10 @@ export function CommandSidebar({
             />
 
             {/* Category Dropdown */}
-            <div className="mt-3">
+            <div className="mt-4 pt-2">
               <button
                 onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
-                className="w-full flex items-center justify-between text-sm text-slate-400 hover:text-white py-1.5 px-2 bg-slate-900 rounded border border-slate-800"
+                className="w-full flex items-center justify-between text-sm text-slate-400 hover:text-slate-200 py-2 px-3 bg-slate-900/50 rounded border border-slate-700/50"
               >
                 <span>
                   {filters.selectedCategory
@@ -178,11 +178,11 @@ export function CommandSidebar({
               </button>
 
               {showCategoryDropdown && (
-                <div className="mt-1 bg-slate-900 border border-slate-800 rounded overflow-hidden">
+                <div className="mt-1 bg-slate-900/80 border border-slate-700/50 rounded overflow-hidden">
                   <button
                     onClick={() => setCategory(undefined)}
-                    className={`w-full text-left text-xs px-2 py-1.5 hover:bg-slate-800 ${
-                      !filters.selectedCategory ? 'text-emerald-400' : 'text-slate-400'
+                    className={`w-full text-left text-xs px-3 py-2 hover:bg-slate-800/50 ${
+                      !filters.selectedCategory ? 'text-cyan-500' : 'text-slate-400'
                     }`}
                   >
                     All Categories
@@ -193,9 +193,9 @@ export function CommandSidebar({
                       <button
                         key={category}
                         onClick={() => setCategory(category)}
-                        className={`w-full text-left text-xs px-2 py-1.5 hover:bg-slate-800 ${
+                        className={`w-full text-left text-xs px-3 py-2 hover:bg-slate-800/50 ${
                           filters.selectedCategory === category
-                            ? 'text-emerald-400'
+                            ? 'text-cyan-500'
                             : 'text-slate-400'
                         }`}
                       >
@@ -209,21 +209,21 @@ export function CommandSidebar({
         </div>
 
         {/* Tracked Funds List */}
-        <div className="p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">
+        <div className="px-5 py-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="text-[10px] uppercase text-slate-600 font-semibold tracking-widest">
               Tracked Funds [{displayFunds.length}]
             </div>
             {filters.selectedFund && (
               <button
                 onClick={() => setFund(undefined)}
-                className="text-[10px] text-emerald-400 hover:underline"
+                className="text-[10px] text-cyan-600 hover:text-cyan-500"
               >
                 Clear
               </button>
             )}
           </div>
-          <ul className="space-y-1 text-xs text-slate-400" role="listbox" aria-label="Tracked funds filter">
+          <ul className="space-y-1.5 text-xs text-slate-400" role="listbox" aria-label="Tracked funds filter">
             {displayFunds.map((fund) => (
               <li key={fund.slug} role="presentation">
                 <button
@@ -237,10 +237,10 @@ export function CommandSidebar({
                       setFund(fund.slug === filters.selectedFund ? undefined : fund.slug);
                     }
                   }}
-                  className={`w-full flex items-center justify-between px-2 py-1.5 rounded text-left transition-colors cursor-pointer ${
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded text-left transition-colors cursor-pointer ${
                     fund.slug === filters.selectedFund
-                      ? 'bg-emerald-500/10 text-emerald-400 border-l-2 border-emerald-500'
-                      : 'hover:bg-slate-800 hover:text-white'
+                      ? 'bg-cyan-950/40 text-cyan-500 border-l-2 border-cyan-700'
+                      : 'hover:bg-slate-800/40 hover:text-slate-200'
                   } ${!fund.isActive ? 'opacity-50' : ''}`}
                 >
                   <span>{fund.name}</span>
@@ -257,17 +257,17 @@ export function CommandSidebar({
       </div>
 
       {/* Footer Actions - fixed at bottom */}
-      <div className="p-4 border-t border-slate-800 flex items-center justify-center gap-2 shrink-0">
+      <div className="px-5 py-4 border-t border-slate-800/40 flex items-center justify-center gap-3 shrink-0">
         <button
           onClick={onOpenAircraft}
-          className="p-2 hover:bg-emerald-500/10 text-slate-400 hover:text-emerald-400 rounded transition-colors group"
+          className="p-2 hover:bg-slate-800/50 text-slate-500 hover:text-cyan-500 rounded transition-colors"
           title="Live Aircraft Tracker"
         >
-          <Plane className="w-5 h-5 group-hover:animate-pulse" />
+          <Plane className="w-5 h-5" />
         </button>
         <button
           onClick={onOpenFeedback}
-          className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors"
+          className="p-2 hover:bg-slate-800/50 text-slate-500 hover:text-slate-300 rounded transition-colors"
           title="Submit feedback"
         >
           <Mail className="w-5 h-5" />
@@ -290,12 +290,12 @@ function NavItem({ icon, label, active, disabled, onClick }: NavItemProps) {
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`w-full flex items-center gap-2 px-3 py-2 rounded text-sm transition-colors ${
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded text-sm transition-colors ${
         active
-          ? 'bg-emerald-500/10 text-emerald-400 border-l-2 border-emerald-500'
+          ? 'bg-cyan-950/40 text-cyan-500 border-l-2 border-cyan-700'
           : disabled
           ? 'text-slate-600 cursor-not-allowed'
-          : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+          : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
       }`}
     >
       {icon}

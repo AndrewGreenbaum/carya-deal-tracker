@@ -201,7 +201,7 @@ body {
 }
 
 .filter-checkbox.checked {
-  @apply border-emerald-500 bg-emerald-500/20 text-emerald-500;
+  @apply border-cyan-700 bg-cyan-950/50 text-cyan-500;
 }
 
 .filter-checkbox.unchecked {
