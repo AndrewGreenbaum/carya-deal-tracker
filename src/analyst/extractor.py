@@ -531,6 +531,138 @@ def _is_crypto_deal(deal: DealExtraction, article_text: str) -> bool:
     return False
 
 
+# =============================================================================
+# AMOUNT VALIDATION (Detect market size confusion)
+# =============================================================================
+
+# Typical check sizes by round (upper bounds for flagging)
+# Based on 2024-2025 market data for AI deals
+ROUND_AMOUNT_THRESHOLDS = {
+    RoundType.PRE_SEED: 5_000_000,      # $5M max typical for pre-seed
+    RoundType.SEED: 25_000_000,          # $25M max typical for seed
+    RoundType.SERIES_A: 100_000_000,     # $100M max typical for Series A
+    RoundType.SERIES_B: 250_000_000,     # $250M max typical for Series B
+    RoundType.SERIES_C: 500_000_000,     # $500M max typical for Series C
+}
+
+# Patterns that indicate market size / TAM (not funding amount)
+MARKET_SIZE_PATTERNS = [
+    r'\$\s*(\d+(?:\.\d+)?)\s*(?:billion|B)\s*(?:market|industry|opportunity|TAM|sector)',
+    r'(?:market|industry|opportunity|TAM|sector)\s*(?:size|worth|valued at|of)\s*\$\s*(\d+(?:\.\d+)?)\s*(?:billion|B)',
+    r'(?:spend|spending|spent)\s*(?:over|approximately|about|around)?\s*\$\s*(\d+(?:\.\d+)?)\s*(?:billion|B)',
+    r'\$\s*(\d+(?:\.\d+)?)\s*(?:billion|B)\s*(?:annually|per year|a year)',
+]
+
+
+def _parse_amount_to_usd(amount_str: Optional[str]) -> Optional[int]:
+    """Parse amount string to USD integer.
+
+    Handles formats like: $50M, $50 million, 50M, $1.5B, etc.
+    Returns None if parsing fails.
+    """
+    if not amount_str:
+        return None
+
+    # Clean the string
+    amount_clean = amount_str.lower().strip()
+
+    # Remove common prefixes
+    for prefix in ['approximately', 'around', 'about', 'up to', 'over', '~', '$']:
+        amount_clean = amount_clean.replace(prefix, '').strip()
+
+    # Extract number and multiplier
+    match = re.search(r'([\d,.]+)\s*(billion|b|million|m|mn)?', amount_clean)
+    if not match:
+        return None
+
+    try:
+        number = float(match.group(1).replace(',', ''))
+        multiplier = match.group(2) or ''
+
+        if multiplier in ('billion', 'b'):
+            return int(number * 1_000_000_000)
+        elif multiplier in ('million', 'm', 'mn'):
+            return int(number * 1_000_000)
+        elif number < 1000:
+            # Small number without multiplier = assume millions (funding context)
+            return int(number * 1_000_000)
+        else:
+            return int(number)
+    except (ValueError, TypeError):
+        return None
+
+
+def _check_market_size_confusion(
+    deal: DealExtraction,
+    article_text: str,
+) -> tuple[bool, Optional[str]]:
+    """
+    Check if extracted amount might be confused with market size.
+
+    This catches cases like the Agency bug where:
+    - Article mentions "$150 billion market size"
+    - LLM extracts "$150 million" as funding amount
+
+    Returns:
+        (needs_review, reason): True if suspicious, with explanation
+    """
+    amount_usd = _parse_amount_to_usd(deal.amount)
+    if not amount_usd:
+        return False, None
+
+    text_lower = article_text.lower()
+
+    # Check 1: Round type vs typical check size
+    threshold = ROUND_AMOUNT_THRESHOLDS.get(deal.round_label)
+    if threshold and amount_usd > threshold:
+        # Check if article mentions similar billion figure that could be confused
+        for pattern in MARKET_SIZE_PATTERNS:
+            matches = re.findall(pattern, text_lower)
+            for match in matches:
+                try:
+                    billion_value = float(match)
+                    # If extracted amount (in millions) matches a market size (in billions)
+                    # e.g., extracted $150M, article has $150B market size
+                    if abs(amount_usd / 1_000_000 - billion_value) < 1:  # Within $1M
+                        return True, (
+                            f"Amount ${amount_usd/1_000_000:.0f}M may be confused with "
+                            f"${billion_value}B market size mentioned in article"
+                        )
+                except (ValueError, TypeError):
+                    continue
+
+        # Generic warning for unusually large amounts
+        round_name = deal.round_label.value.replace('_', ' ').title()
+        return True, (
+            f"{round_name} of ${amount_usd/1_000_000:.0f}M exceeds typical threshold "
+            f"(${threshold/1_000_000:.0f}M) - verify against source"
+        )
+
+    return False, None
+
+
+def _validate_deal_amount(deal: DealExtraction, article_text: str) -> DealExtraction:
+    """
+    Post-process validation for deal amounts.
+
+    Checks for:
+    1. Unusually large amounts for the round type
+    2. Possible confusion with market size figures
+
+    Sets amount_needs_review=True if suspicious.
+    """
+    needs_review, reason = _check_market_size_confusion(deal, article_text)
+
+    if needs_review:
+        logger.warning(
+            f"AMOUNT REVIEW NEEDED for {deal.startup_name}: {reason}"
+        )
+        deal.amount_needs_review = True
+        deal.amount_review_reason = reason
+
+    return deal
+
+
 def _is_consumer_ai_deal(deal: DealExtraction, article_text: str) -> bool:
     """
     Detect if deal is consumer AI (should NOT be Enterprise AI).
@@ -1003,6 +1135,11 @@ async def extract_deal(
                     )
                     response.is_new_announcement = False
                     response.announcement_rejection_reason = reason
+
+            # Post-process: validate deal amount (detect market size confusion)
+            # FIX (2026-01): Catches cases like $150B market size → $150M funding
+            if response and response.amount:
+                response = _validate_deal_amount(response, article_text)
 
             return response
 

@@ -97,6 +97,10 @@ class Deal(SQLModel, table=True):
     verification_snippet: Optional[str] = None  # Exact quote proving lead status
     lead_evidence_weak: bool = Field(default=False)  # True if snippet lacks "led by" language (trusting Claude)
 
+    # Amount validation (FIX 2026-01: detect market size confusion)
+    amount_needs_review: bool = Field(default=False)  # True if amount seems suspicious (e.g., Series A >$100M)
+    amount_review_reason: Optional[str] = None  # Why amount needs review (e.g., "may be confused with market size")
+
     # AI classification
     enterprise_category: Optional[str] = None  # infrastructure, security, vertical_saas, agentic, data_intelligence, consumer_ai, gaming_ai, social_ai, not_ai
     is_enterprise_ai: bool = Field(default=False, index=True)  # True if B2B Enterprise AI (not consumer)

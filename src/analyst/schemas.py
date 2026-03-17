@@ -310,6 +310,14 @@ class DealExtraction(BaseModel):
         default=False,
         description="True if snippet lacks explicit 'led by' language but Claude determined lead status"
     )
+    amount_needs_review: bool = Field(
+        default=False,
+        description="True if amount seems suspicious (e.g., Series A >$100M, possible market size confusion)"
+    )
+    amount_review_reason: Optional[str] = Field(
+        default=None,
+        description="Reason why amount needs review (e.g., 'Series A >$100M is unusual')"
+    )
 
     # Quality signals
     confidence_score: float = Field(
