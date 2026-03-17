@@ -10,18 +10,18 @@ import { RefreshCw, ArrowLeft, X, ZoomIn, ZoomOut, Maximize2, Move } from 'lucid
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'https://bud-tracker-backend-production.up.railway.app';
 
-// Sophisticated muted color palette
+// Palantir/Anduril muted tactical color palette
 const COLORS = {
-  root: { bg: '#1a2e2a', border: '#2dd4bf', text: '#5eead4', glow: 'rgba(45, 212, 191, 0.15)' },
-  pipeline: { bg: '#1a1f2e', border: '#6366f1', text: '#a5b4fc', glow: 'rgba(99, 102, 241, 0.12)' },
-  funds: { bg: '#2a1f1a', border: '#d97706', text: '#fbbf24', glow: 'rgba(217, 119, 6, 0.12)' },
-  classify: { bg: '#2a1a24', border: '#db2777', text: '#f472b6', glow: 'rgba(219, 39, 119, 0.12)' },
-  enrich: { bg: '#1a2a2e', border: '#0891b2', text: '#22d3ee', glow: 'rgba(8, 145, 178, 0.12)' },
-  ui: { bg: '#1a2a1f', border: '#059669', text: '#34d399', glow: 'rgba(5, 150, 105, 0.12)' },
-  infra: { bg: '#1f1a2e', border: '#7c3aed', text: '#a78bfa', glow: 'rgba(124, 58, 237, 0.12)' },
-  stealth: { bg: '#1f1f1f', border: '#525252', text: '#a3a3a3', glow: 'rgba(82, 82, 82, 0.12)' },
-  docs: { bg: '#1a2625', border: '#0d9488', text: '#2dd4bf', glow: 'rgba(13, 148, 136, 0.12)' },
-  child: { bg: '#141418', border: '#3f3f46', text: '#a1a1aa', glow: 'rgba(63, 63, 70, 0.1)' },
+  root: { bg: '#0f1a18', border: '#1e4d47', text: '#4a9089', glow: 'rgba(30, 77, 71, 0.2)' },
+  pipeline: { bg: '#0f1318', border: '#1e3a5f', text: '#4a7a9f', glow: 'rgba(30, 58, 95, 0.15)' },
+  funds: { bg: '#18140f', border: '#4a3d2a', text: '#8a7a5a', glow: 'rgba(74, 61, 42, 0.15)' },
+  classify: { bg: '#18101a', border: '#4a2a4a', text: '#8a5a8a', glow: 'rgba(74, 42, 74, 0.15)' },
+  enrich: { bg: '#0f1618', border: '#1e4a5f', text: '#4a8a9f', glow: 'rgba(30, 74, 95, 0.15)' },
+  ui: { bg: '#101810', border: '#2a4a2a', text: '#5a8a5a', glow: 'rgba(42, 74, 42, 0.15)' },
+  infra: { bg: '#14101a', border: '#3a2a5a', text: '#7a6a9a', glow: 'rgba(58, 42, 90, 0.15)' },
+  stealth: { bg: '#121212', border: '#2a2a2a', text: '#6a6a6a', glow: 'rgba(42, 42, 42, 0.15)' },
+  docs: { bg: '#0f1614', border: '#1e4a3a', text: '#4a8a7a', glow: 'rgba(30, 74, 58, 0.15)' },
+  child: { bg: '#0c0c0e', border: '#252528', text: '#7a7a7f', glow: 'rgba(37, 37, 40, 0.1)' },
 };
 
 // Node structure
@@ -431,7 +431,7 @@ export function MindMapDocs() {
               {/* Branch nodes */}
               {mindMap.children?.map((branch, i) => {
                 const angle = (i / mindMap.children!.length) * Math.PI * 2 - Math.PI / 2;
-                const radius = 280;
+                const radius = 420;
                 const x = Math.cos(angle) * radius;
                 const y = Math.sin(angle) * radius;
                 const colors = COLORS[branch.colorKey];
@@ -479,8 +479,8 @@ export function MindMapDocs() {
                     {isExpanded && branch.children && (
                       <>
                         {branch.children.map((child, ci) => {
-                          const childAngle = angle + ((ci - (branch.children!.length - 1) / 2) * 0.35);
-                          const childRadius = 130;
+                          const childAngle = angle + ((ci - (branch.children!.length - 1) / 2) * 0.4);
+                          const childRadius = 190;
                           const cx = Math.cos(childAngle) * childRadius;
                           const cy = Math.sin(childAngle) * childRadius;
                           const isSelected = selectedNode?.id === child.id;
@@ -519,23 +519,23 @@ export function MindMapDocs() {
                           style={{
                             left: '50%',
                             top: '50%',
-                            width: '300px',
-                            height: '300px',
+                            width: '450px',
+                            height: '450px',
                             transform: 'translate(-50%, -50%)',
                           }}
                         >
                           {branch.children.map((child, ci) => {
-                            const childAngle = angle + ((ci - (branch.children!.length - 1) / 2) * 0.35);
-                            const childRadius = 130;
-                            const ex = 150 + Math.cos(childAngle) * childRadius;
-                            const ey = 150 + Math.sin(childAngle) * childRadius;
-                            const mx = 150 + Math.cos(childAngle) * (childRadius * 0.5);
-                            const my = 150 + Math.sin(childAngle) * (childRadius * 0.5);
+                            const childAngle = angle + ((ci - (branch.children!.length - 1) / 2) * 0.4);
+                            const childRadius = 190;
+                            const ex = 225 + Math.cos(childAngle) * childRadius;
+                            const ey = 225 + Math.sin(childAngle) * childRadius;
+                            const mx = 225 + Math.cos(childAngle) * (childRadius * 0.5);
+                            const my = 225 + Math.sin(childAngle) * (childRadius * 0.5);
 
                             return (
                               <path
                                 key={child.id}
-                                d={`M 150,150 Q ${mx},${my} ${ex},${ey}`}
+                                d={`M 225,225 Q ${mx},${my} ${ex},${ey}`}
                                 fill="none"
                                 stroke={colors.border}
                                 strokeWidth="1"
@@ -557,25 +557,25 @@ export function MindMapDocs() {
                 style={{
                   left: '50%',
                   top: '50%',
-                  width: '700px',
-                  height: '700px',
+                  width: '1000px',
+                  height: '1000px',
                   transform: 'translate(-50%, -50%)',
                 }}
               >
                 {mindMap.children?.map((branch, i) => {
                   const angle = (i / mindMap.children!.length) * Math.PI * 2 - Math.PI / 2;
-                  const radius = 280;
-                  const ex = 350 + Math.cos(angle) * radius;
-                  const ey = 350 + Math.sin(angle) * radius;
-                  const mx = 350 + Math.cos(angle) * (radius * 0.4);
-                  const my = 350 + Math.sin(angle) * (radius * 0.4);
+                  const radius = 420;
+                  const ex = 500 + Math.cos(angle) * radius;
+                  const ey = 500 + Math.sin(angle) * radius;
+                  const mx = 500 + Math.cos(angle) * (radius * 0.4);
+                  const my = 500 + Math.sin(angle) * (radius * 0.4);
                   const colors = COLORS[branch.colorKey];
                   const isExpanded = expandedBranch === branch.id;
 
                   return (
                     <path
                       key={branch.id}
-                      d={`M 350,350 Q ${mx},${my} ${ex},${ey}`}
+                      d={`M 500,500 Q ${mx},${my} ${ex},${ey}`}
                       fill="none"
                       stroke={isExpanded ? colors.border : '#27272a'}
                       strokeWidth={isExpanded ? 2 : 1}
