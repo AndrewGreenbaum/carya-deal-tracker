@@ -3487,6 +3487,56 @@ async def get_scan_detail(
         )
 
 
+@app.post("/scans/backfill-counts")
+async def backfill_scan_counts(api_key: str = Depends(verify_api_key)):
+    """
+    Backfill lead_deals_found and enterprise_ai_deals_found for existing scans.
+
+    Run once to fix historical scan records that have 0 counts.
+    """
+    from .archivist.models import ScanJob
+    from sqlalchemy import Integer
+
+    updated = 0
+    async with get_session() as session:
+        # Get all scans with 0 lead/enterprise counts but have deals
+        scans_result = await session.execute(
+            select(ScanJob).where(
+                ScanJob.lead_deals_found == 0,
+                ScanJob.enterprise_ai_deals_found == 0,
+            )
+        )
+        scans = scans_result.scalars().all()
+
+        for scan in scans:
+            # Count actual deals for this scan
+            count_result = await session.execute(
+                select(
+                    func.count(Deal.id).label("total"),
+                    func.sum(func.cast(Deal.is_lead_confirmed, Integer)).label("leads"),
+                    func.sum(func.cast(Deal.is_enterprise_ai, Integer)).label("enterprise_ai"),
+                ).where(Deal.scan_job_id == scan.id)
+            )
+            counts = count_result.one()
+            lead_deals = int(counts.leads or 0)
+            enterprise_ai_deals = int(counts.enterprise_ai or 0)
+            total = int(counts.total or 0)
+
+            if lead_deals > 0 or enterprise_ai_deals > 0 or total > 0:
+                scan.lead_deals_found = lead_deals
+                scan.enterprise_ai_deals_found = enterprise_ai_deals
+                if total > scan.total_deals_saved:
+                    scan.total_deals_saved = total
+                updated += 1
+
+        await session.commit()
+
+    return {
+        "status": "success",
+        "scans_updated": updated,
+    }
+
+
 # ----- Cache Management -----
 
 @app.post("/cache/clear")

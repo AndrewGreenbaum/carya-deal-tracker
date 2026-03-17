@@ -1473,14 +1473,28 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
         # Update ScanJob record with success
         if scan_job_db_id:
             try:
-                # Calculate totals from external_results
+                # Build fund scraper results dict (same format as external_results)
+                fund_results = {}
+                for r in results:
+                    fund_results[r.fund_slug] = {
+                        "articles_found": r.articles_found,
+                        "articles_received": r.articles_found,  # For consistency
+                        "deals_extracted": r.deals_extracted,
+                        "deals_saved": r.deals_saved,
+                        "articles_skipped_duplicate": r.articles_skipped_duplicate,
+                        "errors": len(r.errors),
+                        "error_message": r.errors[0] if r.errors else None,
+                    }
+
+                # Merge fund results + external results
+                all_source_results = {**fund_results, **external_results}
+
+                # Calculate totals from all sources
                 total_articles = fund_articles
-                total_extracted = 0
+                total_extracted = sum(r.deals_extracted for r in results)
                 total_saved = fund_deals
-                total_duplicates = 0
+                total_duplicates = sum(r.articles_skipped_duplicate for r in results)
                 total_errors = fund_errors
-                lead_deals = 0
-                enterprise_ai_deals = 0
 
                 for source_name, stats in external_results.items():
                     if source_name.startswith("_") or source_name == "total_deals_saved":
@@ -1492,8 +1506,29 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
                         total_duplicates += stats.get("articles_skipped_duplicate", 0)
                         total_errors += stats.get("errors", 0)
 
+                # Query actual deal counts from database (most accurate)
                 async with get_session() as session:
-                    from sqlalchemy import select
+                    from sqlalchemy import select, func, Integer
+                    from ..archivist.models import Deal
+
+                    # Count lead deals and enterprise AI deals for this scan
+                    count_result = await session.execute(
+                        select(
+                            func.count(Deal.id).label("total"),
+                            func.sum(func.cast(Deal.is_lead_confirmed, Integer)).label("leads"),
+                            func.sum(func.cast(Deal.is_enterprise_ai, Integer)).label("enterprise_ai"),
+                        ).where(Deal.scan_job_id == scan_job_db_id)
+                    )
+                    counts = count_result.one()
+                    lead_deals = int(counts.leads or 0)
+                    enterprise_ai_deals = int(counts.enterprise_ai or 0)
+                    actual_total_saved = int(counts.total or 0)
+
+                    # Use actual count from DB (more reliable)
+                    if actual_total_saved > 0:
+                        total_saved = actual_total_saved
+
+                    # Update the scan job record
                     stmt = select(ScanJob).where(ScanJob.id == scan_job_db_id)
                     result = await session.execute(stmt)
                     scan_job = result.scalar_one_or_none()
@@ -1506,9 +1541,14 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
                         scan_job.total_deals_saved = total_saved
                         scan_job.total_duplicates_skipped = total_duplicates
                         scan_job.total_errors = total_errors
-                        scan_job.source_results_json = json.dumps(external_results, default=str)
+                        scan_job.lead_deals_found = lead_deals
+                        scan_job.enterprise_ai_deals_found = enterprise_ai_deals
+                        scan_job.source_results_json = json.dumps(all_source_results, default=str)
                         await session.commit()
-                        logger.info(f"[{job_id}] Updated ScanJob record with success stats")
+                        logger.info(
+                            f"[{job_id}] Updated ScanJob: saved={total_saved}, "
+                            f"leads={lead_deals}, enterprise_ai={enterprise_ai_deals}"
+                        )
             except Exception as e:
                 logger.warning(f"[{job_id}] Failed to update ScanJob record: {e}")
 
