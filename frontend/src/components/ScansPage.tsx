@@ -537,9 +537,6 @@ export function ScansPage() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold">Scan History</h1>
-              <p className="text-slate-400 mt-1">
-                View all scraping jobs and the deals they found
-              </p>
             </div>
             <button
               onClick={fetchScans}
