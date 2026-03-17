@@ -11,7 +11,44 @@ import {
   TrendingUp,
   AlertTriangle,
   RefreshCw,
+  Info,
+  Filter,
+  Zap,
+  Eye,
+  Ban,
 } from 'lucide-react';
+
+// Source configuration - reflects current scraper settings
+const SOURCE_CONFIG = {
+  // Sources that bypass title filter (funding-focused)
+  bypassFilter: [
+    { name: 'sec_edgar', label: 'SEC Edgar', reason: 'Official filings' },
+    { name: 'brave_search', label: 'Brave Search', reason: 'Targeted queries' },
+    { name: 'tech_funding_news', label: 'Tech Funding News', reason: 'Funding-focused site' },
+    { name: 'ventureburn', label: 'Ventureburn', reason: 'Funding-focused site' },
+    { name: 'crunchbase_news', label: 'Crunchbase News', reason: 'Funding database' },
+    { name: 'linkedin_jobs', label: 'LinkedIn Jobs', reason: 'Stealth detector' },
+    { name: 'google_news', label: 'Google News', reason: 'Fund-specific queries' },
+  ],
+  // Early signal sources (0 deals expected - they watch pre-funding)
+  earlySignals: [
+    { name: 'ycombinator', label: 'Y Combinator', purpose: 'Demo Day companies' },
+    { name: 'github_trending', label: 'GitHub Trending', purpose: 'Dev tools pre-funding' },
+    { name: 'hackernews', label: 'Hacker News', purpose: 'Launch posts' },
+  ],
+  // Sources with title filter (general news)
+  withFilter: [
+    { name: 'techcrunch', label: 'TechCrunch' },
+    { name: 'google_alerts', label: 'Google Alerts' },
+    { name: 'prwire', label: 'PR Wire' },
+  ],
+  // Disabled sources
+  disabled: [
+    { name: 'venturebeat', label: 'VentureBeat', reason: 'RSS blocked Dec 2025' },
+    { name: 'axios_prorata', label: 'Axios Pro Rata', reason: 'RSS 404 Dec 2025' },
+    { name: 'strictlyvc', label: 'StrictlyVC', reason: 'RSS dead since 2020' },
+  ],
+};
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 const API_KEY = import.meta.env.VITE_API_KEY || 'dev-key';
@@ -105,6 +142,139 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+// Get source category info
+function getSourceCategory(name: string): { category: string; icon: typeof Zap; color: string } {
+  const bypassNames = SOURCE_CONFIG.bypassFilter.map(s => s.name);
+  const earlyNames = SOURCE_CONFIG.earlySignals.map(s => s.name);
+  const filterNames = SOURCE_CONFIG.withFilter.map(s => s.name);
+
+  if (bypassNames.includes(name)) {
+    return { category: 'Funding-focused', icon: Zap, color: 'text-emerald-400' };
+  }
+  if (earlyNames.includes(name)) {
+    return { category: 'Early signal', icon: Eye, color: 'text-blue-400' };
+  }
+  if (filterNames.includes(name)) {
+    return { category: 'Filtered', icon: Filter, color: 'text-amber-400' };
+  }
+  // Fund scrapers (a16z, sequoia, etc.)
+  return { category: 'Fund scraper', icon: Building2, color: 'text-purple-400' };
+}
+
+function DataSourcesPanel({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => void }) {
+  return (
+    <div className="mb-6 bg-slate-900/50 border border-slate-700/50 rounded-lg overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full p-4 flex items-center justify-between hover:bg-slate-800/30 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Info className="w-5 h-5 text-slate-400" />
+          <span className="font-medium">Data Sources Configuration</span>
+        </div>
+        {isOpen ? (
+          <ChevronDown className="w-5 h-5 text-slate-400" />
+        ) : (
+          <ChevronRight className="w-5 h-5 text-slate-400" />
+        )}
+      </button>
+
+      {isOpen && (
+        <div className="border-t border-slate-700/50 p-4 space-y-4">
+          {/* Bypass Filter Sources */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Zap className="w-4 h-4 text-emerald-400" />
+              <span className="text-sm font-medium text-emerald-400">Bypass Title Filter</span>
+              <span className="text-xs text-slate-500">(All articles sent to Claude)</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {SOURCE_CONFIG.bypassFilter.map(s => (
+                <span
+                  key={s.name}
+                  className="px-2 py-1 bg-emerald-900/20 border border-emerald-700/30 rounded text-xs"
+                  title={s.reason}
+                >
+                  {s.label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Early Signal Sources */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Eye className="w-4 h-4 text-blue-400" />
+              <span className="text-sm font-medium text-blue-400">Early Signals</span>
+              <span className="text-xs text-slate-500">(Pre-funding watchlist, 0 deals expected)</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {SOURCE_CONFIG.earlySignals.map(s => (
+                <span
+                  key={s.name}
+                  className="px-2 py-1 bg-blue-900/20 border border-blue-700/30 rounded text-xs"
+                  title={s.purpose}
+                >
+                  {s.label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Filtered Sources */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Filter className="w-4 h-4 text-amber-400" />
+              <span className="text-sm font-medium text-amber-400">With Title Filter</span>
+              <span className="text-xs text-slate-500">(General news, filtered before Claude)</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {SOURCE_CONFIG.withFilter.map(s => (
+                <span
+                  key={s.name}
+                  className="px-2 py-1 bg-amber-900/20 border border-amber-700/30 rounded text-xs"
+                >
+                  {s.label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Disabled Sources */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Ban className="w-4 h-4 text-red-400" />
+              <span className="text-sm font-medium text-red-400">Disabled</span>
+              <span className="text-xs text-slate-500">(RSS feeds broken/deprecated)</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {SOURCE_CONFIG.disabled.map(s => (
+                <span
+                  key={s.name}
+                  className="px-2 py-1 bg-red-900/20 border border-red-700/30 rounded text-xs line-through opacity-60"
+                  title={s.reason}
+                >
+                  {s.label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Fund Scrapers note */}
+          <div className="pt-2 border-t border-slate-700/30">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-purple-400" />
+              <span className="text-sm text-slate-400">
+                <span className="text-purple-400 font-medium">18 Fund Scrapers</span> (a16z, Sequoia, etc.) run separately in Phase 1
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SourceBreakdown({ sources }: { sources: Record<string, ScanSourceStats> }) {
   const sortedSources = Object.entries(sources)
     .filter(([name]) => name !== 'total_deals_saved')
@@ -112,29 +282,36 @@ function SourceBreakdown({ sources }: { sources: Record<string, ScanSourceStats>
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-3">
-      {sortedSources.map(([name, stats]) => (
-        <div
-          key={name}
-          className={`p-2 rounded text-xs ${
-            stats.error_message
-              ? 'bg-red-900/20 border border-red-700/30'
-              : stats.deals_saved > 0
-              ? 'bg-emerald-900/20 border border-emerald-700/30'
-              : 'bg-slate-800/50 border border-slate-700/30'
-          }`}
-        >
-          <div className="font-medium text-white truncate">{name.replace(/_/g, ' ')}</div>
-          {stats.error_message ? (
-            <div className="text-red-400 truncate" title={stats.error_message}>
-              Error
+      {sortedSources.map(([name, stats]) => {
+        const { category, icon: Icon, color } = getSourceCategory(name);
+        return (
+          <div
+            key={name}
+            className={`p-2 rounded text-xs ${
+              stats.error_message
+                ? 'bg-red-900/20 border border-red-700/30'
+                : stats.deals_saved > 0
+                ? 'bg-emerald-900/20 border border-emerald-700/30'
+                : 'bg-slate-800/50 border border-slate-700/30'
+            }`}
+          >
+            <div className="flex items-center gap-1.5">
+              <Icon className={`w-3 h-3 ${color} flex-shrink-0`} />
+              <span className="font-medium text-white truncate">{name.replace(/_/g, ' ')}</span>
             </div>
-          ) : (
-            <div className="text-slate-400">
-              {stats.articles_found} articles → {stats.deals_saved} deals
-            </div>
-          )}
-        </div>
-      ))}
+            {stats.error_message ? (
+              <div className="text-red-400 truncate mt-1" title={stats.error_message}>
+                Error
+              </div>
+            ) : (
+              <div className="text-slate-400 mt-1">
+                {stats.articles_found} articles → {stats.deals_saved} deals
+              </div>
+            )}
+            <div className={`text-[10px] ${color} mt-0.5 opacity-70`}>{category}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -316,6 +493,7 @@ export function ScansPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [showSourcesPanel, setShowSourcesPanel] = useState(false);
   const limit = 20;
 
   const fetchScans = useCallback(async () => {
@@ -382,6 +560,12 @@ export function ScansPage() {
             {error}
           </div>
         )}
+
+        {/* Data Sources Configuration Panel */}
+        <DataSourcesPanel
+          isOpen={showSourcesPanel}
+          onToggle={() => setShowSourcesPanel(!showSourcesPanel)}
+        />
 
         {loading && scans.length === 0 ? (
           <div className="flex items-center justify-center py-12">

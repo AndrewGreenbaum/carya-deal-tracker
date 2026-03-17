@@ -359,7 +359,6 @@ function App() {
       {/* Header */}
       <CommandHeader
         systemStatus={systemStatus}
-        onRefresh={handleRefresh}
         onSettingsClick={() => setSettingsOpen(true)}
       />
 

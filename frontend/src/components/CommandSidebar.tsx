@@ -90,7 +90,7 @@ export function CommandSidebar({
       {/* Scrollable content area - entire sidebar scrolls */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {/* Navigation */}
-        <nav className="px-5 py-6 border-b border-slate-800/40">
+        <nav className="px-5 py-4 border-b border-slate-800/40">
           <div className="space-y-2">
             <NavItem
               icon={<Home className="w-4 h-4" />}
@@ -108,7 +108,7 @@ export function CommandSidebar({
         </nav>
 
         {/* Search */}
-        <div className="px-5 py-6 border-b border-slate-800/40">
+        <div className="px-5 py-4 border-b border-slate-800/40">
           <div className="text-[10px] uppercase text-slate-600 font-semibold mb-3 tracking-widest">
             Search
           </div>
@@ -133,7 +133,7 @@ export function CommandSidebar({
         </div>
 
         {/* Filters */}
-        <div className="px-5 py-6 border-b border-slate-800/40">
+        <div className="px-5 py-4 border-b border-slate-800/40">
           <div className="text-[10px] uppercase text-slate-600 font-semibold mb-4 tracking-widest">
             Filters
           </div>
@@ -209,7 +209,7 @@ export function CommandSidebar({
         </div>
 
         {/* Tracked Funds List */}
-        <div className="px-5 py-6">
+        <div className="px-5 py-4">
           <div className="flex items-center justify-between mb-4">
             <div className="text-[10px] uppercase text-slate-600 font-semibold tracking-widest">
               Tracked Funds [{displayFunds.length}]

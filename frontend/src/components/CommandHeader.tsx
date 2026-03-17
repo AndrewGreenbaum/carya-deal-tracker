@@ -12,21 +12,17 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Database, Server, Cpu, Settings, RefreshCw, Clock, History } from 'lucide-react';
+import { Database, Server, Cpu, Settings, Clock, History } from 'lucide-react';
 import type { SystemStatus } from '../types';
 
 interface CommandHeaderProps {
   systemStatus: SystemStatus;
-  onRefresh: () => void;
   onSettingsClick: () => void;
-  isRefreshing?: boolean;
 }
 
 export function CommandHeader({
   systemStatus,
-  onRefresh,
   onSettingsClick,
-  isRefreshing = false,
 }: CommandHeaderProps) {
   // Live countdown state - updates every second
   const [countdown, setCountdown] = useState<string | null>(null);
@@ -123,15 +119,6 @@ export function CommandHeader({
         )}
 
         {/* Action Buttons */}
-        <button
-          onClick={onRefresh}
-          disabled={isRefreshing}
-          className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 rounded border border-slate-800 hover:border-emerald-500/50 transition-colors disabled:opacity-50"
-          title="Refresh data"
-        >
-          <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
-        </button>
-
         <button
           onClick={() => window.location.href = '/scans'}
           className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 rounded border border-slate-800 hover:border-cyan-500/50 transition-colors text-slate-400 hover:text-cyan-400"
