@@ -258,6 +258,15 @@ async def log_token_usage(
     source = source_name or _current_source_name or "unknown"
     job_id = scan_id or _current_scan_id
 
+    # DEBUG: Log detailed attribution info when falling back to unknown
+    if source == "unknown":
+        logger.warning(
+            f"[TOKEN ATTRIBUTION] Falling back to 'unknown' - "
+            f"source_name={repr(source_name)}, "
+            f"_current_source_name={repr(_current_source_name)}, "
+            f"article_url={article_url[:80] if article_url else 'None'}..."
+        )
+
     cost = _calculate_cost(input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
     logger.info(f"[TOKEN DEBUG] log_token_usage called: source={source}, in={input_tokens}, out={output_tokens}")
 
