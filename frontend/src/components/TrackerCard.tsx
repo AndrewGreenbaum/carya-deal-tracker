@@ -98,17 +98,20 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
 
           {/* Website Link */}
           {item.website && (
-            <a
-              href={item.website}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="text-slate-400 hover:text-emerald-400 transition-colors"
-              title={item.website}
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                window.open(item.website, '_blank', 'noopener,noreferrer');
+              }}
+              className="text-slate-400 hover:text-emerald-400 transition-colors cursor-pointer"
+              title={`Open ${item.website}`}
               aria-label={`Visit ${item.companyName} website`}
             >
               <ExternalLink className="w-3 h-3" aria-hidden="true" />
-            </a>
+            </button>
           )}
         </div>
       </div>
