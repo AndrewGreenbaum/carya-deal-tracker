@@ -18,6 +18,7 @@ import logging
 import re
 import instructor
 import httpx
+from contextvars import ContextVar
 from anthropic import Anthropic, APITimeoutError, APIError, RateLimitError
 from instructor.core import InstructorRetryException
 from typing import Optional, List, Set
@@ -25,9 +26,10 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# Thread-local storage for source tracking (set by callers)
-_current_source_name: Optional[str] = None
-_current_scan_id: Optional[str] = None
+# Task-local context for source tracking (async-safe with contextvars)
+# Each asyncio task gets its own copy, preventing race conditions in parallel execution
+_current_source_name: ContextVar[Optional[str]] = ContextVar('source_name', default=None)
+_current_scan_id: ContextVar[Optional[str]] = ContextVar('scan_id', default=None)
 
 # API call configuration - loaded from settings (see below after settings import)
 
@@ -199,21 +201,20 @@ def set_extraction_context(source_name: str, scan_id: Optional[str] = None) -> N
     """Set the current extraction context for token logging.
 
     Call this before starting extraction to track which source is being processed.
+    Uses contextvars for async-safe task-local storage.
 
     Args:
         source_name: Name of the source (e.g., "brave_search", "techcrunch", "a16z")
         scan_id: Optional job ID for grouping (e.g., scan timestamp)
     """
-    global _current_source_name, _current_scan_id
-    _current_source_name = source_name
-    _current_scan_id = scan_id
+    _current_source_name.set(source_name)
+    _current_scan_id.set(scan_id)
 
 
 def clear_extraction_context() -> None:
     """Clear the extraction context after processing."""
-    global _current_source_name, _current_scan_id
-    _current_source_name = None
-    _current_scan_id = None
+    _current_source_name.set(None)
+    _current_scan_id.set(None)
 
 
 def _calculate_cost(
@@ -254,16 +255,18 @@ async def log_token_usage(
         cache_read_tokens: Tokens read from cache
         cache_write_tokens: Tokens written to cache
     """
-    # Use context values if not explicitly provided
-    source = source_name or _current_source_name or "unknown"
-    job_id = scan_id or _current_scan_id
+    # Use context values if not explicitly provided (ContextVar.get() for async safety)
+    context_source = _current_source_name.get()
+    context_scan_id = _current_scan_id.get()
+    source = source_name or context_source or "unknown"
+    job_id = scan_id or context_scan_id
 
     # DEBUG: Log detailed attribution info when falling back to unknown
     if source == "unknown":
         logger.warning(
             f"[TOKEN ATTRIBUTION] Falling back to 'unknown' - "
             f"source_name={repr(source_name)}, "
-            f"_current_source_name={repr(_current_source_name)}, "
+            f"context_source={repr(context_source)}, "
             f"article_url={article_url[:80] if article_url else 'None'}..."
         )
 
