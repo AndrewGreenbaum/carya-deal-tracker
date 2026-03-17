@@ -1008,7 +1008,8 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             async with LinkedInJobsScraper() as scraper:
                 articles = await scraper.scrape_all()
 
-            stats = await process_external_articles(articles, "linkedin_jobs", scan_job_id)
+            # Bypass title filter - LinkedIn Jobs searches for stealth signals, not funding headlines
+            stats = await process_external_articles(articles, "linkedin_jobs", scan_job_id, skip_title_filter=True)
             results["linkedin_jobs"] = stats
             total_deals_saved += stats["deals_saved"]
 
@@ -1075,7 +1076,8 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             from ..harvester.scrapers.crunchbase_news import CrunchbaseNewsScraper
             async with CrunchbaseNewsScraper() as scraper:
                 articles = await scraper.scrape_all(hours_back=days * 24)
-            stats = await process_external_articles(articles, source_name, scan_job_id)
+            # Bypass title filter - Crunchbase is funding-focused
+            stats = await process_external_articles(articles, source_name, scan_job_id, skip_title_filter=True)
             return source_name, stats
         except Exception as e:
             logger.error("Crunchbase News scraping failed: %s", e)
@@ -1193,7 +1195,8 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             from ..harvester.scrapers.tech_funding_news import TechFundingNewsScraper
             async with TechFundingNewsScraper() as scraper:
                 articles = await scraper.scrape_all(hours_back=days * 24)
-            stats = await process_external_articles(articles, source_name, scan_job_id)
+            # Bypass title filter - this is literally a funding news site
+            stats = await process_external_articles(articles, source_name, scan_job_id, skip_title_filter=True)
             return source_name, stats
         except Exception as e:
             logger.error("Tech Funding News scraping failed: %s", e)
@@ -1206,7 +1209,8 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             from ..harvester.scrapers.ventureburn import VentureburnScraper
             async with VentureburnScraper() as scraper:
                 articles = await scraper.scrape_all(hours_back=days * 24)
-            stats = await process_external_articles(articles, source_name, scan_job_id)
+            # Bypass title filter - Ventureburn is funding-focused
+            stats = await process_external_articles(articles, source_name, scan_job_id, skip_title_filter=True)
             return source_name, stats
         except Exception as e:
             logger.error("Ventureburn scraping failed: %s", e)
@@ -1249,14 +1253,18 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             return source_name, {"error": str(e)}
 
     # Run all free sources in parallel
-    logger.info("Phase 2b: Running 13 free RSS/HTTP sources in parallel...")
+    # NOTE: Removed 3 dead RSS sources (Dec 2025):
+    #   - scrape_venturebeat() - RSS blocked/empty
+    #   - scrape_axios() - RSS 404, feed deprecated
+    #   - scrape_strictlyvc() - RSS dead since April 2020
+    logger.info("Phase 2b: Running 11 free RSS/HTTP sources in parallel...")
     parallel_tasks = [
         scrape_google_alerts(),
         scrape_techcrunch(),
         scrape_crunchbase(),
-        scrape_venturebeat(),
-        scrape_axios(),
-        scrape_strictlyvc(),
+        # scrape_venturebeat(),  # DISABLED: RSS blocked Dec 2025
+        # scrape_axios(),  # DISABLED: RSS 404 Dec 2025
+        # scrape_strictlyvc(),  # DISABLED: RSS dead since April 2020
         scrape_prwire(),
         scrape_google_news(),  # External-only fund coverage (Thrive, Benchmark, etc.)
         scrape_ycombinator(),
