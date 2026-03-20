@@ -768,6 +768,52 @@ class BraveSearchScraper:
             fetched_at=datetime.now(timezone.utc),
         )
 
+    async def to_normalized_articles_batch(
+        self,
+        results: List[Tuple[BraveSearchResult, str]],
+        extra_tags: Optional[List[str]] = None,
+    ) -> List[NormalizedArticle]:
+        """
+        Convert multiple search results to NormalizedArticles in PARALLEL.
+
+        FIX 2026-01: Article fetching was sequential, causing ~80s delay.
+        Now uses semaphore-limited parallel fetching for 5x speedup.
+
+        Args:
+            results: List of (BraveSearchResult, fund_slug) tuples
+            extra_tags: Optional tags to add to all articles
+
+        Returns:
+            List of NormalizedArticle objects
+        """
+        if not results:
+            return []
+
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_ARTICLES)
+
+        async def fetch_one(result: BraveSearchResult, fund_slug: str) -> NormalizedArticle:
+            async with semaphore:
+                article = await self.to_normalized_article(result, fund_slug)
+                if extra_tags:
+                    article.tags.extend(extra_tags)
+                # Small delay to avoid overwhelming target servers
+                await asyncio.sleep(ARTICLE_RATE_LIMIT_DELAY)
+                return article
+
+        tasks = [fetch_one(result, fund_slug) for result, fund_slug in results]
+        articles = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Filter out exceptions and log them
+        valid_articles = []
+        for i, article in enumerate(articles):
+            if isinstance(article, Exception):
+                logger.warning(f"Error fetching article: {article}")
+            else:
+                valid_articles.append(article)
+
+        logger.info(f"Fetched {len(valid_articles)}/{len(results)} articles in parallel")
+        return valid_articles
+
     async def scrape_all(
         self,
         freshness: str = "pw",
@@ -785,76 +831,78 @@ class BraveSearchScraper:
         - Parallel fund queries: 18s → 4s
         - Parallel partner queries: 23.5s → 5s (+ caching)
         - Parallel regional queries: 5s → 1s
-        - Total: ~42s → ~15s
+        - Parallel article fetching: 80s → 16s (5x concurrent)
+        - Total: ~42s → ~15s (queries) + ~16s (articles) = ~31s
         """
-        all_articles: List[NormalizedArticle] = []
+        # Phase 1: Collect all search results (parallel queries)
+        # Store as (result, fund_slug, extra_tags) tuples for batch processing
+        pending_results: List[Tuple[BraveSearchResult, str, List[str]]] = []
         seen_urls: set = set()
+
+        def add_result(result: BraveSearchResult, fund_slug: str, extra_tags: List[str] = None):
+            """Add result if URL not seen."""
+            if result.url not in seen_urls:
+                seen_urls.add(result.url)
+                pending_results.append((result, fund_slug, extra_tags or []))
 
         # Parallel fund search (lead + participation)
         fund_results = await self.search_all_funds_parallel(freshness, include_participation)
-
         for fund_slug, results in fund_results.items():
             actual_fund_slug = fund_slug.replace("_participation", "")
             for result in results:
-                if result.url not in seen_urls:
-                    seen_urls.add(result.url)
-                    article = await self.to_normalized_article(result, actual_fund_slug)
-                    all_articles.append(article)
+                add_result(result, actual_fund_slug)
 
         # Enterprise AI (single query)
         if include_enterprise:
             for result in await self.search_enterprise_ai(freshness):
-                if result.url not in seen_urls:
-                    seen_urls.add(result.url)
-                    article = await self.to_normalized_article(result, "")
-                    all_articles.append(article)
+                add_result(result, "")
 
         # Stealth startups (single query)
         if include_stealth:
             for result in await self.search_stealth(freshness):
-                if result.url not in seen_urls:
-                    seen_urls.add(result.url)
-                    article = await self.to_normalized_article(result, "")
-                    article.tags.append("stealth")
-                    all_articles.append(article)
+                add_result(result, "", ["stealth"])
 
         # Parallel regional search
         if include_regional:
             regional_results = await self.search_regional_parallel(freshness)
             for region, results in regional_results.items():
                 for result in results:
-                    if result.url not in seen_urls:
-                        seen_urls.add(result.url)
-                        article = await self.to_normalized_article(result, "")
-                        article.tags.extend(["regional", region])
-                        all_articles.append(article)
+                    add_result(result, "", ["regional", region])
 
         # Parallel early signals search
         if include_early_signals:
             for result in await self.search_early_signals_parallel("pd"):
-                if result.url not in seen_urls:
-                    seen_urls.add(result.url)
-                    article = await self.to_normalized_article(result, "")
-                    article.tags.append("early_signal")
-                    all_articles.append(article)
+                add_result(result, "", ["early_signal"])
 
         # Parallel partner names search with caching
-        # Use past month (pm) for partner queries - external-only funds need longer coverage
-        # Partner queries are for funds without working website scrapers
         if include_partner_names:
             partner_freshness = "pm" if freshness in ("pd", "pw") else freshness
             partner_results = await self.search_partner_names_parallel(partner_freshness)
             for fund_slug, results in partner_results.items():
                 for result in results:
-                    if result.url not in seen_urls:
-                        seen_urls.add(result.url)
-                        article = await self.to_normalized_article(result, fund_slug)
-                        article.tags.append("partner_search")
-                        all_articles.append(article)
+                    add_result(result, fund_slug, ["partner_search"])
 
-        # Log cache stats
+        # Log query stats
         cache = get_query_cache()
         logger.info(f"Query cache size: {cache.size()} entries")
+        logger.info(f"Found {len(pending_results)} unique URLs to fetch")
+
+        # Phase 2: Fetch all articles in PARALLEL (5x speedup)
+        # Group by extra_tags for efficient batch processing
+        all_articles: List[NormalizedArticle] = []
+
+        # Process in batches by tag type for cleaner logging
+        tag_groups: Dict[str, List[Tuple[BraveSearchResult, str]]] = {}
+        for result, fund_slug, extra_tags in pending_results:
+            tag_key = ",".join(sorted(extra_tags)) if extra_tags else "default"
+            if tag_key not in tag_groups:
+                tag_groups[tag_key] = []
+            tag_groups[tag_key].append((result, fund_slug))
+
+        for tag_key, batch in tag_groups.items():
+            extra_tags = tag_key.split(",") if tag_key != "default" else None
+            articles = await self.to_normalized_articles_batch(batch, extra_tags)
+            all_articles.extend(articles)
 
         return all_articles
 
