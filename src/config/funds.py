@@ -47,7 +47,16 @@ FUND_REGISTRY: dict[str, FundConfig] = {
         ingestion_url="https://foundersfund.com/",
         scraper_type=ScraperType.PLAYWRIGHT,
         stealth_monitor_path="/portfolio/",
-        extraction_notes="Homepage + blog posts (/YYYY/MM/ pattern). No /news/ page exists."
+        extraction_notes="Homepage + blog posts (/YYYY/MM/ pattern). No /news/ page exists.",
+        # UPDATED 2026-01: Current partners + notable former
+        partner_names=[
+            # Current
+            "Peter Thiel", "Napoleon Ta", "Trae Stephens", "Lauren Gross",
+            "Scott Nolan", "John Luttig", "Delian Asparouhov", "Joey Krug",
+            "Matias Van Thienen", "Amin Mirzadegan", "Sean Liu",
+            # Former (still newsworthy)
+            "Keith Rabois", "Brian Singerman"
+        ]
     ),
 
     "benchmark": FundConfig(
@@ -57,9 +66,12 @@ FUND_REGISTRY: dict[str, FundConfig] = {
         scraper_type=ScraperType.EXTERNAL,
         negative_keywords=["International", "Electronics", "Benchmark Capital Management"],
         extraction_notes="Must include Partner names in article. Filter NOT 'International', NOT 'Electronics'.",
+        # UPDATED 2026-01: Current GPs + former partners still referenced in deals
         partner_names=[
-            "Bill Gurley", "Peter Fenton", "Matt Cohler", "Eric Vishria",
-            "Sarah Tavel", "Chetan Puttagunta", "Miles Grimshaw", "Victor Lazarte"
+            # Current GPs
+            "Chetan Puttagunta", "Peter Fenton", "Eric Vishria",
+            # Former (still newsworthy)
+            "Bill Gurley", "Sarah Tavel", "Miles Grimshaw", "Victor Lazarte"
         ]
     ),
 
@@ -77,7 +89,14 @@ FUND_REGISTRY: dict[str, FundConfig] = {
         slug="khosla",
         ingestion_url="https://www.khoslaventures.com/posts/rss.xml",
         scraper_type=ScraperType.RSS,
-        extraction_notes="RSS feed of blog posts; deep-tech focus."
+        extraction_notes="RSS feed of blog posts; deep-tech focus.",
+        # UPDATED 2026-01: Managing Directors + key investors
+        partner_names=[
+            # Managing Directors
+            "Vinod Khosla", "Samir Kaul", "Sven Strohband", "David Weiden", "Keith Rabois",
+            # Key Investors
+            "Ethan Choi", "Kanu Gulati", "Alex Morgan", "Jai Sajnani"
+        ]
     ),
 
     "index": FundConfig(
@@ -128,7 +147,13 @@ FUND_REGISTRY: dict[str, FundConfig] = {
         slug="greylock",
         ingestion_url="https://greylock.com/portfolio-news/",
         scraper_type=ScraperType.PLAYWRIGHT,
-        extraction_notes="Portfolio news page with inline content (no individual URLs). Requires Playwright."
+        extraction_notes="Portfolio news page with inline content (no individual URLs). Requires Playwright.",
+        # UPDATED 2026-01: Current partners + venture partners
+        partner_names=[
+            "Reid Hoffman", "Asheem Chandna", "Jerry Chen", "Saam Motamedi",
+            "Seth Rosenberg", "Mike Duboe", "David Sze", "Josh Elman",
+            "Corinne Riley", "Christine Kim", "Mor Chen", "Shreya Shekhar"
+        ]
     ),
 
     "gv": FundConfig(
@@ -137,7 +162,13 @@ FUND_REGISTRY: dict[str, FundConfig] = {
         ingestion_url="https://gv.com/news/",
         scraper_type=ScraperType.HTML,
         negative_keywords=["Visionary Holdings", "GV Ticker", "NYSE:GV"],
-        extraction_notes="CRITICAL: Exclude 'Visionary Holdings' (Ticker: GV)."
+        extraction_notes="CRITICAL: Exclude 'Visionary Holdings' (Ticker: GV).",
+        # UPDATED 2026-01: Current GPs
+        partner_names=[
+            "M.G. Siegler", "Crystal Huang", "Terri Burns", "Krishna Yeshwant",
+            "Frédérique Dame", "David Krane", "Tyson Clark", "Brendan Bulik-Sullivan",
+            "Sangeen Zeb", "Issi Rozen"
+        ]
     ),
 
     "menlo": FundConfig(
@@ -162,7 +193,12 @@ FUND_REGISTRY: dict[str, FundConfig] = {
         ingestion_url="external:prn,businesswire,techcrunch",
         scraper_type=ScraperType.EXTERNAL,
         negative_keywords=["Thrive IT Services", "Thrive Global", "Thrive Market"],
-        extraction_notes="CRITICAL: Exclude 'Thrive IT Services' or 'Thrive Global'."
+        extraction_notes="CRITICAL: Exclude 'Thrive IT Services' or 'Thrive Global'.",
+        # UPDATED 2026-01: Current team (~9 investors)
+        partner_names=[
+            "Josh Kushner", "Kareem Zaki", "Nabil Mallick", "Belen Mella",
+            "Gaurav Ahuja", "Joe Kahn", "Kyle Yuan"
+        ]
     ),
 
     "accel": FundConfig(
@@ -195,7 +231,12 @@ FUND_REGISTRY: dict[str, FundConfig] = {
         slug="first_round",
         ingestion_url="https://review.firstround.com",
         scraper_type=ScraperType.HTML,
-        extraction_notes="Monitor 'Community' page/Twitter for deal news."
+        extraction_notes="Monitor 'Community' page/Twitter for deal news.",
+        # UPDATED 2026-01: Current partners
+        partner_names=[
+            "Josh Kopelman", "Todd Jackson", "Brett Berson", "Bill Trenchard",
+            "Meka Asonye", "Liz Wessel", "Hayley Barna"
+        ]
     ),
 }
 

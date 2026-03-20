@@ -36,6 +36,13 @@ from bs4 import BeautifulSoup
 from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
 
+# Optional Playwright resolver for JS redirect following
+try:
+    from .playwright_resolver import PlaywrightResolver, PLAYWRIGHT_AVAILABLE
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+    PlaywrightResolver = None
+
 logger = logging.getLogger(__name__)
 
 # Article fetching settings
@@ -59,9 +66,10 @@ ARTICLE_SELECTORS = [
 
 # External-only funds that need Google News coverage
 # These funds either have no portfolio page or their scrapers aren't working
-# FIX (2026-01): Expanded queries for better coverage of missed deals
+# UPDATED 2026-01: Expanded partner lists based on current team pages + additional query variants
 GOOGLE_NEWS_FUNDS = {
     # EXTERNAL scraper type (no portfolio page)
+    # Team: Josh Kushner (founder), Kareem Zaki, Nabil Mallick (COO), Belen Mella, Gaurav Ahuja
     "thrive": {
         "name": "Thrive Capital",
         "queries": [
@@ -71,16 +79,25 @@ GOOGLE_NEWS_FUNDS = {
             '"Thrive Capital" Series',
             '"Thrive Capital" raises',
             '"Thrive Capital" led',
+            '"led by Thrive"',
+            'raises million "Thrive Capital"',
+            '"Thrive Capital" closes',
+            '"Thrive Capital" backs',
             # Partner-specific queries
             '"Josh Kushner" investment startup',
             '"Josh Kushner" leads funding',
+            '"Josh Kushner" venture',
             '"Kareem Zaki" investment',
-            # Additional deal discovery patterns
-            'raises million "Thrive Capital"',
-            '"led by Thrive"',
+            '"Kareem Zaki" startup',
+            '"Nabil Mallick" investment',
+            '"Gaurav Ahuja" investment Thrive',
+            '"Belen Mella" investment',
         ],
         "exclude": ["Thrive Global", "Thrive IT", "Thrive Market", "Thrive Wellness", "Arianna Huffington"],
     },
+    # EXTERNAL scraper type (no portfolio page)
+    # Current GPs: Chetan Puttagunta, Peter Fenton, Eric Vishria
+    # Former (still newsworthy): Bill Gurley, Sarah Tavel, Miles Grimshaw, Victor Lazarte
     "benchmark": {
         "name": "Benchmark Capital",
         "queries": [
@@ -90,19 +107,28 @@ GOOGLE_NEWS_FUNDS = {
             '"Benchmark" Series A',
             '"Benchmark" Series B',
             '"led by Benchmark"',
-            # Partner-specific queries (most deals come through partners)
-            '"Bill Gurley" investment',
-            '"Bill Gurley" leads',
+            '"Benchmark" closes funding',
+            '"Benchmark" backs startup',
+            'raises million "Benchmark"',
+            # Current GP queries
+            '"Chetan Puttagunta" investment',
+            '"Chetan Puttagunta" leads',
+            '"Chetan Puttagunta" startup',
             '"Peter Fenton" investment',
             '"Peter Fenton" leads',
-            '"Sarah Tavel" investment',
-            '"Sarah Tavel" leads',
             '"Eric Vishria" investment',
+            '"Eric Vishria" leads',
+            # Former GPs (still referenced in deals)
+            '"Bill Gurley" investment',
+            '"Bill Gurley" leads',
+            '"Sarah Tavel" investment',
+            '"Victor Lazarte" investment',
             '"Miles Grimshaw" investment',
         ],
         "exclude": ["Benchmark Electronics", "Benchmark International", "Benchmark Mineral"],
     },
     # HTML scraper but site doesn't announce deals
+    # Current: Meka Asonye, Josh Kopelman, Todd Jackson, Brett Berson, Bill Trenchard, Liz Wessel, Hayley Barna
     "first_round": {
         "name": "First Round Capital",
         "queries": [
@@ -112,15 +138,24 @@ GOOGLE_NEWS_FUNDS = {
             '"First Round" leads seed',
             '"First Round" Series A',
             '"led by First Round"',
+            '"First Round" backs startup',
+            '"First Round" closes',
+            'raises million "First Round"',
             # Partner-specific queries
             '"Josh Kopelman" investment',
             '"Josh Kopelman" leads',
-            '"Todd Jackson" investment',
-            '"Phin Barnes" investment',
+            '"Todd Jackson" investment startup',
+            '"Brett Berson" investment',
+            '"Bill Trenchard" investment',
+            '"Meka Asonye" investment',
+            '"Liz Wessel" investment',
+            '"Hayley Barna" investment',
         ],
         "exclude": ["first round pick", "NFL", "NBA", "first round draft", "playoff"],
     },
     # PLAYWRIGHT but may have issues
+    # Partners: Asheem Chandna, Jerry Chen, Mike Duboe, Reid Hoffman, Saam Motamedi, Seth Rosenberg
+    # Venture Partners: Josh Elman, David Sze
     "greylock": {
         "name": "Greylock",
         "queries": [
@@ -130,15 +165,26 @@ GOOGLE_NEWS_FUNDS = {
             '"Greylock" Series A',
             '"Greylock" Series B',
             '"led by Greylock"',
+            '"Greylock" backs startup',
+            '"Greylock" closes funding',
+            'raises million "Greylock"',
             # Partner-specific queries
             '"Reid Hoffman" investment startup',
             '"Reid Hoffman" leads',
-            '"David Sze" investment',
-            '"Sarah Guo" investment',
             '"Asheem Chandna" investment',
+            '"Asheem Chandna" leads',
+            '"Jerry Chen" investment Greylock',
+            '"Saam Motamedi" investment',
+            '"Seth Rosenberg" investment',
+            '"Mike Duboe" investment',
+            '"David Sze" investment',
+            '"Josh Elman" investment startup',
+            '"Corinne Riley" investment Greylock',
+            '"Christine Kim" investment Greylock',
         ],
         "exclude": [],
     },
+    # GPs: M.G. Siegler, Crystal Huang, Terri Burns, Krishna Yeshwant, Frédérique Dame, David Krane
     "gv": {
         "name": "GV (Google Ventures)",
         "queries": [
@@ -149,11 +195,24 @@ GOOGLE_NEWS_FUNDS = {
             '"GV" leads Series',
             '"led by GV"',
             '"led by Google Ventures"',
+            '"Google Ventures" backs startup',
+            '"Google Ventures" closes',
+            'raises million "Google Ventures"',
             # Partner queries
-            '"David Krane" investment',
+            '"David Krane" investment GV',
+            '"M.G. Siegler" investment',
+            '"M.G. Siegler" startup',
+            '"Crystal Huang" investment GV',
+            '"Terri Burns" investment GV',
+            '"Krishna Yeshwant" investment',
+            '"Tyson Clark" investment GV',
+            '"Brendan Bulik-Sullivan" investment',
         ],
         "exclude": ["NYSE:GV", "Visionary Holdings", "stock ticker GV", "GV stock"],
     },
+    # Current: Peter Thiel, Napoleon Ta, Trae Stephens, Lauren Gross, Scott Nolan, John Luttig,
+    #          Delian Asparouhov, Joey Krug
+    # Former: Keith Rabois, Brian Singerman (still newsworthy)
     "founders_fund": {
         "name": "Founders Fund",
         "queries": [
@@ -162,12 +221,25 @@ GOOGLE_NEWS_FUNDS = {
             '"Founders Fund" leads investment',
             '"Founders Fund" Series',
             '"led by Founders Fund"',
-            # Partner-specific queries
-            '"Keith Rabois" investment startup',
-            '"Keith Rabois" leads',
+            '"Founders Fund" backs startup',
+            '"Founders Fund" closes',
+            'raises million "Founders Fund"',
+            # Current partner queries
             '"Peter Thiel" investment startup',
             '"Peter Thiel" leads',
+            '"Napoleon Ta" investment',
             '"Trae Stephens" investment',
+            '"Trae Stephens" leads',
+            '"Delian Asparouhov" investment',
+            '"Delian Asparouhov" startup',
+            '"Scott Nolan" investment Founders Fund',
+            '"John Luttig" investment',
+            '"Joey Krug" investment',
+            '"Lauren Gross" investment Founders Fund',
+            # Former partners (still referenced)
+            '"Keith Rabois" investment startup',
+            '"Keith Rabois" leads',
+            '"Brian Singerman" investment',
         ],
         "exclude": [],
     },
@@ -180,11 +252,41 @@ GOOGLE_NEWS_FUNDS = {
             '"Redpoint" Series A',
             '"Redpoint" Series B',
             '"led by Redpoint"',
+            '"Redpoint" backs startup',
+            '"Redpoint" closes',
+            'raises million "Redpoint"',
             # Partner queries
             '"Satish Dharmaraj" investment',
             '"Tomasz Tunguz" investment',
+            '"Tomasz Tunguz" leads',
+            '"Logan Bartlett" investment',
+            '"Erica Brescia" investment',
         ],
         "exclude": ["Redpoint Bio", "Redpoint Biopharmaceutical"],
+    },
+    # ADDED: Khosla Ventures for external coverage
+    # Managing Directors: Vinod Khosla, Samir Kaul, Sven Strohband, David Weiden, Keith Rabois
+    "khosla": {
+        "name": "Khosla Ventures",
+        "queries": [
+            # Primary fund queries
+            '"Khosla Ventures" funding',
+            '"Khosla Ventures" leads',
+            '"Khosla" Series A',
+            '"Khosla" Series B',
+            '"led by Khosla"',
+            '"Khosla" backs startup',
+            'raises million "Khosla"',
+            # Partner queries
+            '"Vinod Khosla" investment',
+            '"Vinod Khosla" leads',
+            '"Samir Kaul" investment',
+            '"Sven Strohband" investment',
+            '"David Weiden" investment Khosla',
+            '"Keith Rabois" investment Khosla',
+            '"Ethan Choi" investment Khosla',
+        ],
+        "exclude": [],
     },
 }
 
@@ -292,16 +394,24 @@ class GoogleNewsRSSScraper:
     FIX (2026-01): Now fetches full article content instead of just using headlines.
     """
 
-    def __init__(self, funds: Optional[List[str]] = None, fetch_full_articles: bool = True):
+    def __init__(
+        self,
+        funds: Optional[List[str]] = None,
+        fetch_full_articles: bool = True,
+        use_playwright: bool = True,
+    ):
         """
         Initialize with list of fund slugs to monitor.
 
         Args:
             funds: List of fund slugs. If None, uses all GOOGLE_NEWS_FUNDS.
             fetch_full_articles: If True, fetch full article content from source URLs.
+            use_playwright: If True, use Playwright to resolve undecodable Google News URLs.
+                           Requires playwright to be installed.
         """
         self.funds = funds or list(GOOGLE_NEWS_FUNDS.keys())
         self.fetch_full_articles = fetch_full_articles
+        self.use_playwright = use_playwright and PLAYWRIGHT_AVAILABLE
         self.client = httpx.AsyncClient(
             timeout=30,
             headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
@@ -310,6 +420,8 @@ class GoogleNewsRSSScraper:
         )
         # Separate client for article fetching with longer timeout
         self._article_client: Optional[httpx.AsyncClient] = None
+        # Playwright resolver for JS redirects (initialized in __aenter__)
+        self._playwright_resolver: Optional['PlaywrightResolver'] = None
 
     async def __aenter__(self):
         self._article_client = httpx.AsyncClient(
@@ -318,12 +430,19 @@ class GoogleNewsRSSScraper:
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             follow_redirects=True,
         )
+        # Initialize Playwright resolver if enabled
+        if self.use_playwright and PlaywrightResolver:
+            self._playwright_resolver = PlaywrightResolver()
+            await self._playwright_resolver.__aenter__()
+            logger.info("Playwright resolver enabled for Google News URL resolution")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.client.aclose()
         if self._article_client:
             await self._article_client.aclose()
+        if self._playwright_resolver:
+            await self._playwright_resolver.__aexit__(exc_type, exc_val, exc_tb)
 
     async def fetch_article_content(self, url: str, max_retries: int = 2) -> Optional[str]:
         """
@@ -685,10 +804,10 @@ Article Content:
         """
         Fetch full content for all articles in parallel.
 
-        NOTE: Google News URLs use JavaScript redirects that can't be followed.
-        We try to decode the actual URL from the base64 path, but this often fails
-        with newer Google News URL formats. In those cases, articles will be
-        processed with headline-only content.
+        STRATEGY:
+        1. First pass: Try base64 decoding for all URLs (fast, no network)
+        2. Second pass: Use Playwright batch resolution for unresolved URLs
+        3. Third pass: Fetch article content from resolved URLs
 
         Args:
             articles: List of GoogleNewsArticle with URLs
@@ -699,21 +818,43 @@ Article Content:
         if not articles:
             return articles
 
+        # First pass: Try base64 decoding for all unresolved URLs
+        unresolved_articles = []
+        for article in articles:
+            if not article.real_url:
+                extracted = extract_real_url_from_google_news(article.url)
+                if extracted:
+                    article.real_url = extracted
+                else:
+                    unresolved_articles.append(article)
+
+        decoded_count = len(articles) - len(unresolved_articles)
+        logger.info(f"Google News: {decoded_count}/{len(articles)} URLs decoded from base64")
+
+        # Second pass: Use Playwright for remaining unresolved URLs
+        if unresolved_articles and self._playwright_resolver:
+            logger.info(f"Using Playwright to resolve {len(unresolved_articles)} remaining URLs...")
+            unresolved_urls = [a.url for a in unresolved_articles]
+            resolved_map = await self._playwright_resolver.resolve_batch(
+                unresolved_urls,
+                max_concurrent=3,
+                delay_between=0.3
+            )
+            # Update articles with resolved URLs
+            for article in unresolved_articles:
+                if article.url in resolved_map and resolved_map[article.url]:
+                    article.real_url = resolved_map[article.url]
+
+            playwright_resolved = sum(1 for a in unresolved_articles if a.real_url)
+            logger.info(f"Playwright resolved {playwright_resolved}/{len(unresolved_articles)} URLs")
+
+        # Third pass: Fetch article content from resolved URLs
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_ARTICLES)
 
         async def fetch_with_limit(article: GoogleNewsArticle) -> GoogleNewsArticle:
             async with semaphore:
-                # Try to get URL from decoding or resolution
-                url_to_fetch = article.real_url
-
-                if not url_to_fetch:
-                    # Try to resolve the Google News URL
-                    url_to_fetch = await self.resolve_google_news_url(article.url)
-                    if url_to_fetch:
-                        article.real_url = url_to_fetch
-
-                if url_to_fetch:
-                    content = await self.fetch_article_content(url_to_fetch)
+                if article.real_url:
+                    content = await self.fetch_article_content(article.real_url)
                     if content:
                         article.full_text = content
                         logger.debug(f"Fetched {len(content)} chars for: {article.title[:50]}...")

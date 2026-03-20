@@ -101,9 +101,13 @@ EXCLUSION_TERMS = {
 #
 # SYNTAX FIX: Use AND grouping - "Name" AND (term1 OR term2)
 # NOT: "Name" term1 OR term2 (parses as ("Name" term1) OR term2)
+#
+# UPDATED 2026-01: Expanded partner lists based on current team pages
 PARTNER_QUERIES = {
     # DISABLED SCRAPER - needs full partner coverage
     # Benchmark partners: https://www.benchmark.com/people
+    # Current GPs: Chetan Puttagunta, Peter Fenton, Eric Vishria
+    # Former (still newsworthy): Bill Gurley, Sarah Tavel, Miles Grimshaw, Victor Lazarte
     "benchmark": [
         # Fund-level queries (BROAD - catch any funding mention)
         '"Benchmark Capital" AND (funding OR raises OR raised OR investment OR invests)',
@@ -111,46 +115,60 @@ PARTNER_QUERIES = {
         '"Benchmark" AND "Series B" AND (startup OR funding OR million)',
         '"Benchmark" AND "seed" AND (startup OR funding OR million)',
         '"Benchmark" AND (backs OR backed OR invests) AND startup',
-        # Partner queries (any investment mention)
-        '"Bill Gurley" AND (startup OR investment OR funding OR venture)',
-        '"Peter Fenton" AND (startup OR investment OR funding OR venture)',
-        '"Sarah Tavel" AND (startup OR investment OR funding OR venture)',
-        '"Eric Vishria" AND (startup OR investment OR funding OR venture)',
+        '"Benchmark" AND (leads OR led) AND (funding OR round OR million)',
+        # Current GP partner queries
         '"Chetan Puttagunta" AND (startup OR investment OR funding OR venture)',
+        '"Peter Fenton" AND (startup OR investment OR funding OR venture)',
+        '"Eric Vishria" AND (startup OR investment OR funding OR venture)',
+        # Former GPs (still referenced in recent deals)
+        '"Bill Gurley" AND (startup OR investment OR funding OR venture)',
+        '"Sarah Tavel" AND (startup OR investment OR funding OR venture)',
         '"Miles Grimshaw" AND (startup OR investment OR funding OR venture)',
+        '"Victor Lazarte" AND (startup OR investment OR funding OR venture)',
     ],
     # DISABLED SCRAPER - needs full partner coverage
     # First Round partners: https://firstround.com/team
+    # Current: Meka Asonye, Josh Kopelman, Todd Jackson, Brett Berson, Bill Trenchard, Liz Wessel, Hayley Barna
     "first_round": [
         # Fund-level queries (BROAD - catch any funding mention)
         '"First Round Capital" AND (funding OR raises OR raised OR investment)',
         '"First Round Capital" AND "Series A" AND (startup OR million)',
         '"First Round" AND "seed" AND (startup OR funding OR raises)',
         '"First Round" AND (backs OR backed OR invests) AND startup',
-        # Partner queries (any investment mention)
+        '"First Round" AND (leads OR led) AND (funding OR round)',
+        # Current partner queries
         '"Josh Kopelman" AND (startup OR investment OR funding OR venture)',
-        '"Todd Jackson" AND (startup OR investment OR funding OR venture) AND "First Round"',
-        '"Phin Barnes" AND (startup OR investment OR funding OR venture)',
+        '"Todd Jackson" AND (startup OR investment OR funding OR venture)',
+        '"Brett Berson" AND (startup OR investment OR funding OR venture)',
         '"Bill Trenchard" AND (startup OR investment OR funding OR venture)',
-        '"Rob Hayes" AND (startup OR investment OR funding OR "First Round")',
-        '"Howard Morgan" AND (startup OR investment OR funding OR venture)',
+        '"Meka Asonye" AND (startup OR investment OR funding OR venture)',
+        '"Liz Wessel" AND (startup OR investment OR funding OR venture)',
+        '"Hayley Barna" AND (startup OR investment OR funding OR venture)',
     ],
     # DISABLED SCRAPER - needs full partner coverage
     # Khosla partners: https://www.khoslaventures.com/team
+    # Managing Directors: Vinod Khosla, Samir Kaul, Sven Strohband, David Weiden, Keith Rabois
+    # Key Investors: Ethan Choi, Kanu Gulati, Alex Morgan
     "khosla": [
         # Fund-level queries (BROAD - catch any funding mention)
         '"Khosla Ventures" AND (funding OR raises OR raised OR investment)',
         '"Khosla Ventures" AND "Series A" AND (startup OR million)',
         '"Khosla Ventures" AND "Series B" AND (startup OR million)',
         '"Khosla" AND (backs OR backed OR invests) AND startup',
-        # Partner queries (any investment mention)
+        '"Khosla" AND (leads OR led) AND (funding OR round)',
+        # Managing Director queries
         '"Vinod Khosla" AND (startup OR investment OR funding OR venture)',
-        '"Samir Kaul" AND (startup OR investment OR funding OR "Khosla")',
-        '"Sven Strohband" AND (startup OR investment OR funding OR "Khosla")',
+        '"Samir Kaul" AND (startup OR investment OR funding OR venture)',
+        '"Sven Strohband" AND (startup OR investment OR funding OR venture)',
+        '"David Weiden" AND (startup OR investment OR funding OR Khosla)',
+        '"Keith Rabois" AND Khosla AND (investment OR funding)',
+        # Key investor queries
+        '"Ethan Choi" AND Khosla AND (investment OR funding OR startup)',
+        '"Kanu Gulati" AND (startup OR investment OR funding OR Khosla)',
     ],
     # DISABLED SCRAPER - needs full partner coverage
-    # Thrive partners: https://www.thrivecap.com (limited public info)
-    # FIX (2026-01): Added "leads" queries for headline matching
+    # Thrive partners: https://www.thrivecap.com
+    # Team: Josh Kushner (founder), Kareem Zaki, Nabil Mallick (COO), Belen Mella, Gaurav Ahuja, Joe Kahn, Kyle Yuan
     "thrive": [
         # Fund-level queries (BROAD - catch any funding mention)
         '"Thrive Capital" AND (funding OR raises OR raised OR investment)',
@@ -159,28 +177,44 @@ PARTNER_QUERIES = {
         '"Thrive Capital" AND "Series B" AND (startup OR million)',
         '"Thrive Capital" AND "seed" AND (startup OR million)',
         '"Thrive Capital" AND (backs OR backed OR invests)',
-        # Partner queries (any investment mention)
+        '"led by Thrive" AND (funding OR million OR startup)',
+        # Partner queries
         '"Josh Kushner" AND (startup OR investment OR funding OR venture)',
         '"Josh Kushner" AND (leads OR led) AND (funding OR investment)',
-        '"Kareem Zaki" AND (startup OR investment OR funding OR "Thrive")',
-        '"Josh Miller" AND "Thrive Capital" AND (investment OR funding)',
+        '"Kareem Zaki" AND (startup OR investment OR funding OR venture)',
+        '"Nabil Mallick" AND (startup OR investment OR funding OR Thrive)',
+        '"Gaurav Ahuja" AND Thrive AND (investment OR funding)',
+        '"Belen Mella" AND Thrive AND (investment OR funding)',
     ],
     # WEAK SCRAPER - needs partner backup
     # Founders Fund partners: https://foundersfund.com/team
+    # Current: Peter Thiel, Napoleon Ta, Trae Stephens, Lauren Gross, Scott Nolan, John Luttig,
+    #          Matias Van Thienen, Delian Asparouhov, Amin Mirzadegan, Joey Krug, Sean Liu
+    # Former: Keith Rabois, Brian Singerman (still newsworthy)
     "founders_fund": [
         # Fund-level queries (BROAD - catch any funding mention)
         '"Founders Fund" AND (funding OR raises OR raised OR investment)',
         '"Founders Fund" AND "Series A" AND (startup OR million)',
         '"Founders Fund" AND "Series B" AND (startup OR million)',
         '"Founders Fund" AND (backs OR backed OR invests)',
-        # Partner queries (any investment mention)
-        '"Keith Rabois" AND (startup OR investment OR funding OR venture)',
-        '"Brian Singerman" AND (startup OR investment OR funding OR "Founders Fund")',
-        '"Delian Asparouhov" AND (startup OR investment OR funding OR venture)',
+        '"Founders Fund" AND (leads OR led) AND (funding OR round)',
+        # Current partner queries
+        '"Peter Thiel" AND (startup OR investment OR funding OR venture)',
+        '"Napoleon Ta" AND (startup OR investment OR funding OR "Founders Fund")',
         '"Trae Stephens" AND (startup OR investment OR funding OR venture)',
+        '"Delian Asparouhov" AND (startup OR investment OR funding OR venture)',
+        '"Scott Nolan" AND (startup OR investment OR funding OR "Founders Fund")',
+        '"John Luttig" AND (startup OR investment OR funding OR "Founders Fund")',
+        '"Lauren Gross" AND "Founders Fund" AND (investment OR funding)',
+        '"Joey Krug" AND (startup OR investment OR funding OR crypto OR "Founders Fund")',
+        # Former partners (still referenced in deals)
+        '"Keith Rabois" AND (startup OR investment OR funding OR venture)',
+        '"Brian Singerman" AND (startup OR investment OR funding OR venture)',
     ],
-    # LOW COVERAGE - needs partner queries (only 1 deal)
+    # LOW COVERAGE - needs partner queries
     # GV partners: https://gv.com/team
+    # GPs: M.G. Siegler, Crystal Huang, Terri Burns, Krishna Yeshwant, Frédérique Dame,
+    #      Brendan Bulik-Sullivan, Issi Rozen, Sangeen Zeb, David Krane, Tyson Clark
     "gv": [
         # Fund-level queries - be very specific to avoid NYSE:GV noise
         '"Google Ventures" AND (funding OR raises OR raised OR investment)',
@@ -188,15 +222,22 @@ PARTNER_QUERIES = {
         '"Google Ventures" AND "Series B" AND startup',
         '"Google Ventures" AND (leads OR led) AND funding',
         'GV AND "venture capital" AND (funding OR investment OR startup)',
-        # Partner queries
+        '"led by GV" AND (funding OR million OR startup)',
+        # GP partner queries
+        '"M.G. Siegler" AND (startup OR investment OR funding OR venture)',
+        '"Crystal Huang" AND GV AND (investment OR funding OR startup)',
+        '"Terri Burns" AND GV AND (investment OR funding OR startup)',
+        '"Krishna Yeshwant" AND GV AND (investment OR funding)',
+        '"Frédérique Dame" AND GV AND (investment OR funding)',
         '"David Krane" AND GV AND (investment OR funding OR startup)',
         '"Tyson Clark" AND GV AND (investment OR funding OR startup)',
-        '"Tom Hulme" AND GV AND (investment OR funding)',
-        '"Blake Byers" AND GV AND (investment OR funding OR startup)',
-        '"Karim Faris" AND GV AND (investment OR startup)',
+        '"Brendan Bulik-Sullivan" AND GV AND (investment OR funding)',
     ],
-    # LOW COVERAGE - needs partner queries (only 1 deal)
+    # LOW COVERAGE - needs partner queries
     # Greylock partners: https://greylock.com/team
+    # Partners: Asheem Chandna, Jerry Chen, Mor Chen, Mike Duboe, Reid Hoffman, Christine Kim,
+    #           Sophia Luo, Saam Motamedi, Corinne Riley, Seth Rosenberg, Shreya Shekhar
+    # Venture Partners: Josh Elman, David Thacker, Mustafa Suleyman
     "greylock": [
         # Fund-level queries
         '"Greylock Partners" AND (funding OR raises OR raised OR investment)',
@@ -204,13 +245,18 @@ PARTNER_QUERIES = {
         '"Greylock" AND "Series B" AND (startup OR funding)',
         '"Greylock" AND (leads OR led) AND funding',
         '"Greylock" AND (backs OR backed OR invests) AND startup',
-        # Partner queries
+        '"led by Greylock" AND (funding OR million OR startup)',
+        # Current partner queries
         '"Reid Hoffman" AND (startup OR investment OR funding OR venture)',
-        '"Asheem Chandna" AND (startup OR investment OR funding OR Greylock)',
-        '"Sarah Guo" AND (startup OR investment OR funding OR venture)',
-        '"Seth Rosenberg" AND (startup OR investment OR funding OR Greylock)',
-        '"Saam Motamedi" AND (startup OR investment OR funding OR Greylock)',
+        '"Asheem Chandna" AND (startup OR investment OR funding OR venture)',
+        '"Jerry Chen" AND Greylock AND (investment OR funding OR startup)',
+        '"Saam Motamedi" AND (startup OR investment OR funding OR venture)',
+        '"Seth Rosenberg" AND (startup OR investment OR funding OR venture)',
         '"Mike Duboe" AND (startup OR investment OR funding OR venture)',
+        '"David Sze" AND (startup OR investment OR funding OR Greylock)',
+        '"Josh Elman" AND (startup OR investment OR funding OR venture)',
+        '"Corinne Riley" AND Greylock AND (investment OR funding)',
+        '"Christine Kim" AND Greylock AND (investment OR funding)',
     ],
 }
 
