@@ -351,8 +351,6 @@ export function PreFundingTab() {
   const [sourceFilter, setSourceFilter] = useState<StealthSignalSource | ''>('');
   const [minScore, setMinScore] = useState(25);
   const [includeDismissed, setIncludeDismissed] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-
   // Load signals
   const loadSignals = useCallback(async () => {
     try {
@@ -372,18 +370,11 @@ export function PreFundingTab() {
       setError(err instanceof Error ? err.message : 'Failed to load signals');
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }, [sourceFilter, minScore, includeDismissed]);
 
   // Initial load
   useEffect(() => {
-    loadSignals();
-  }, [loadSignals]);
-
-  // Refresh handler
-  const handleRefresh = useCallback(() => {
-    setRefreshing(true);
     loadSignals();
   }, [loadSignals]);
 
@@ -432,7 +423,7 @@ export function PreFundingTab() {
           <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-2" />
           <p className="text-red-400">{error}</p>
           <button
-            onClick={handleRefresh}
+            onClick={loadSignals}
             className="mt-4 px-4 py-2 bg-slate-800 text-white rounded hover:bg-slate-700"
           >
             Retry
@@ -446,19 +437,9 @@ export function PreFundingTab() {
     <div className="flex-1 flex flex-col overflow-hidden bg-[#050506]">
       {/* Header */}
       <div className="px-6 py-4 border-b border-slate-800 bg-[#0a0a0c]">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <Radar className="w-5 h-5 text-purple-400" />
-            <h2 className="text-lg font-bold text-white">Pre-Funding Signals</h2>
-          </div>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 text-slate-300 hover:text-white rounded transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
+        <div className="flex items-center gap-3 mb-4">
+          <Radar className="w-5 h-5 text-purple-400" />
+          <h2 className="text-lg font-bold text-white">Pre-Funding Signals</h2>
         </div>
 
         {/* Stats */}
@@ -576,32 +557,6 @@ export function PreFundingTab() {
         )}
       </div>
 
-      {/* Footer info */}
-      <div className="px-6 py-3 border-t border-slate-800 bg-[#0a0a0c]">
-        <div className="flex items-center gap-4 text-xs text-slate-500">
-          <div className="flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-orange-400" />
-            <span>YC</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Github className="w-3.5 h-3.5 text-slate-400" />
-            <span>GitHub</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Newspaper className="w-3.5 h-3.5 text-orange-400" />
-            <span>HN</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Linkedin className="w-3.5 h-3.5 text-blue-400" />
-            <span>LinkedIn</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Building2 className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Delaware</span>
-          </div>
-          <span className="ml-auto">Rule-based scoring saves ~$44/mo in LLM costs</span>
-        </div>
-      </div>
     </div>
   );
 }
