@@ -93,39 +93,62 @@ FUND_NAME_VARIANTS: dict[str, list[str]] = {
 # Partner names mapped to their funds
 # FIX: These require investment context to avoid false positives like
 # "Peter Thiel spoke at conference" matching as Founders Fund deal
+# UPDATED 2026-01: Synced with funds.py partner_names for complete coverage
 PARTNER_NAMES: dict[str, list[str]] = {
     "benchmark": [
-        "bill gurley",
-        "sarah tavel",
+        # Current GPs
+        "chetan puttagunta",
         "peter fenton",
         "eric vishria",
-        "chetan puttagunta",
+        # Former (still newsworthy)
+        "bill gurley",
+        "sarah tavel",
         "miles grimshaw",
         "victor lazarte",
     ],
     "founders_fund": [
+        # Current
         "peter thiel",
+        "napoleon ta",
+        "trae stephens",
+        "lauren gross",
+        "scott nolan",
+        "john luttig",
+        "delian asparouhov",
+        "joey krug",
+        "matias van thienen",
+        "amin mirzadegan",
+        "sean liu",
+        # Former (still newsworthy)
         "keith rabois",
         "brian singerman",
-        "delian asparouhov",
-        "trae stephens",
     ],
     "khosla": [
+        # Managing Directors
         "vinod khosla",
         "samir kaul",
         "sven strohband",
+        "david weiden",
+        "keith rabois",
+        # Key Investors
+        "ethan choi",
+        "kanu gulati",
+        "alex morgan",
+        "jai sajnani",
     ],
     "greylock": [
         "reid hoffman",
-        "david sze",
-        "josh elman",
-        "sarah guo",
+        "asheem chandna",
+        "jerry chen",
         "saam motamedi",
         "seth rosenberg",
-        "jerry chen",
-        "asheem chandna",
         "mike duboe",
+        "david sze",
+        "josh elman",
         "corinne riley",
+        "christine kim",
+        "mor chen",
+        "shreya shekhar",
     ],
     "redpoint": [
         "tomasz tunguz",
@@ -135,22 +158,39 @@ PARTNER_NAMES: dict[str, list[str]] = {
         "jason warner",
     ],
     "gv": [
-        "david krane",
+        # Current GPs
+        "m.g. siegler",
         "mg siegler",
+        "crystal huang",
+        "terri burns",
+        "krishna yeshwant",
+        "frédérique dame",
+        "frederique dame",
+        "david krane",
+        "tyson clark",
+        "brendan bulik-sullivan",
+        "sangeen zeb",
+        "issi rozen",
     ],
     "thrive": [
+        # Current team
         "josh kushner",
         "kareem zaki",
-        "josh miller",
-        "nadia singer",
+        "nabil mallick",
+        "belen mella",
+        "gaurav ahuja",
+        "joe kahn",
+        "kyle yuan",
     ],
     "first_round": [
+        # Current partners
         "josh kopelman",
-        "phin barnes",
-        "bill trenchard",
-        "rob hayes",
-        "howard morgan",
         "todd jackson",
+        "brett berson",
+        "bill trenchard",
+        "meka asonye",
+        "liz wessel",
+        "hayley barna",
     ],
 }
 
