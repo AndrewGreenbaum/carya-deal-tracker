@@ -15,6 +15,10 @@ import type {
   ScraperStatus,
   SchedulerStatusResponse,
   StealthDetectionsResponse,
+  StealthSignal,
+  StealthSignalsResponse,
+  StealthSignalStats,
+  StealthSignalSource,
   ScrapeResponse,
   SECEdgarResponse,
   BraveSearchResponse,
@@ -438,6 +442,116 @@ export async function fetchStealthDetections(
     })),
     total: data.total,
   };
+}
+
+// ============================================
+// Stealth Signals (Pre-Funding Detection) Endpoints
+// ============================================
+
+interface StealthSignalApiResponse {
+  id: number;
+  company_name: string;
+  source: string;
+  source_url: string;
+  score: number;
+  signals: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  spotted_at: string;
+  dismissed: boolean;
+  converted_deal_id?: number;
+  created_at: string;
+}
+
+interface StealthSignalsApiResponse {
+  signals: StealthSignalApiResponse[];
+  total: number;
+}
+
+interface StealthSignalStatsApiResponse {
+  total: number;
+  by_source: Record<string, number>;
+  avg_score: number;
+  converted: number;
+}
+
+function mapStealthSignal(api: StealthSignalApiResponse): StealthSignal {
+  return {
+    id: api.id,
+    companyName: api.company_name,
+    source: api.source as StealthSignalSource,
+    sourceUrl: api.source_url,
+    score: api.score,
+    signals: api.signals,
+    metadata: api.metadata,
+    spottedAt: api.spotted_at,
+    dismissed: api.dismissed,
+    convertedDealId: api.converted_deal_id,
+    createdAt: api.created_at,
+  };
+}
+
+export async function fetchStealthSignals(
+  options: {
+    source?: StealthSignalSource;
+    minScore?: number;
+    includeDismissed?: boolean;
+    limit?: number;
+    offset?: number;
+  } = {}
+): Promise<StealthSignalsResponse> {
+  const params = new URLSearchParams();
+  if (options.source) params.set('source', options.source);
+  if (options.minScore !== undefined) params.set('min_score', options.minScore.toString());
+  if (options.includeDismissed) params.set('include_dismissed', 'true');
+  params.set('limit', (options.limit ?? 100).toString());
+  params.set('offset', (options.offset ?? 0).toString());
+
+  const data = await apiGet<StealthSignalsApiResponse>(
+    `/stealth-signals?${params.toString()}`,
+    false // Don't cache - data changes frequently
+  );
+
+  return {
+    signals: data.signals.map(mapStealthSignal),
+    total: data.total,
+  };
+}
+
+export async function fetchStealthSignalStats(
+  includeDismissed = false
+): Promise<StealthSignalStats> {
+  const params = new URLSearchParams();
+  if (includeDismissed) params.set('include_dismissed', 'true');
+
+  const data = await apiGet<StealthSignalStatsApiResponse>(
+    `/stealth-signals/stats?${params.toString()}`,
+    false
+  );
+
+  return {
+    total: data.total,
+    bySource: data.by_source,
+    avgScore: data.avg_score,
+    converted: data.converted,
+  };
+}
+
+export async function dismissStealthSignal(signalId: number): Promise<void> {
+  await apiPost(`/stealth-signals/${signalId}/dismiss`);
+  invalidateCache('GET:/stealth-signals');
+}
+
+export async function undismissStealthSignal(signalId: number): Promise<void> {
+  await apiPost(`/stealth-signals/${signalId}/undismiss`);
+  invalidateCache('GET:/stealth-signals');
+}
+
+export async function linkStealthSignalToDeal(
+  signalId: number,
+  dealId: number
+): Promise<void> {
+  await apiPost(`/stealth-signals/${signalId}/link/${dealId}`);
+  invalidateCache('GET:/stealth-signals');
 }
 
 // ============================================

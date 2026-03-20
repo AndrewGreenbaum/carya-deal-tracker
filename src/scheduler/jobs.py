@@ -866,6 +866,110 @@ async def process_external_articles(
     return stats
 
 
+async def process_stealth_signals(
+    articles: List[NormalizedArticle],
+    source_name: str,
+    scan_job_id: Optional[int] = None,
+) -> Dict[str, int]:
+    """
+    Process articles as stealth signals (pre-funding detection).
+
+    Uses rule-based scoring instead of Claude extraction.
+    Saves to stealth_signals table, NOT deals table.
+
+    This saves ~$44/month in LLM costs for sources that produce 0 deals:
+    - hackernews
+    - ycombinator
+    - github_trending
+    - linkedin_jobs
+    - delaware_corps
+
+    Args:
+        articles: List of NormalizedArticle from early signal source
+        source_name: Name of source for logging
+        scan_job_id: Optional scan job ID for tracking
+
+    Returns:
+        Dict with processing stats
+    """
+    from ..harvester.stealth_scorer import score_article
+    from ..archivist.stealth_storage import save_stealth_signal
+    from ..archivist.database import get_session
+
+    stats = {
+        "articles_received": len(articles),
+        "articles_skipped_low_score": 0,
+        "signals_saved": 0,
+        "errors": 0,
+        # For compatibility with external sources stats format
+        "deals_saved": 0,
+        "deals_extracted": 0,
+    }
+
+    if not articles:
+        return stats
+
+    # Apply source limit
+    if len(articles) > MAX_ARTICLES_PER_SOURCE:
+        logger.info(f"[{source_name}] Limiting from {len(articles)} to {MAX_ARTICLES_PER_SOURCE} articles")
+        articles = articles[:MAX_ARTICLES_PER_SOURCE]
+        stats["articles_received"] = MAX_ARTICLES_PER_SOURCE
+
+    logger.info(f"[{source_name}] Processing {len(articles)} articles as stealth signals (no LLM)")
+
+    # Minimum score threshold (skip low-quality signals)
+    MIN_SCORE_THRESHOLD = 25
+
+    async with get_session() as session:
+        for article in articles:
+            try:
+                # Score the article using rule-based scoring
+                scored = score_article(article, source_name)
+                if not scored:
+                    stats["errors"] += 1
+                    continue
+
+                # Skip low-score signals
+                if scored.score < MIN_SCORE_THRESHOLD:
+                    stats["articles_skipped_low_score"] += 1
+                    continue
+
+                # Save to stealth_signals table
+                signal = await save_stealth_signal(
+                    session=session,
+                    company_name=scored.company_name,
+                    source=source_name,
+                    source_url=article.url,
+                    score=scored.score,
+                    signals=scored.signals,
+                    metadata_json=scored.metadata,
+                )
+
+                if signal:
+                    stats["signals_saved"] += 1
+
+            except Exception as e:
+                stats["errors"] += 1
+                logger.warning(f"[{source_name}] Error processing stealth signal: {e}")
+
+        # Commit all at once
+        await session.commit()
+
+    logger.info(
+        f"[{source_name}] Stealth signals complete: "
+        f"received={stats['articles_received']}, "
+        f"saved={stats['signals_saved']}, "
+        f"low_score={stats['articles_skipped_low_score']}, "
+        f"errors={stats['errors']}"
+    )
+
+    # Set deals_saved for compatibility with results aggregation
+    stats["deals_saved"] = 0  # Stealth signals don't create deals
+    stats["deals_extracted"] = stats["signals_saved"]  # For stats display
+
+    return stats
+
+
 async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Scrape all external data sources and process through extraction pipeline.
@@ -1001,6 +1105,7 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             results["twitter"] = {"error": str(e)}
 
     # 4. LINKEDIN JOBS / STEALTH DETECTOR (uses Brave Search - rate limited)
+    # ROUTED TO STEALTH PIPELINE: This source produces 0 deals but good pre-funding signals
     if settings.brave_search_key:
         try:
             from ..harvester.scrapers.linkedin_jobs import LinkedInJobsScraper
@@ -1008,16 +1113,16 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             async with LinkedInJobsScraper() as scraper:
                 articles = await scraper.scrape_all()
 
-            # Bypass title filter - LinkedIn Jobs searches for stealth signals, not funding headlines
-            stats = await process_external_articles(articles, "linkedin_jobs", scan_job_id, skip_title_filter=True)
+            # Route to stealth signals (saves ~$8/month in LLM costs)
+            stats = await process_stealth_signals(articles, "linkedin_jobs", scan_job_id)
             results["linkedin_jobs"] = stats
-            total_deals_saved += stats["deals_saved"]
 
         except Exception as e:
             logger.error("LinkedIn Jobs scraping failed: %s", e)
             results["linkedin_jobs"] = {"error": str(e)}
 
     # 5. DELAWARE CORPS (uses Brave Search - rate limited)
+    # ROUTED TO STEALTH PIPELINE: This source produces 0 deals but good pre-funding signals
     if settings.brave_search_key:
         try:
             from ..harvester.scrapers.delaware_corps import DelawareCorpsScraper
@@ -1025,10 +1130,9 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             async with DelawareCorpsScraper() as scraper:
                 articles = await scraper.scrape_all(days_back=days, min_score=3)
 
-            # Corp filings don't have news headlines, bypass title filter
-            stats = await process_external_articles(articles, "delaware_corps", scan_job_id, skip_title_filter=True)
+            # Route to stealth signals (saves ~$8/month in LLM costs)
+            stats = await process_stealth_signals(articles, "delaware_corps", scan_job_id)
             results["delaware_corps"] = stats
-            total_deals_saved += stats["deals_saved"]
 
         except Exception as e:
             logger.error("Delaware Corps scraping failed: %s", e)
@@ -1149,40 +1253,52 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             return source_name, {"error": str(e)}
 
     async def scrape_ycombinator() -> tuple:
-        """Scrape Y Combinator (Demo Day companies)."""
+        """Scrape Y Combinator (Demo Day companies).
+
+        ROUTED TO STEALTH PIPELINE: This source produces 0 deals but good pre-funding signals.
+        YC Demo Day companies are excellent early signals (saves ~$10/month in LLM costs).
+        """
         source_name = "ycombinator"
         try:
             from ..harvester.scrapers.ycombinator import YCombinatorScraper
             async with YCombinatorScraper() as scraper:
                 articles = await scraper.scrape_all(filter_enterprise=True)
-            stats = await process_external_articles(articles, source_name, scan_job_id, skip_title_filter=True)
+            stats = await process_stealth_signals(articles, source_name, scan_job_id)
             return source_name, stats
         except Exception as e:
             logger.error("Y Combinator scraping failed: %s", e)
             return source_name, {"error": str(e)}
 
     async def scrape_github() -> tuple:
-        """Scrape GitHub Trending (dev tools before funding)."""
+        """Scrape GitHub Trending (dev tools before funding).
+
+        ROUTED TO STEALTH PIPELINE: This source produces 0 deals but good pre-funding signals.
+        Trending repos are often VC-backed startups before announcement (saves ~$8/month in LLM costs).
+        """
         source_name = "github_trending"
         try:
             from ..harvester.scrapers.github_trending import GitHubTrendingScraper
             async with GitHubTrendingScraper() as scraper:
                 repos = await scraper.fetch_all_trending(since="daily")
                 articles = await scraper.scrape_all(since="daily", filter_enterprise=True, repos=repos)
-            stats = await process_external_articles(articles, source_name, scan_job_id, skip_title_filter=True)
+            stats = await process_stealth_signals(articles, source_name, scan_job_id)
             return source_name, stats
         except Exception as e:
             logger.error("GitHub Trending scraping failed: %s", e)
             return source_name, {"error": str(e)}
 
     async def scrape_hackernews() -> tuple:
-        """Scrape Hacker News (launch posts)."""
+        """Scrape Hacker News (launch posts).
+
+        ROUTED TO STEALTH PIPELINE: This source produces 0 deals but good pre-funding signals.
+        Launch HN posts are often pre-funding companies (saves ~$10/month in LLM costs).
+        """
         source_name = "hackernews"
         try:
             from ..harvester.scrapers.hackernews import HackerNewsScraper
             async with HackerNewsScraper() as scraper:
                 articles = await scraper.scrape_all(hours_back=days * 24)
-            stats = await process_external_articles(articles, source_name, scan_job_id, skip_title_filter=True)
+            stats = await process_stealth_signals(articles, source_name, scan_job_id)
             return source_name, stats
         except Exception as e:
             logger.error("Hacker News scraping failed: %s", e)

@@ -29,6 +29,7 @@ import { TokenUsage } from './components/TokenUsage';
 import { MindMapDocs } from './components/MindMapDocs';
 import { AircraftTracker } from './components/AircraftTracker';
 import { ScansPage } from './components/ScansPage';
+import { PreFundingTab } from './components/PreFundingTab';
 import {
   fetchDeals,
   fetchFunds,
@@ -481,6 +482,13 @@ function App() {
           {currentView === 'scans' && (
             <ErrorBoundary>
               <ScansPage />
+            </ErrorBoundary>
+          )}
+
+          {/* Pre-Funding Signals View */}
+          {currentView === 'prefunding' && (
+            <ErrorBoundary>
+              <PreFundingTab />
             </ErrorBoundary>
           )}
         </main>

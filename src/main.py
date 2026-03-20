@@ -1217,6 +1217,212 @@ async def list_stealth_detections(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+# =============================================================================
+# STEALTH SIGNALS (Pre-Funding Detection) Endpoints
+# =============================================================================
+
+class StealthSignalResponse(BaseModel):
+    """Response model for a stealth signal."""
+    id: int
+    company_name: str
+    source: str
+    source_url: str
+    score: int
+    signals: dict
+    metadata: dict
+    spotted_at: str
+    dismissed: bool
+    converted_deal_id: Optional[int]
+    created_at: str
+
+
+class StealthSignalsListResponse(BaseModel):
+    """Paginated list of stealth signals."""
+    signals: List[StealthSignalResponse]
+    total: int
+
+
+class StealthSignalStatsResponse(BaseModel):
+    """Statistics for stealth signals."""
+    total: int
+    by_source: dict
+    avg_score: float
+    converted: int
+
+
+@app.get("/stealth-signals", response_model=StealthSignalsListResponse)
+async def list_stealth_signals(
+    source: Optional[str] = Query(None, description="Filter by source (hackernews, ycombinator, github, linkedin, delaware)"),
+    min_score: int = Query(0, ge=0, le=100, description="Minimum score threshold"),
+    include_dismissed: bool = Query(False, description="Include dismissed signals"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """
+    List pre-funding stealth signals.
+
+    These are early-stage company signals from sources that detect
+    startups before they announce funding (YC batch, GitHub trending,
+    HN launches, LinkedIn stealth hiring, Delaware filings).
+    """
+    try:
+        from .archivist.stealth_storage import get_stealth_signals
+
+        async with get_session() as session:
+            signals, total = await get_stealth_signals(
+                session=session,
+                source=source,
+                min_score=min_score,
+                include_dismissed=include_dismissed,
+                limit=limit,
+                offset=offset,
+            )
+
+            return StealthSignalsListResponse(
+                signals=[
+                    StealthSignalResponse(
+                        id=s.id,
+                        company_name=s.company_name,
+                        source=s.source,
+                        source_url=s.source_url,
+                        score=s.score,
+                        signals=s.signals or {},
+                        metadata=s.metadata_json or {},
+                        spotted_at=s.spotted_at.isoformat() if s.spotted_at else "",
+                        dismissed=s.dismissed,
+                        converted_deal_id=s.converted_deal_id,
+                        created_at=s.created_at.isoformat() if s.created_at else "",
+                    )
+                    for s in signals
+                ],
+                total=total,
+            )
+
+    except Exception as e:
+        logger.error("Failed to list stealth signals: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/stealth-signals/stats", response_model=StealthSignalStatsResponse)
+async def get_stealth_signal_stats(
+    include_dismissed: bool = Query(False, description="Include dismissed signals in stats"),
+):
+    """
+    Get aggregate statistics for stealth signals.
+
+    Returns total count, counts by source, average score, and conversion count.
+    """
+    try:
+        from .archivist.stealth_storage import get_stealth_stats
+
+        async with get_session() as session:
+            stats = await get_stealth_stats(
+                session=session,
+                include_dismissed=include_dismissed,
+            )
+
+            return StealthSignalStatsResponse(
+                total=stats["total"],
+                by_source=stats["by_source"],
+                avg_score=stats["avg_score"],
+                converted=stats["converted"],
+            )
+
+    except Exception as e:
+        logger.error("Failed to get stealth signal stats: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/stealth-signals/{signal_id}/dismiss")
+async def dismiss_stealth_signal(
+    signal_id: int,
+    _: str = Depends(verify_api_key),
+):
+    """
+    Dismiss a stealth signal (hide from default list).
+
+    Dismissed signals can be restored with the undismiss endpoint.
+    """
+    try:
+        from .archivist.stealth_storage import dismiss_signal
+
+        async with get_session() as session:
+            success = await dismiss_signal(session, signal_id)
+            await session.commit()
+
+            if not success:
+                raise HTTPException(status_code=404, detail="Signal not found")
+
+            return {"success": True, "signal_id": signal_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to dismiss stealth signal: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/stealth-signals/{signal_id}/undismiss")
+async def undismiss_stealth_signal(
+    signal_id: int,
+    _: str = Depends(verify_api_key),
+):
+    """
+    Undismiss a stealth signal (restore to default list).
+    """
+    try:
+        from .archivist.stealth_storage import undismiss_signal
+
+        async with get_session() as session:
+            success = await undismiss_signal(session, signal_id)
+            await session.commit()
+
+            if not success:
+                raise HTTPException(status_code=404, detail="Signal not found")
+
+            return {"success": True, "signal_id": signal_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to undismiss stealth signal: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/stealth-signals/{signal_id}/link/{deal_id}")
+async def link_signal_to_deal(
+    signal_id: int,
+    deal_id: int,
+    _: str = Depends(verify_api_key),
+):
+    """
+    Link a stealth signal to a deal.
+
+    Use this when a company from the stealth signals announces funding.
+    This tracks which pre-funding signals correctly predicted deals.
+    """
+    try:
+        from .archivist.stealth_storage import link_to_deal
+
+        async with get_session() as session:
+            success = await link_to_deal(session, signal_id, deal_id)
+            await session.commit()
+
+            if not success:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Signal or deal not found"
+                )
+
+            return {"success": True, "signal_id": signal_id, "deal_id": deal_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to link stealth signal to deal: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @app.post("/extract", response_model=ExtractionResponse)
 async def extract_funding_deal(
     request: ExtractionRequest,

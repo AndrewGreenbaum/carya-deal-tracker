@@ -30,7 +30,7 @@ export type EnterpriseCategory =
 
 export type ScraperType = 'html' | 'rss' | 'playwright' | 'external' | 'dom_diff';
 
-export type ViewType = 'dashboard' | 'stealth' | 'settings' | 'scrapers' | 'tracker' | 'scans';
+export type ViewType = 'dashboard' | 'stealth' | 'settings' | 'scrapers' | 'tracker' | 'scans' | 'prefunding';
 
 export type ServiceStatus = 'live' | 'idle' | 'error' | 'processing';
 
@@ -130,6 +130,70 @@ export interface StealthDetectionsResponse {
   detections: StealthDetection[];
   total: number;
 }
+
+// ============================================
+// Pre-Funding Stealth Signals Types
+// ============================================
+
+export type StealthSignalSource =
+  | 'hackernews'
+  | 'ycombinator'
+  | 'github'
+  | 'github_trending'
+  | 'linkedin'
+  | 'linkedin_jobs'
+  | 'delaware'
+  | 'delaware_corps';
+
+export interface StealthSignal {
+  id: number;
+  companyName: string;
+  source: StealthSignalSource;
+  sourceUrl: string;
+  score: number; // 0-100 certainty score
+  signals: Record<string, unknown>; // Source-specific signals
+  metadata: Record<string, unknown>; // Source-specific metadata
+  spottedAt: string;
+  dismissed: boolean;
+  convertedDealId?: number;
+  createdAt: string;
+}
+
+export interface StealthSignalsResponse {
+  signals: StealthSignal[];
+  total: number;
+}
+
+export interface StealthSignalStats {
+  total: number;
+  bySource: Record<string, number>;
+  avgScore: number;
+  converted: number;
+}
+
+// Source display labels for stealth signals
+export const STEALTH_SIGNAL_SOURCE_LABELS: Record<StealthSignalSource, string> = {
+  hackernews: 'Hacker News',
+  ycombinator: 'Y Combinator',
+  github: 'GitHub',
+  github_trending: 'GitHub Trending',
+  linkedin: 'LinkedIn',
+  linkedin_jobs: 'LinkedIn Jobs',
+  delaware: 'Delaware Corps',
+  delaware_corps: 'Delaware Corps',
+};
+
+// Source icon colors (for UI display)
+export const STEALTH_SIGNAL_SOURCE_COLORS: Record<StealthSignalSource, string> = {
+  hackernews: 'orange',
+  ycombinator: 'orange',
+  github: 'slate',
+  github_trending: 'slate',
+  linkedin: 'blue',
+  linkedin_jobs: 'blue',
+  delaware: 'emerald',
+  delaware_corps: 'emerald',
+};
 
 // ============================================
 // Health & Status Types

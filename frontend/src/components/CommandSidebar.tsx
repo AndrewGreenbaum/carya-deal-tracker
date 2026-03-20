@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { Home, ChevronDown, ChevronUp, Search, X, Kanban, Mail, Plane } from 'lucide-react';
+import { Home, ChevronDown, ChevronUp, Search, X, Kanban, Mail, Plane, Radar } from 'lucide-react';
 import type { FilterState, EnterpriseCategory, Fund, ViewType } from '../types';
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
@@ -103,6 +103,12 @@ export function CommandSidebar({
               label="Tracker"
               active={currentView === 'tracker'}
               onClick={() => onViewChange('tracker')}
+            />
+            <NavItem
+              icon={<Radar className="w-4 h-4" />}
+              label="Pre-Funding"
+              active={currentView === 'prefunding'}
+              onClick={() => onViewChange('prefunding')}
             />
           </div>
         </nav>

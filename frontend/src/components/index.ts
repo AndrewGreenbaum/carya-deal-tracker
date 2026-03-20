@@ -30,3 +30,6 @@ export { MindMapDocs } from './MindMapDocs';
 
 // Scans
 export { ScansPage } from './ScansPage';
+
+// Pre-Funding Detection
+export { PreFundingTab } from './PreFundingTab';

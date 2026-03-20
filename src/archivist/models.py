@@ -15,6 +15,7 @@ from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, DateTime, BigInteger
+from sqlalchemy.dialects.postgresql import JSONB
 import uuid
 
 
@@ -438,6 +439,42 @@ class FounderValidation(SQLModel, table=True):
     validated_at: Optional[datetime] = None
     validation_method: str = Field(default="brave_search")  # brave_search, manual
     created_at: datetime = Field(default_factory=utc_now_naive)
+
+
+class StealthSignal(SQLModel, table=True):
+    """Pre-funding signals from early detection scrapers.
+
+    Stores companies spotted BEFORE they announce funding:
+    - hackernews: Launch HN posts, high-engagement discussions
+    - ycombinator: Demo Day batch companies
+    - github_trending: Viral dev tools and AI repos
+    - linkedin_jobs: Stealth startup hiring signals
+    - delaware_corps: New tech company incorporations
+
+    These sources previously produced 0 deals through Claude extraction.
+    Now they use rule-based scoring (0-100) and skip LLM calls entirely.
+
+    When a company later raises funding, converted_deal_id links to the deal.
+    """
+    __tablename__ = "stealth_signals"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    company_name: str = Field(max_length=200)
+    source: str = Field(max_length=50, index=True)  # hackernews, ycombinator, github, linkedin, delaware
+    source_url: str
+    score: int = Field(default=0)  # 0-100 certainty score
+    signals: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    metadata_json: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    spotted_at: datetime = Field(
+        default_factory=utc_now_naive,
+        sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    )
+    dismissed: bool = Field(default=False)
+    converted_deal_id: Optional[int] = Field(default=None, foreign_key="deals.id")
+    created_at: datetime = Field(
+        default_factory=utc_now_naive,
+        sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    )
 
 
 class ScanJob(SQLModel, table=True):
