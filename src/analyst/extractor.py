@@ -433,13 +433,27 @@ CRYPTO_KEYWORDS = [
 ]
 
 # Company name patterns that indicate crypto (for stricter detection)
-# "0x" prefix is common in crypto (0xMiden, 0xSplits, 0x Protocol)
+# FIX 2026-01: Removed ambiguous patterns that cause false positives
+# - "chain" removed: matches "SupplyChain", "Blockchain" (valid AI companies)
+# - "vault" removed: matches "DataVault" (valid)
+# - "finance" removed: matches "MarketFinance" (valid)
+# - "bridge" removed: matches "DataBridge" (valid)
+# These are now caught by keyword density check (3+ crypto keywords in article)
 CRYPTO_COMPANY_PATTERNS = [
-    "protocol", "chain", "token", "dao", "coin", "web3", "0x",
-    "finance",  # e.g., "Compound Finance", "Aave Finance"
-    "swap",     # e.g., "Uniswap", "Sushiswap"
-    "bridge",   # e.g., "Wormhole Bridge"
-    "vault",    # e.g., "Yearn Vault"
+    "0x",       # 0x prefix is explicitly crypto (0xMiden, 0xSplits, 0x Protocol)
+    "defi",     # Explicit DeFi in name
+    "nft",      # Explicit NFT in name
+    "web3",     # Explicit Web3 in name
+    "dao",      # DAO suffix is almost always crypto
+    "swap",     # e.g., "Uniswap", "Sushiswap" - swap suffix is crypto-specific
+]
+
+# More ambiguous patterns that require word boundary matching
+# These match if the word appears as a separate token, not embedded
+CRYPTO_COMPANY_PATTERNS_STRICT = [
+    r'\bprotocol\b',  # "Protocol" as standalone word (not "ProtocolLabs" or "DataProtocol")
+    r'\btoken\b',      # "Token" as standalone word
+    r'\bcoin\b',       # "Coin" as standalone word (not "Coinbase")
 ]
 
 # URL patterns that indicate crypto websites
@@ -522,10 +536,17 @@ def _is_crypto_deal(deal: DealExtraction, article_text: str) -> bool:
     text_lower = article_text.lower()
     name_lower = deal.startup_name.lower() if deal.startup_name else ""
 
-    # Check 1: Company name contains crypto patterns
+    # Check 1a: Company name contains explicit crypto patterns (substring match OK)
     if any(pattern in name_lower for pattern in CRYPTO_COMPANY_PATTERNS):
-        logger.debug(f"Crypto detected by company name: {deal.startup_name}")
+        logger.debug(f"Crypto detected by company name pattern: {deal.startup_name}")
         return True
+
+    # Check 1b: Company name contains strict patterns (word boundary required)
+    # FIX 2026-01: Use regex for patterns that could cause false positives
+    for pattern in CRYPTO_COMPANY_PATTERNS_STRICT:
+        if re.search(pattern, name_lower):
+            logger.debug(f"Crypto detected by strict company pattern: {deal.startup_name}")
+            return True
 
     # Check 2: Article is dominated by crypto keywords (3+ = likely crypto)
     crypto_count = sum(1 for kw in CRYPTO_KEYWORDS if kw in text_lower)
