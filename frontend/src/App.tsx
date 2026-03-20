@@ -122,8 +122,13 @@ function App() {
     return <ScansPage />;
   }
 
-  // View state
-  const [currentView, setCurrentView] = useState<ViewType>('dashboard');
+  // View state - persist to URL hash for refresh
+  const getInitialView = (): ViewType => {
+    const hash = window.location.hash.slice(1);
+    const validViews: ViewType[] = ['dashboard', 'tracker', 'prefunding', 'stealth', 'scrapers', 'scans', 'settings'];
+    return validViews.includes(hash as ViewType) ? (hash as ViewType) : 'dashboard';
+  };
+  const [currentView, setCurrentView] = useState<ViewType>(getInitialView);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -186,6 +191,11 @@ function App() {
     }, 300);
     return () => clearTimeout(timer);
   }, [filters.searchQuery]);
+
+  // Sync view to URL hash for refresh persistence
+  useEffect(() => {
+    window.location.hash = currentView;
+  }, [currentView]);
 
   // Load system status
   const loadSystemStatus = useCallback(async () => {

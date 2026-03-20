@@ -21,7 +21,6 @@ import {
   Link2,
   RefreshCw,
   ChevronDown,
-  Filter,
   AlertCircle,
   Github,
   Linkedin,
@@ -324,8 +323,8 @@ export function PreFundingTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<StealthSignalSource | ''>('');
-  const [minScore, setMinScore] = useState(25);
   const [includeDismissed, setIncludeDismissed] = useState(false);
+  const minScore = 25; // Fixed minimum score threshold
   // Load signals
   const loadSignals = useCallback(async () => {
     try {
@@ -422,35 +421,18 @@ export function PreFundingTab() {
 
         {/* Filters */}
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-slate-500" />
-            <select
-              value={sourceFilter}
-              onChange={(e) => setSourceFilter(e.target.value as StealthSignalSource | '')}
-              className="bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-purple-500"
-            >
-              <option value="">All Sources</option>
-              {Object.entries(SOURCE_CONFIG).map(([key, config]) => (
-                <option key={key} value={key}>
-                  {config.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">Min Score:</span>
-            <input
-              type="range"
-              min="0"
-              max="75"
-              step="5"
-              value={minScore}
-              onChange={(e) => setMinScore(Number(e.target.value))}
-              className="w-24 accent-purple-500"
-            />
-            <span className="text-xs text-white w-8">{minScore}%</span>
-          </div>
+          <select
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value as StealthSignalSource | '')}
+            className="bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-purple-500"
+          >
+            <option value="">All Sources</option>
+            {Object.entries(SOURCE_CONFIG).map(([key, config]) => (
+              <option key={key} value={key}>
+                {config.label}
+              </option>
+            ))}
+          </select>
 
           <label className="flex items-center gap-2 cursor-pointer">
             <input
