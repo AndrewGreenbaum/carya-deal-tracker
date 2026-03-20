@@ -122,6 +122,11 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
           Next: {item.nextStep}
         </div>
       )}
+
+      {/* Added date - unobtrusive */}
+      <div className="mt-2 text-[10px] text-slate-600">
+        Added {formatAddedDate(item.createdAt)}
+      </div>
     </div>
   );
 }
@@ -139,6 +144,15 @@ function formatDate(dateString: string): string {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   } catch {
     return dateString;
+  }
+}
+
+function formatAddedDate(dateString: string): string {
+  try {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } catch {
+    return '';
   }
 }
 
