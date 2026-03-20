@@ -22,9 +22,7 @@ import {
   RefreshCw,
   ChevronDown,
   Filter,
-  TrendingUp,
   AlertCircle,
-  CheckCircle2,
   Github,
   Linkedin,
   Building2,
@@ -319,29 +317,6 @@ function SignalRow({
   );
 }
 
-// Stats card component
-function StatCard({
-  label,
-  value,
-  icon: Icon,
-  color,
-}: {
-  label: string;
-  value: string | number;
-  icon: typeof TrendingUp;
-  color: string;
-}) {
-  return (
-    <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
-      <div className="flex items-center gap-2 mb-2">
-        <Icon className={`w-4 h-4 ${color}`} />
-        <span className="text-xs text-slate-500">{label}</span>
-      </div>
-      <div className="text-2xl font-bold text-white">{value}</div>
-    </div>
-  );
-}
-
 // Main component
 export function PreFundingTab() {
   const [signals, setSignals] = useState<StealthSignal[]>([]);
@@ -440,37 +415,10 @@ export function PreFundingTab() {
         <div className="flex items-center gap-3 mb-4">
           <Radar className="w-5 h-5 text-purple-400" />
           <h2 className="text-lg font-bold text-white">Pre-Funding Signals</h2>
+          {stats && (
+            <span className="text-xs text-slate-500 ml-2">({stats.total})</span>
+          )}
         </div>
-
-        {/* Stats */}
-        {stats && (
-          <div className="grid grid-cols-4 gap-4 mb-4">
-            <StatCard
-              label="Total Signals"
-              value={stats.total}
-              icon={Radar}
-              color="text-purple-400"
-            />
-            <StatCard
-              label="Avg Score"
-              value={`${stats.avgScore.toFixed(0)}%`}
-              icon={TrendingUp}
-              color="text-emerald-400"
-            />
-            <StatCard
-              label="Converted"
-              value={stats.converted}
-              icon={CheckCircle2}
-              color="text-blue-400"
-            />
-            <StatCard
-              label="Sources"
-              value={Object.keys(stats.bySource).length}
-              icon={Filter}
-              color="text-amber-400"
-            />
-          </div>
-        )}
 
         {/* Filters */}
         <div className="flex items-center gap-4">
@@ -557,6 +505,31 @@ export function PreFundingTab() {
         )}
       </div>
 
+      {/* Footer with source icons */}
+      <div className="px-6 py-2 border-t border-slate-800/50 bg-[#0a0a0c]">
+        <div className="flex items-center gap-4 text-[10px] text-slate-600">
+          <div className="flex items-center gap-1">
+            <Sparkles className="w-3 h-3 text-orange-400/60" />
+            <span>YC</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Github className="w-3 h-3 text-slate-500" />
+            <span>GitHub</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Newspaper className="w-3 h-3 text-orange-400/60" />
+            <span>HN</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Linkedin className="w-3 h-3 text-blue-400/60" />
+            <span>LinkedIn</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Building2 className="w-3 h-3 text-emerald-400/60" />
+            <span>Delaware</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
