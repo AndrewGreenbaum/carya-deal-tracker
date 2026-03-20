@@ -40,14 +40,32 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
       role="article"
       aria-label={`${item.companyName}${item.leadInvestor ? `, led by ${item.leadInvestor}` : ''}`}
       className={`
-        bg-slate-800 border border-slate-700 rounded-lg p-3 cursor-grab
+        relative bg-slate-800 border border-slate-700 rounded-lg p-3 cursor-grab
         hover:border-slate-600 hover:bg-slate-750 transition-all select-none
         ${isCurrentlyDragging ? 'opacity-50 shadow-lg ring-2 ring-emerald-500/30 cursor-grabbing' : ''}
       `}
       onClick={() => !isCurrentlyDragging && onClick?.()}
     >
+      {/* Website link - always top-right corner */}
+      {item.website && (
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            window.open(item.website, '_blank', 'noopener,noreferrer');
+          }}
+          className="absolute top-2 right-2 p-1 text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer"
+          title={`Open ${item.website}`}
+          aria-label={`Visit ${item.companyName} website`}
+        >
+          <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+        </button>
+      )}
+
       {/* Header with drag handle indicator */}
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-2 pr-6">
         <div className="p-0.5 text-slate-500 shrink-0" aria-hidden="true">
           <GripVertical className="w-4 h-4" />
         </div>
@@ -74,44 +92,25 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
       {/* Footer with metadata */}
       <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
         {/* Last Contact */}
-        {item.lastContactDate && (
+        {item.lastContactDate ? (
           <div className="flex items-center gap-1">
             <Calendar className="w-3 h-3" />
             <span>{formatDate(item.lastContactDate)}</span>
           </div>
+        ) : (
+          <span />
         )}
 
-        {/* Icons */}
-        <div className="flex items-center gap-2">
-          {/* Deal Link Indicator */}
-          {item.dealId && (
-            <span
-              className="text-blue-400"
-              title="Linked to Dashboard deal"
-              aria-label="Linked to Dashboard deal"
-            >
-              <Link className="w-3 h-3" aria-hidden="true" />
-            </span>
-          )}
-
-          {/* Website Link */}
-          {item.website && (
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                window.open(item.website, '_blank', 'noopener,noreferrer');
-              }}
-              className="text-slate-400 hover:text-emerald-400 transition-colors cursor-pointer"
-              title={`Open ${item.website}`}
-              aria-label={`Visit ${item.companyName} website`}
-            >
-              <ExternalLink className="w-3 h-3" aria-hidden="true" />
-            </button>
-          )}
-        </div>
+        {/* Deal Link Indicator */}
+        {item.dealId && (
+          <span
+            className="text-blue-400"
+            title="Linked to Dashboard deal"
+            aria-label="Linked to Dashboard deal"
+          >
+            <Link className="w-3 h-3" aria-hidden="true" />
+          </span>
+        )}
       </div>
 
       {/* Next Step indicator */}
