@@ -218,6 +218,7 @@ export function Tracker() {
           status: data.status || 'watching',
         });
       } else if (modalItem) {
+        // Update fields (backend ignores status in PUT, must use move endpoint)
         await updateTrackerItem(modalItem.id, {
           companyName: data.companyName,
           roundType: data.roundType,
@@ -225,10 +226,14 @@ export function Tracker() {
           leadInvestor: data.leadInvestor,
           website: data.website,
           notes: data.notes,
-          status: data.status,
           lastContactDate: data.lastContactDate,
           nextStep: data.nextStep,
         });
+        // If status changed, move the item to the new column
+        if (data.status && data.status !== modalItem.status) {
+          const targetItems = items.filter((i) => i.status === data.status);
+          await moveTrackerItem(modalItem.id, data.status, targetItems.length);
+        }
       }
       setIsModalOpen(false);
       loadItems();
