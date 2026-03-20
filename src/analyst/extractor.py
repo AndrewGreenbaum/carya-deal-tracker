@@ -443,10 +443,14 @@ CRYPTO_COMPANY_PATTERNS = [
 ]
 
 # URL patterns that indicate crypto websites
+# FIX 2026-01: Removed "chain" (too broad - matches supplychain, markovchain, etc.)
+# FIX 2026-01: Removed "blockchain" (could block legitimate AI+blockchain for provenance)
+# These are now caught by keyword density check (3+ keywords) which is more accurate
 CRYPTO_URL_PATTERNS = [
-    ".eth", ".crypto", ".sol",  # Crypto TLDs
-    "crypto", "defi", "nft", "web3",  # In domain name
-    "blockchain", "token", "chain",
+    ".eth", ".crypto", ".sol",  # Crypto TLDs (strong signal)
+    "crypto", "defi", "nft", "web3",  # In domain name (strong signal)
+    "coindesk", "cointelegraph", "theblock.co", "decrypt.co",  # Crypto news sites
+    "token",  # Usually crypto-specific
 ]
 
 # Keywords that indicate consumer AI (NOT Enterprise AI)
@@ -704,10 +708,20 @@ def _is_consumer_ai_deal(deal: DealExtraction, article_text: str) -> bool:
     name_lower = deal.startup_name.lower() if deal.startup_name else ""
     desc_lower = deal.startup_description.lower() if deal.startup_description else ""
 
+    # Enterprise signals that protect against false consumer classification
+    # FIX 2026-01: Added protection for B2B companies with consumer-sounding names
+    # e.g., "StreamData" (data streaming platform), "ChatBot AI" (enterprise chatbot)
+    enterprise_signals = ["b2b", "enterprise", "business", "saas", "platform", "api", "infrastructure"]
+    has_enterprise_signals = any(sig in desc_lower for sig in enterprise_signals)
+
     # Check 1: Company name contains consumer AI patterns
+    # FIX 2026-01: Only trigger if NO enterprise signals in description
     if any(pattern in name_lower for pattern in CONSUMER_AI_COMPANY_PATTERNS):
-        logger.debug(f"Consumer AI detected by company name: {deal.startup_name}")
-        return True
+        if has_enterprise_signals:
+            logger.debug(f"Skipping consumer name match for {deal.startup_name} - has enterprise signals")
+        else:
+            logger.debug(f"Consumer AI detected by company name: {deal.startup_name}")
+            return True
 
     # Check 2: Article is dominated by consumer AI keywords (3+ = likely consumer)
     consumer_count = sum(1 for kw in CONSUMER_AI_KEYWORDS if kw in text_lower)
@@ -722,8 +736,8 @@ def _is_consumer_ai_deal(deal: DealExtraction, article_text: str) -> bool:
     ]
     if any(signal in desc_lower for signal in consumer_desc_signals):
         # Only trigger if NOT also mentioning B2B/enterprise signals
-        enterprise_signals = ["b2b", "enterprise", "business", "saas", "platform", "api"]
-        if not any(sig in desc_lower for sig in enterprise_signals):
+        # FIX 2026-01: Reuse has_enterprise_signals from Check 1 for consistency
+        if not has_enterprise_signals:
             logger.debug(f"Consumer AI detected by description: {deal.startup_name}")
             return True
 
