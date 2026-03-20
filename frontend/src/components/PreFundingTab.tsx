@@ -345,7 +345,7 @@ export function PreFundingTab() {
     } finally {
       setLoading(false);
     }
-  }, [sourceFilter, minScore, includeDismissed]);
+  }, [sourceFilter, includeDismissed]);
 
   // Initial load
   useEffect(() => {
