@@ -74,13 +74,11 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
       {/* Footer with metadata */}
       <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
         {/* Last Contact */}
-        {item.lastContactDate ? (
+        {item.lastContactDate && (
           <div className="flex items-center gap-1">
             <Calendar className="w-3 h-3" />
             <span>{formatDate(item.lastContactDate)}</span>
           </div>
-        ) : (
-          <span className="text-slate-600">No contact yet</span>
         )}
 
         {/* Icons */}
