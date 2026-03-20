@@ -224,7 +224,7 @@ const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
       <td className="px-6 py-4">
         <CompanyLinks
           website={deal.companyWebsite}
-          ceoLinkedin={deal.founders?.[0]?.linkedinUrl}
+          ceoLinkedin={deal.founders?.find(f => f.linkedinUrl)?.linkedinUrl}
           isRejected={isRejected}
         />
       </td>

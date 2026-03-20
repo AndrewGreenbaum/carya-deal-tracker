@@ -3757,6 +3757,7 @@ async def clear_cache(api_key: str = Depends(verify_api_key)):
 class EnrichmentResult(BaseModel):
     company_name: str
     website: Optional[str] = None
+    company_linkedin: Optional[str] = None
     ceo_name: Optional[str] = None
     ceo_linkedin: Optional[str] = None
 
@@ -3786,6 +3787,7 @@ async def enrich_single_company(
     return EnrichmentResult(
         company_name=result.company_name,
         website=result.website,
+        company_linkedin=result.company_linkedin,
         ceo_name=result.ceo_name,
         ceo_linkedin=result.ceo_linkedin,
     )
@@ -3877,6 +3879,10 @@ async def enrich_deals(
                     deal.company.website = enrichment.website
                     updated_count += 1
 
+                # Update company LinkedIn
+                if enrichment.company_linkedin and (not deal.company.linkedin_url or force_update):
+                    deal.company.linkedin_url = enrichment.company_linkedin
+
                 # Update founders_json with LinkedIn URLs
                 if enrichment.founder_linkedins or enrichment.ceo_linkedin:
                     # Update existing founders with LinkedIn URLs
@@ -3901,6 +3907,7 @@ async def enrich_deals(
             results.append(EnrichmentResult(
                 company_name=company_name,
                 website=enrichment.website,
+                company_linkedin=enrichment.company_linkedin,
                 ceo_name=enrichment.ceo_name,
                 ceo_linkedin=enrichment.ceo_linkedin,
             ))

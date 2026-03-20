@@ -82,12 +82,16 @@ class BraveEnrichmentResult:
     website: Optional[str] = None
     ceo_name: Optional[str] = None
     ceo_linkedin: Optional[str] = None
+    company_linkedin: Optional[str] = None  # Company page: linkedin.com/company/...
     founder_linkedins: Dict[str, str] = field(default_factory=dict)  # {name: linkedin_url}
     enrichment_source: str = "brave_search"
 
 
 # LinkedIn profile URL pattern
 LINKEDIN_PROFILE_PATTERN = r"https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]+"
+
+# LinkedIn company page URL pattern
+LINKEDIN_COMPANY_PATTERN = r"https?://(?:www\.)?linkedin\.com/company/[a-zA-Z0-9_-]+"
 
 # Skip these domains (not startup company sites)
 SKIP_DOMAINS = {
@@ -207,6 +211,53 @@ class BraveEnrichmentClient:
             invalid_paths = ["/search", "/company/", "/jobs", "/posts", "/activity", "/pulse", "/learning"]
             if not any(path in url for path in invalid_paths):
                 return url
+        return None
+
+    def _extract_company_linkedin_url(self, text: str) -> Optional[str]:
+        """Extract LinkedIn company page URL from text.
+
+        Only accepts /company/ URLs, not /jobs/, /posts/, etc.
+        """
+        match = re.search(LINKEDIN_COMPANY_PATTERN, text)
+        if match:
+            url = match.group(0)
+            # Reject non-company paths that might be appended
+            invalid_suffixes = ["/jobs", "/posts", "/people", "/about", "/life"]
+            if not any(suffix in text[match.end():match.end()+10] for suffix in invalid_suffixes):
+                return url
+        return None
+
+    async def find_company_linkedin(self, company_name: str) -> Optional[str]:
+        """Find company's LinkedIn page URL.
+
+        Searches for the company's official LinkedIn company page.
+
+        Args:
+            company_name: Name of the company
+
+        Returns:
+            LinkedIn company page URL or None
+        """
+        query = f'site:linkedin.com/company "{company_name}"'
+        results = await self._search(query, count=5)
+
+        company_lower = company_name.lower()
+        company_slug = re.sub(r'[^a-z0-9]', '', company_lower)
+
+        for result in results:
+            url = result.get("url", "")
+            title = result.get("title", "").lower()
+
+            # Must be a LinkedIn company URL
+            linkedin_url = self._extract_company_linkedin_url(url)
+            if not linkedin_url:
+                continue
+
+            # Check if company name matches in title or URL slug
+            url_slug = re.sub(r'[^a-z0-9]', '', url.lower())
+            if company_slug in url_slug or company_lower in title:
+                return linkedin_url
+
         return None
 
     async def _search(self, query: str, count: int = 5) -> List[Dict]:
@@ -392,6 +443,12 @@ class BraveEnrichmentClient:
         )
         await asyncio.sleep(self.rate_limit_delay)
 
+        # Find company LinkedIn page
+        result.company_linkedin = await self.find_company_linkedin(context.company_name)
+        if result.company_linkedin:
+            logger.info(f"Found company LinkedIn for {context.company_name}: {result.company_linkedin}")
+        await asyncio.sleep(self.rate_limit_delay)
+
         # Find LinkedIn for each known founder
         if context.founders:
             for founder in context.founders:
@@ -463,6 +520,10 @@ class BraveEnrichmentClient:
 
         # Find website (without context - less accurate)
         result.website = await self.find_website_with_context(company_name)
+        await asyncio.sleep(self.rate_limit_delay)
+
+        # Find company LinkedIn page
+        result.company_linkedin = await self.find_company_linkedin(company_name)
         await asyncio.sleep(self.rate_limit_delay)
 
         # Find CEO LinkedIn
