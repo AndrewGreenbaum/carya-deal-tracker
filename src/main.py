@@ -5286,11 +5286,10 @@ async def list_feedback(
 @app.patch("/feedback/{feedback_id}/reviewed")
 async def mark_feedback_reviewed(
     feedback_id: int,
-    reviewed: bool = True,
+    reviewed: bool = Query(default=True),
     api_key: str = Depends(verify_api_key),
 ):
     """Mark a feedback entry as reviewed or unreviewed."""
-    from datetime import timezone
     from sqlmodel import select
     from .archivist.models import Feedback
     from .archivist.database import async_session_factory
@@ -5300,13 +5299,13 @@ async def mark_feedback_reviewed(
             result = await session.execute(
                 select(Feedback).where(Feedback.id == feedback_id)
             )
-            feedback = result.scalar_one_or_none()
+            fb = result.scalar_one_or_none()
 
-            if not feedback:
+            if not fb:
                 raise HTTPException(status_code=404, detail="Feedback not found")
 
-            feedback.reviewed = reviewed
-            feedback.reviewed_at = datetime.now(timezone.utc) if reviewed else None
+            fb.reviewed = reviewed
+            fb.reviewed_at = datetime.now(timezone.utc) if reviewed else None
             await session.commit()
 
             return {"success": True, "id": feedback_id, "reviewed": reviewed}
