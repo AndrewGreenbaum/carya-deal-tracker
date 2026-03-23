@@ -15,43 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 
-# ----- URL Validation -----
-
-def _is_valid_url(url: Optional[str]) -> bool:
-    """Check if URL is a real URL (not a placeholder)."""
-    if not url:
-        return False
-    url_lower = url.lower().strip()
-
-    # Invalid placeholders
-    invalid_values = {
-        "not mentioned", "not specified", "unknown", "n/a", "none", "",
-        "<unknown>", "$unknown", "null", "undefined", "n.a.", "na",
-        "not available", "not provided", "tbd", "tba", "pending",
-    }
-    if url_lower in invalid_values:
-        return False
-
-    # Check for placeholder patterns (FIX #2: added n/a to match main.py)
-    if any(p in url_lower for p in ["not mentioned", "not specified", "unknown", "n/a"]):
-        return False
-
-    # Must start with http or www
-    if not (url_lower.startswith("http") or url_lower.startswith("www.")):
-        return False
-
-    return True
-
-
-def _sanitize_url(url: Optional[str]) -> Optional[str]:
-    """Sanitize URL - return None if invalid, normalized URL otherwise."""
-    if not _is_valid_url(url):
-        return None
-    url = url.strip()
-    # Add https:// if starts with www.
-    if url.lower().startswith("www."):
-        url = "https://" + url
-    return url
+# ----- URL Validation (FIX #1: Use shared module) -----
+from ..common.url_utils import is_valid_url as _is_valid_url, sanitize_url as _sanitize_url
 
 
 # FIX #20: Alert info returned from save_deal for post-commit sending

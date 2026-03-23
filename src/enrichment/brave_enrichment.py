@@ -194,15 +194,20 @@ class BraveEnrichmentClient:
             company_slug = re.sub(r"[^a-z0-9]", "", company_lower)
             domain_slug = re.sub(r"[^a-z0-9]", "", domain.split(".")[0])
 
-            # Get first significant word of company name (skip common words)
-            company_words = [w for w in company_lower.split() if len(w) >= 3]
-            first_word = re.sub(r"[^a-z0-9]", "", company_words[0]) if company_words else company_slug
+            # FIX #10: Get all significant words (including short ones like "AI")
+            all_words = [re.sub(r"[^a-z0-9]", "", w) for w in company_lower.split()]
+            all_words = [w for w in all_words if w]  # Remove empty strings
+            # First word for longer-name matching (min 3 chars to be considered "significant")
+            significant_words = [w for w in all_words if len(w) >= 3]
+            first_word = significant_words[0] if significant_words else company_slug
 
-            # Healthcare domain filter: reject if domain has "health" but company name doesn't
-            # This prevents "graphite" → "graphitehealth.io" false positives
-            for healthcare_kw in HEALTHCARE_DOMAIN_KEYWORDS:
-                if healthcare_kw in domain_slug and healthcare_kw not in company_slug:
-                    return False
+            # FIX #11: Healthcare domain filter - only apply for longer company names
+            # This prevents "Care" blocking "carehealth.io" but still blocks
+            # "Graphite" → "graphitehealth.io"
+            if len(company_slug) >= 5:
+                for healthcare_kw in HEALTHCARE_DOMAIN_KEYWORDS:
+                    if healthcare_kw in domain_slug and healthcare_kw not in company_slug:
+                        return False
 
             # FIX: Stricter matching - require significant overlap
             # Option A: Full company slug appears in domain
@@ -214,9 +219,14 @@ class BraveEnrichmentClient:
             if len(domain_slug) >= 4 and domain_slug in company_slug:
                 return True
 
-            # Option C: First word of company name is in domain
+            # FIX #10: Option C-alt: Any significant word (4+ chars) matches domain exactly
+            # Handles "AI Corp" → "aicorp.com" where domain = "aicorp"
+            for word in all_words:
+                if len(word) >= 2 and word == domain_slug:
+                    return True
+
+            # Option C: First significant word (5+ chars) is in domain
             # This catches "Trade Republic" → "traderepublic.com"
-            # But requires at least 5 chars to avoid false positives
             if len(first_word) >= 5 and first_word in domain_slug:
                 # Also verify domain doesn't have extra unrelated words
                 # e.g., reject "tradingview" for "Trade Republic"
@@ -262,8 +272,13 @@ class BraveEnrichmentClient:
         """Extract LinkedIn profile URL from text.
 
         FIX #35: Validates URL is a profile page, not /jobs/, /posts/, etc.
-        FIX #3: Normalizes URL to ensure https:// prefix.
+        FIX #3: Full sanitization - checks placeholders + normalizes https://.
         """
+        # FIX #3: Check for placeholder text first
+        text_lower = text.lower()
+        if any(p in text_lower for p in ["not mentioned", "not specified", "unknown", "n/a"]):
+            return None
+
         match = re.search(LINKEDIN_PROFILE_PATTERN, text)
         if match:
             url = match.group(0)
@@ -444,7 +459,7 @@ class BraveEnrichmentClient:
             return None
 
         # Skip generic names
-        if founder_name.lower() in ("ceo", "founder", "unknown"):
+        if founder_name.lower() in ("ceo", "founder", "unknown", "<unknown>"):
             return None
 
         # FIX #7: Check cache for recent failures
@@ -456,6 +471,9 @@ class BraveEnrichmentClient:
         query = f'site:linkedin.com/in "{founder_name}" "{company_name}"'
         results = await self._search(query, count=5)
 
+        # FIX #8: Track if we found any LinkedIn URLs (even if name didn't match)
+        found_any_linkedin = False
+
         for result in results:
             url = result.get("url", "")
             title = result.get("title", "")
@@ -464,6 +482,7 @@ class BraveEnrichmentClient:
             # Must be a LinkedIn profile URL
             linkedin_url = self._extract_linkedin_url(url)
             if linkedin_url:
+                found_any_linkedin = True
                 # FIX #3 & #5: Check both first AND last name in title OR description
                 name_parts = founder_name.lower().split()
                 text_to_check = f"{title} {description}".lower()
@@ -472,15 +491,19 @@ class BraveEnrichmentClient:
                 if any(part in text_to_check for part in name_parts if len(part) >= 2):
                     return linkedin_url
 
-        # Fallback: search without company name but still target LinkedIn
-        query = f'site:linkedin.com/in "{founder_name}" founder startup'
-        results = await self._search(query, count=3)
+        # FIX #8: Only do fallback if first search returned NO LinkedIn URLs at all
+        # This avoids wasting API calls when we found LinkedIn profiles but just
+        # couldn't match the name (likely wrong person)
+        if not found_any_linkedin:
+            # Fallback: search without company name but still target LinkedIn
+            query = f'site:linkedin.com/in "{founder_name}" founder startup'
+            results = await self._search(query, count=3)
 
-        for result in results:
-            url = result.get("url", "")
-            linkedin_url = self._extract_linkedin_url(url)
-            if linkedin_url:
-                return linkedin_url
+            for result in results:
+                url = result.get("url", "")
+                linkedin_url = self._extract_linkedin_url(url)
+                if linkedin_url:
+                    return linkedin_url
 
         # FIX #7: Mark this as a failed search to avoid redundant future calls
         _mark_linkedin_failure(founder_name, company_name)

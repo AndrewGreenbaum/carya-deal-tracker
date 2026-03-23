@@ -81,43 +81,13 @@ import re
 from urllib.parse import quote
 
 
-# ----- URL Validation Helpers -----
-
-def is_valid_url(url: str) -> bool:
-    """Check if URL is a real URL (not a search URL or placeholder)."""
-    if not url:
-        return False
-    url_lower = url.lower().strip()
-
-    # Invalid placeholders - comprehensive list
-    invalid_values = {
-        "not mentioned", "not specified", "unknown", "n/a", "none", "",
-        "<unknown>", "$unknown", "null", "undefined", "n.a.", "na",
-        "not available", "not provided", "tbd", "tba", "pending",
-    }
-    if url_lower in invalid_values:
-        return False
-
-    # Check for placeholder patterns (handles variations like "Not Mentioned")
-    if any(p in url_lower for p in ["not mentioned", "not specified", "unknown", "n/a"]):
-        return False
-
-    # Must start with http (or www. which we can fix)
-    if url_lower.startswith("www."):
-        # This is technically valid but needs http prefix
-        return True  # Will be normalized elsewhere
-    if not url_lower.startswith("http"):
-        return False
-
-    # Reject search URLs - we want real direct URLs only
-    if "google.com/search" in url_lower:
-        return False
-    if "linkedin.com/search" in url_lower:
-        return False
-    if "bing.com/search" in url_lower:
-        return False
-
-    return True
+# ----- URL Validation Helpers (FIX #1: Use shared module) -----
+from src.common.url_utils import (
+    is_valid_url,
+    is_valid_website_url,
+    is_valid_linkedin_profile,
+    sanitize_url,
+)
 
 
 # ----- Caching Infrastructure -----
