@@ -80,7 +80,10 @@ KNOWN_PUBLIC_COMPANIES = {
     "whatsapp", "youtube", "instagram", "waze", "nest", "fitbit",
     "github", "gitlab", "bitbucket", "heroku", "vercel", "netlify",
     # Hardware/Other
-    "spacex", "openai", "anthropic",
+    "spacex", "openai", "anthropic", "anduril",
+    # Additional well-known companies
+    "skype", "samsara", "pagerduty", "oculus", "databricks", "splunk",
+    "wise", "retool", "linear", "vanta",
 }
 
 def _is_known_public_company(name: str) -> bool:
