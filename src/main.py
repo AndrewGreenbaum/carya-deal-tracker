@@ -5324,7 +5324,8 @@ async def mark_feedback_reviewed(
             # Update fields
             fb.reviewed = reviewed
             if reviewed:
-                fb.reviewed_at = datetime.now(timezone.utc)
+                # Use naive UTC datetime (model expects naive)
+                fb.reviewed_at = datetime.utcnow()
             else:
                 fb.reviewed_at = None
 
