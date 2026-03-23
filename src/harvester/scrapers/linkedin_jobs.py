@@ -72,6 +72,72 @@ STEALTH_JOB_QUERIES = [
 # NOTE: Fund matching now uses centralized fund_matcher.py
 # which handles name variants, negative keywords, and disambiguation
 
+# Established companies to NEVER flag as "stealth startups"
+# These are large public companies that appear in news articles
+ESTABLISHED_COMPANIES = {
+    # FAANG and mega-caps
+    "amazon", "google", "alphabet", "meta", "facebook", "apple", "microsoft",
+    "nvidia", "netflix", "tesla", "twitter", "x corp",
+    # Major public tech
+    "salesforce", "oracle", "ibm", "intel", "amd", "qualcomm", "cisco",
+    "adobe", "vmware", "dell", "hp", "hpe",
+    # Other large companies
+    "uber", "lyft", "airbnb", "doordash", "instacart", "spotify",
+    "snap", "pinterest", "reddit", "linkedin", "tiktok", "bytedance",
+    # Finance
+    "jpmorgan", "goldman", "morgan stanley", "bank of america", "wells fargo",
+    "visa", "mastercard", "paypal", "square", "block",
+}
+
+def _is_established_company_article(title: str, description: str) -> bool:
+    """
+    Check if article is about an established company (not a stealth startup).
+
+    Returns True if the title/description is primarily about a large company
+    like Amazon, Google, etc. rather than an emerging startup.
+    """
+    text = f"{title} {description}".lower()
+
+    # Check if any established company is prominently featured
+    for company in ESTABLISHED_COMPANIES:
+        # Company name at start of title is a strong signal
+        if title.lower().startswith(company):
+            return True
+        # "Company will", "Company is", "Company's" patterns
+        if f"{company} will" in text or f"{company} is" in text or f"{company}'s" in text:
+            return True
+        # "about Company" or "how Company" patterns (analysis articles)
+        if f"about {company}" in text or f"how {company}" in text:
+            return True
+
+    return False
+
+def _has_startup_indicators(title: str, description: str) -> bool:
+    """
+    Check if content has indicators of an actual startup (not just news).
+
+    Looking for: funding announcements, launches, founding news.
+    """
+    text = f"{title} {description}".lower()
+
+    startup_indicators = [
+        "launches from stealth",
+        "emerges from stealth",
+        "exits stealth",
+        "comes out of stealth",
+        "raises", "raised",
+        "seed round", "series a", "series b", "series c",
+        "funding round",
+        "founded by",
+        "founding team",
+        "backed by",
+        "led by",  # As in "round led by"
+        "new startup",
+        "startup announces",
+    ]
+
+    return any(indicator in text for indicator in startup_indicators)
+
 
 @dataclass
 class LinkedInJob:
@@ -182,6 +248,17 @@ class LinkedInJobsScraper:
 
             # Skip if no content
             if not title or not url:
+                return None
+
+            # FILTER: Skip articles about established companies (Amazon, Google, etc.)
+            if _is_established_company_article(title, description):
+                logger.debug(f"Skipping established company article: {title[:50]}")
+                return None
+
+            # FILTER: Require startup indicators for stealth signals
+            # This prevents random news articles from being flagged
+            if not _has_startup_indicators(title, description):
+                logger.debug(f"Skipping non-startup content: {title[:50]}")
                 return None
 
             # Extract company name from title or description
