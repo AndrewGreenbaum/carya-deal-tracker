@@ -5286,9 +5286,10 @@ async def list_feedback(
 @app.patch("/feedback/{feedback_id}/reviewed")
 async def mark_feedback_reviewed(
     feedback_id: int,
+    reviewed: bool = True,
     api_key: str = Depends(verify_api_key),
 ):
-    """Mark a feedback entry as reviewed."""
+    """Mark a feedback entry as reviewed or unreviewed."""
     from datetime import timezone
     from sqlmodel import select
     from .archivist.models import Feedback
@@ -5304,16 +5305,47 @@ async def mark_feedback_reviewed(
             if not feedback:
                 raise HTTPException(status_code=404, detail="Feedback not found")
 
-            feedback.reviewed = True
-            feedback.reviewed_at = datetime.now(timezone.utc)
+            feedback.reviewed = reviewed
+            feedback.reviewed_at = datetime.now(timezone.utc) if reviewed else None
             await session.commit()
 
-            return {"success": True, "id": feedback_id, "reviewed": True}
+            return {"success": True, "id": feedback_id, "reviewed": reviewed}
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to mark feedback as reviewed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to update feedback")
+
+
+@app.delete("/feedback/{feedback_id}")
+async def delete_feedback(
+    feedback_id: int,
+    api_key: str = Depends(verify_api_key),
+):
+    """Delete a feedback entry."""
+    from sqlmodel import select
+    from .archivist.models import Feedback
+    from .archivist.database import async_session_factory
+
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(Feedback).where(Feedback.id == feedback_id)
+            )
+            feedback = result.scalar_one_or_none()
+
+            if not feedback:
+                raise HTTPException(status_code=404, detail="Feedback not found")
+
+            await session.delete(feedback)
+            await session.commit()
+
+            return {"success": True, "id": feedback_id, "deleted": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete feedback: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to delete feedback")
 
 
 # ----- CLI Runner -----

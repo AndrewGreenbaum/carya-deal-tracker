@@ -1,10 +1,10 @@
 /**
- * AdminFeedback.tsx - Simple admin page to view and manage feedback
- * Access via Ctrl+9 secret shortcut
+ * AdminFeedback.tsx - Admin page to view and manage feedback
+ * Access via /admin URL
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Check, RefreshCw, Flag, MessageSquare } from 'lucide-react';
+import { Check, RefreshCw, Flag, MessageSquare, Trash2, Undo2 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'https://bud-tracker-backend-production.up.railway.app';
 const API_KEY = 'dev-key';
@@ -27,18 +27,6 @@ export function AdminFeedback() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'unreviewed'>('unreviewed');
-  const [authenticated, setAuthenticated] = useState(false);
-
-  // Password check on mount
-  useEffect(() => {
-    const pwd = prompt('Enter admin password:');
-    if (pwd === 'theo2025') {
-      setAuthenticated(true);
-    } else {
-      alert('Access denied');
-      window.location.href = '/';
-    }
-  }, []);
 
   const fetchFeedback = useCallback(async () => {
     setLoading(true);
@@ -61,49 +49,59 @@ export function AdminFeedback() {
   }, [filter]);
 
   useEffect(() => {
-    if (authenticated) {
-      fetchFeedback();
-    }
-  }, [authenticated, fetchFeedback]);
+    fetchFeedback();
+  }, [fetchFeedback]);
 
-  const markReviewed = async (id: number) => {
+  const toggleReviewed = async (id: number, currentStatus: boolean) => {
+    const newStatus = !currentStatus;
     try {
-      await fetch(`${API_BASE}/feedback/${id}/reviewed`, {
+      const res = await fetch(`${API_BASE}/feedback/${id}/reviewed?reviewed=${newStatus}`, {
         method: 'PATCH',
         headers: { 'X-API-Key': API_KEY },
       });
+      if (!res.ok) throw new Error('Failed to update');
       setFeedback(prev => prev.map(f =>
-        f.id === id ? { ...f, reviewed: true } : f
+        f.id === id ? { ...f, reviewed: newStatus } : f
       ));
     } catch (err) {
-      console.error('Failed to mark reviewed:', err);
+      console.error('Failed to toggle reviewed:', err);
     }
   };
 
-  if (!authenticated) {
-    return <div className="min-h-screen bg-black" />;
-  }
+  const deleteFeedback = async (id: number) => {
+    if (!confirm('Delete this feedback item permanently?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/feedback/${id}`, {
+        method: 'DELETE',
+        headers: { 'X-API-Key': API_KEY },
+      });
+      if (!res.ok) throw new Error('Failed to delete');
+      setFeedback(prev => prev.filter(f => f.id !== id));
+    } catch (err) {
+      console.error('Failed to delete feedback:', err);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-black text-green-400 p-8 font-mono">
+    <div className="min-h-screen bg-zinc-950 text-zinc-300 p-8 font-mono">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-2xl font-bold text-green-500">
+          <h1 className="text-2xl font-bold text-zinc-100">
             FEEDBACK ADMIN
           </h1>
           <div className="flex gap-4">
             <select
               value={filter}
               onChange={(e) => setFilter(e.target.value as 'all' | 'unreviewed')}
-              className="bg-gray-900 border border-green-900 rounded px-3 py-2 text-green-400"
+              className="bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-300 focus:outline-none focus:border-zinc-500"
             >
               <option value="unreviewed">Unreviewed Only</option>
               <option value="all">All Feedback</option>
             </select>
             <button
               onClick={fetchFeedback}
-              className="flex items-center gap-2 px-4 py-2 bg-green-900/30 border border-green-700 rounded hover:bg-green-900/50"
+              className="flex items-center gap-2 px-4 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 transition-colors"
             >
               <RefreshCw className="w-4 h-4" />
               Refresh
@@ -113,39 +111,39 @@ export function AdminFeedback() {
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4 mb-8">
-          <div className="bg-gray-900 border border-green-900 rounded-lg p-4">
-            <div className="text-3xl font-bold">{feedback.length}</div>
-            <div className="text-green-600 text-sm">Total Items</div>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+            <div className="text-3xl font-bold text-zinc-100">{feedback.length}</div>
+            <div className="text-zinc-500 text-sm">Total Items</div>
           </div>
-          <div className="bg-gray-900 border border-green-900 rounded-lg p-4">
-            <div className="text-3xl font-bold">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+            <div className="text-3xl font-bold text-red-400">
               {feedback.filter(f => f.feedback_type === 'flag').length}
             </div>
-            <div className="text-red-500 text-sm">Flags</div>
+            <div className="text-zinc-500 text-sm">Flags</div>
           </div>
-          <div className="bg-gray-900 border border-green-900 rounded-lg p-4">
-            <div className="text-3xl font-bold">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+            <div className="text-3xl font-bold text-blue-400">
               {feedback.filter(f => f.feedback_type === 'suggestion').length}
             </div>
-            <div className="text-blue-400 text-sm">Suggestions</div>
+            <div className="text-zinc-500 text-sm">Suggestions</div>
           </div>
         </div>
 
         {/* Feedback List */}
         {loading ? (
-          <div className="text-center py-12 text-green-600">Loading feedback...</div>
+          <div className="text-center py-12 text-zinc-500">Loading feedback...</div>
         ) : error ? (
           <div className="text-center py-12">
             <div className="text-red-400 mb-4">Error: {error}</div>
             <button
               onClick={fetchFeedback}
-              className="px-4 py-2 bg-green-900/30 border border-green-700 rounded hover:bg-green-900/50"
+              className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700"
             >
               Retry
             </button>
           </div>
         ) : feedback.length === 0 ? (
-          <div className="text-center py-12 text-green-600">
+          <div className="text-center py-12 text-zinc-500">
             No feedback to review
           </div>
         ) : (
@@ -153,8 +151,8 @@ export function AdminFeedback() {
             {feedback.map((item) => (
               <div
                 key={item.id}
-                className={`bg-gray-900 border rounded-lg p-4 ${
-                  item.reviewed ? 'border-gray-800 opacity-60' : 'border-green-900'
+                className={`bg-zinc-900 border rounded-lg p-4 ${
+                  item.reviewed ? 'border-zinc-800 opacity-50' : 'border-zinc-700'
                 }`}
               >
                 <div className="flex items-start justify-between">
@@ -162,35 +160,35 @@ export function AdminFeedback() {
                     {/* Type badge */}
                     <div className="flex items-center gap-2 mb-2">
                       {item.feedback_type === 'flag' ? (
-                        <span className="flex items-center gap-1 px-2 py-1 bg-red-900/30 text-red-400 text-xs rounded">
+                        <span className="flex items-center gap-1 px-2 py-1 bg-red-950 text-red-400 text-xs rounded border border-red-900">
                           <Flag className="w-3 h-3" />
                           FLAG
                         </span>
                       ) : (
-                        <span className="flex items-center gap-1 px-2 py-1 bg-blue-900/30 text-blue-400 text-xs rounded">
+                        <span className="flex items-center gap-1 px-2 py-1 bg-blue-950 text-blue-400 text-xs rounded border border-blue-900">
                           <MessageSquare className="w-3 h-3" />
                           {item.suggestion_type?.toUpperCase() || 'SUGGESTION'}
                         </span>
                       )}
                       {item.reviewed && (
-                        <span className="px-2 py-1 bg-green-900/30 text-green-400 text-xs rounded">
+                        <span className="px-2 py-1 bg-zinc-800 text-zinc-400 text-xs rounded border border-zinc-700">
                           REVIEWED
                         </span>
                       )}
                     </div>
 
                     {/* Company name */}
-                    <h3 className="text-lg font-semibold text-white mb-1">
+                    <h3 className="text-lg font-semibold text-zinc-100 mb-1">
                       {item.company_name}
                     </h3>
 
                     {/* Reason/details */}
                     {item.reason && (
-                      <p className="text-green-300 mb-2">{item.reason}</p>
+                      <p className="text-zinc-400 mb-2">{item.reason}</p>
                     )}
 
                     {/* Metadata */}
-                    <div className="flex gap-4 text-xs text-green-600">
+                    <div className="flex gap-4 text-xs text-zinc-500">
                       <span>
                         {new Date(item.created_at).toLocaleDateString()} {new Date(item.created_at).toLocaleTimeString()}
                       </span>
@@ -212,15 +210,34 @@ export function AdminFeedback() {
                   </div>
 
                   {/* Actions */}
-                  {!item.reviewed && (
+                  <div className="flex items-center gap-2 ml-4">
+                    {item.reviewed ? (
+                      <button
+                        onClick={() => toggleReviewed(item.id, true)}
+                        className="flex items-center gap-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 text-sm transition-colors"
+                        title="Undo Review"
+                      >
+                        <Undo2 className="w-4 h-4" />
+                        Undo
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => toggleReviewed(item.id, false)}
+                        className="flex items-center gap-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 text-sm transition-colors"
+                        title="Mark as Reviewed"
+                      >
+                        <Check className="w-4 h-4" />
+                        Reviewed
+                      </button>
+                    )}
                     <button
-                      onClick={() => markReviewed(item.id)}
-                      className="flex items-center gap-1 px-3 py-2 bg-green-900/30 border border-green-700 rounded hover:bg-green-900/50 text-sm"
+                      onClick={() => deleteFeedback(item.id)}
+                      className="flex items-center gap-1 px-3 py-2 bg-red-950 border border-red-900 rounded hover:bg-red-900 text-red-400 text-sm transition-colors"
+                      title="Delete"
                     >
-                      <Check className="w-4 h-4" />
-                      Mark Reviewed
+                      <Trash2 className="w-4 h-4" />
                     </button>
-                  )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -229,7 +246,7 @@ export function AdminFeedback() {
 
         {/* Back link */}
         <div className="mt-8 text-center">
-          <a href="/" className="text-green-600 hover:text-green-400">
+          <a href="/" className="text-zinc-500 hover:text-zinc-300 transition-colors">
             ← Back to Dashboard
           </a>
         </div>
