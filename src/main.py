@@ -5307,25 +5307,30 @@ async def mark_feedback_reviewed(
     api_key: str = Depends(verify_api_key),
 ):
     """Mark a feedback entry as reviewed or unreviewed."""
-    from sqlalchemy import update, text
+    from sqlmodel import select
     from .archivist.models import Feedback
     from .archivist.database import async_session_factory
 
     try:
         async with async_session_factory() as session:
-            # Use raw UPDATE for reliability
-            reviewed_at_val = datetime.now(timezone.utc) if reviewed else None
-            stmt = (
-                update(Feedback)
-                .where(Feedback.id == feedback_id)
-                .values(reviewed=reviewed, reviewed_at=reviewed_at_val)
+            result = await session.execute(
+                select(Feedback).where(Feedback.id == feedback_id)
             )
-            result = await session.execute(stmt)
+            fb = result.scalar_one_or_none()
 
-            if result.rowcount == 0:
+            if not fb:
                 raise HTTPException(status_code=404, detail="Feedback not found")
 
+            # Update fields
+            fb.reviewed = reviewed
+            if reviewed:
+                fb.reviewed_at = datetime.now(timezone.utc)
+            else:
+                fb.reviewed_at = None
+
+            session.add(fb)
             await session.commit()
+
             return {"success": True, "id": feedback_id, "reviewed": reviewed}
     except HTTPException:
         raise
