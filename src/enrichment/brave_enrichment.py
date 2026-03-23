@@ -175,23 +175,43 @@ class BraveEnrichmentClient:
             company_slug = re.sub(r"[^a-z0-9]", "", company_lower)
             domain_slug = re.sub(r"[^a-z0-9]", "", domain.split(".")[0])
 
+            # Get first significant word of company name (skip common words)
+            company_words = [w for w in company_lower.split() if len(w) >= 3]
+            first_word = re.sub(r"[^a-z0-9]", "", company_words[0]) if company_words else company_slug
+
             # Healthcare domain filter: reject if domain has "health" but company name doesn't
             # This prevents "graphite" → "graphitehealth.io" false positives
             for healthcare_kw in HEALTHCARE_DOMAIN_KEYWORDS:
                 if healthcare_kw in domain_slug and healthcare_kw not in company_slug:
                     return False
 
-            # FIX: Require full company name in domain (not just 4-char prefix)
-            # Option A: Full company name appears in domain
+            # FIX: Stricter matching - require significant overlap
+            # Option A: Full company slug appears in domain
             if company_slug in domain_slug:
                 return True
 
-            # Option B: Domain name appears in company name (for short domains like "gv.com")
-            # Only allow this for domains with 4+ chars to avoid false positives
+            # Option B: Domain slug appears in company slug (for short domains like "gv.com")
+            # Only allow this for domains with 4+ chars
             if len(domain_slug) >= 4 and domain_slug in company_slug:
                 return True
 
-            # Option C: Exact match
+            # Option C: First word of company name is in domain
+            # This catches "Trade Republic" → "traderepublic.com"
+            # But requires at least 5 chars to avoid false positives
+            if len(first_word) >= 5 and first_word in domain_slug:
+                # Also verify domain doesn't have extra unrelated words
+                # e.g., reject "tradingview" for "Trade Republic"
+                remaining = domain_slug.replace(first_word, "")
+                # If remaining is short or empty, it's likely correct
+                if len(remaining) <= 4:
+                    return True
+                # If remaining is in the company name, also OK
+                if remaining and remaining in company_slug:
+                    return True
+                # Otherwise, reject - domain has extra unrelated content
+                return False
+
+            # Option D: Exact match
             if company_slug == domain_slug:
                 return True
 
@@ -466,10 +486,28 @@ class BraveEnrichmentClient:
 
                 linkedin = await self.find_founder_linkedin(founder_name, context.company_name)
                 if linkedin:
-                    result.founder_linkedins[founder_name] = linkedin
-                    if not result.ceo_linkedin:
-                        result.ceo_name = founder_name
-                        result.ceo_linkedin = linkedin
+                    # Validate the LinkedIn URL before storing
+                    validation = await validate_founder_linkedin(
+                        founder_name=founder_name,
+                        company_name=context.company_name,
+                        linkedin_url=linkedin,
+                        extracted_title=founder.get("title"),
+                    )
+
+                    # Store if validation passed OR we couldn't extract company info
+                    # (some profiles don't have clear company in snippet)
+                    if validation.is_valid or validation.profile_current_company is None:
+                        result.founder_linkedins[founder_name] = linkedin
+                        if not result.ceo_linkedin:
+                            result.ceo_name = founder_name
+                            result.ceo_linkedin = linkedin
+                        if validation.is_valid:
+                            logger.info(f"LinkedIn VALIDATED for {founder_name}: {linkedin}")
+                    else:
+                        logger.warning(
+                            f"LinkedIn REJECTED for {founder_name} at {context.company_name}: "
+                            f"profile shows '{validation.profile_current_company}' with title '{validation.profile_current_title}'"
+                        )
 
                 await asyncio.sleep(self.rate_limit_delay)
 
@@ -487,23 +525,35 @@ class BraveEnrichmentClient:
             reason = "No founders extracted" if not context.founders else "All founders missing LinkedIn"
             logger.info(f"{reason} for {context.company_name}, trying CEO fallback search")
             ceo_name, linkedin_url = await self.find_ceo_linkedin(context.company_name)
-            if linkedin_url:
-                result.ceo_name = ceo_name
-                result.ceo_linkedin = linkedin_url
-                # Add to founder_linkedins with special key
-                if ceo_name:
+            if linkedin_url and ceo_name:
+                # Validate CEO LinkedIn
+                validation = await validate_founder_linkedin(
+                    founder_name=ceo_name,
+                    company_name=context.company_name,
+                    linkedin_url=linkedin_url,
+                )
+                if validation.is_valid or validation.profile_current_company is None:
+                    result.ceo_name = ceo_name
+                    result.ceo_linkedin = linkedin_url
                     result.founder_linkedins[ceo_name] = linkedin_url
+                    logger.info(f"Found CEO for {context.company_name} via fallback: {ceo_name}")
                 else:
-                    result.founder_linkedins["CEO (discovered)"] = linkedin_url
-                logger.info(f"Found CEO for {context.company_name} via fallback: {ceo_name}")
+                    logger.warning(f"CEO LinkedIn rejected for {context.company_name}: wrong company")
             await asyncio.sleep(self.rate_limit_delay)
 
         # Original fallback: if still no LinkedIn found after processing founders
         elif not result.ceo_linkedin:
             ceo_name, linkedin_url = await self.find_ceo_linkedin(context.company_name)
-            if linkedin_url:
-                result.ceo_name = ceo_name
-                result.ceo_linkedin = linkedin_url
+            if linkedin_url and ceo_name:
+                # Validate CEO LinkedIn
+                validation = await validate_founder_linkedin(
+                    founder_name=ceo_name,
+                    company_name=context.company_name,
+                    linkedin_url=linkedin_url,
+                )
+                if validation.is_valid or validation.profile_current_company is None:
+                    result.ceo_name = ceo_name
+                    result.ceo_linkedin = linkedin_url
 
         return result
 

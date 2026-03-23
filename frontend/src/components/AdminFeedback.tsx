@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Check, RefreshCw, Flag, MessageSquare, Trash2, Undo2 } from 'lucide-react';
+import { Check, Flag, MessageSquare, Trash2, Undo2 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'https://bud-tracker-backend-production.up.railway.app';
 const API_KEY = 'dev-key';
@@ -90,23 +90,14 @@ export function AdminFeedback() {
           <h1 className="text-2xl font-bold text-zinc-100">
             FEEDBACK ADMIN
           </h1>
-          <div className="flex gap-4">
-            <select
-              value={filter}
-              onChange={(e) => setFilter(e.target.value as 'all' | 'unreviewed')}
-              className="bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-300 focus:outline-none focus:border-zinc-500"
-            >
-              <option value="unreviewed">Unreviewed Only</option>
-              <option value="all">All Feedback</option>
-            </select>
-            <button
-              onClick={fetchFeedback}
-              className="flex items-center gap-2 px-4 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Refresh
-            </button>
-          </div>
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as 'all' | 'unreviewed')}
+            className="bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-300 focus:outline-none focus:border-zinc-500"
+          >
+            <option value="unreviewed">Unreviewed Only</option>
+            <option value="all">All Feedback</option>
+          </select>
         </div>
 
         {/* Stats */}

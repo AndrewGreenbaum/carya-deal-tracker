@@ -15,6 +15,45 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 
+# ----- URL Validation -----
+
+def _is_valid_url(url: Optional[str]) -> bool:
+    """Check if URL is a real URL (not a placeholder)."""
+    if not url:
+        return False
+    url_lower = url.lower().strip()
+
+    # Invalid placeholders
+    invalid_values = {
+        "not mentioned", "not specified", "unknown", "n/a", "none", "",
+        "<unknown>", "$unknown", "null", "undefined", "n.a.", "na",
+        "not available", "not provided", "tbd", "tba", "pending",
+    }
+    if url_lower in invalid_values:
+        return False
+
+    # Check for placeholder patterns
+    if any(p in url_lower for p in ["not mentioned", "not specified", "unknown"]):
+        return False
+
+    # Must start with http or www
+    if not (url_lower.startswith("http") or url_lower.startswith("www.")):
+        return False
+
+    return True
+
+
+def _sanitize_url(url: Optional[str]) -> Optional[str]:
+    """Sanitize URL - return None if invalid, normalized URL otherwise."""
+    if not _is_valid_url(url):
+        return None
+    url = url.strip()
+    # Add https:// if starts with www.
+    if url.lower().startswith("www."):
+        url = "https://" + url
+    return url
+
+
 # FIX #20: Alert info returned from save_deal for post-commit sending
 @dataclass
 class LeadDealAlertInfo:
@@ -365,6 +404,10 @@ async def get_or_create_company(
     from sqlalchemy import func
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Sanitize URLs to prevent storing placeholders like "Not mentioned"
+    website = _sanitize_url(website)
+    linkedin_url = _sanitize_url(linkedin_url)
 
     # Use INSERT ... ON CONFLICT for atomic upsert
     # The unique index is on LOWER(name), so we use that for conflict detection
@@ -1029,9 +1072,15 @@ async def update_deal(
         if company_name is not None:
             company.name = company_name
         if website is not None:
-            company.website = website
+            # Sanitize URL to prevent storing placeholders
+            sanitized = _sanitize_url(website)
+            if sanitized:
+                company.website = sanitized
         if linkedin_url is not None:
-            company.linkedin_url = linkedin_url
+            # Sanitize URL to prevent storing placeholders
+            sanitized = _sanitize_url(linkedin_url)
+            if sanitized:
+                company.linkedin_url = sanitized
         company.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Update deal fields

@@ -88,18 +88,35 @@ def is_valid_url(url: str) -> bool:
     if not url:
         return False
     url_lower = url.lower().strip()
-    # Invalid placeholders
-    invalid_values = ["not mentioned", "not specified", "unknown", "n/a", "none", ""]
+
+    # Invalid placeholders - comprehensive list
+    invalid_values = {
+        "not mentioned", "not specified", "unknown", "n/a", "none", "",
+        "<unknown>", "$unknown", "null", "undefined", "n.a.", "na",
+        "not available", "not provided", "tbd", "tba", "pending",
+    }
     if url_lower in invalid_values:
         return False
-    # Must start with http
+
+    # Check for placeholder patterns (handles variations like "Not Mentioned")
+    if any(p in url_lower for p in ["not mentioned", "not specified", "unknown", "n/a"]):
+        return False
+
+    # Must start with http (or www. which we can fix)
+    if url_lower.startswith("www."):
+        # This is technically valid but needs http prefix
+        return True  # Will be normalized elsewhere
     if not url_lower.startswith("http"):
         return False
+
     # Reject search URLs - we want real direct URLs only
     if "google.com/search" in url_lower:
         return False
     if "linkedin.com/search" in url_lower:
         return False
+    if "bing.com/search" in url_lower:
+        return False
+
     return True
 
 
@@ -5290,24 +5307,25 @@ async def mark_feedback_reviewed(
     api_key: str = Depends(verify_api_key),
 ):
     """Mark a feedback entry as reviewed or unreviewed."""
-    from sqlmodel import select
+    from sqlalchemy import update, text
     from .archivist.models import Feedback
     from .archivist.database import async_session_factory
 
     try:
         async with async_session_factory() as session:
-            result = await session.execute(
-                select(Feedback).where(Feedback.id == feedback_id)
+            # Use raw UPDATE for reliability
+            reviewed_at_val = datetime.now(timezone.utc) if reviewed else None
+            stmt = (
+                update(Feedback)
+                .where(Feedback.id == feedback_id)
+                .values(reviewed=reviewed, reviewed_at=reviewed_at_val)
             )
-            fb = result.scalar_one_or_none()
+            result = await session.execute(stmt)
 
-            if not fb:
+            if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Feedback not found")
 
-            fb.reviewed = reviewed
-            fb.reviewed_at = datetime.now(timezone.utc) if reviewed else None
             await session.commit()
-
             return {"success": True, "id": feedback_id, "reviewed": reviewed}
     except HTTPException:
         raise
