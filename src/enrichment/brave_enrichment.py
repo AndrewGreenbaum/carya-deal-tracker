@@ -219,6 +219,30 @@ class BraveEnrichmentClient:
         except Exception:
             return False
 
+    async def _verify_website_exists(self, url: str) -> bool:
+        """Verify that a website URL responds with 2xx status.
+
+        Uses HEAD request with short timeout to minimize latency.
+        Returns True if site responds, False otherwise.
+        """
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(5.0),
+                follow_redirects=True,
+                limits=httpx.Limits(max_connections=5),
+            ) as client:
+                response = await client.head(url)
+                if response.status_code < 400:
+                    return True
+                # Some sites block HEAD, try GET
+                response = await client.get(url)
+                return response.status_code < 400
+        except Exception as e:
+            logger.debug(f"Website verification failed for {url}: {e}")
+            return False
+
     def _extract_linkedin_url(self, text: str) -> Optional[str]:
         """Extract LinkedIn profile URL from text.
 
@@ -345,7 +369,13 @@ class BraveEnrichmentClient:
             url = result.get("url", "")
             if self._is_valid_startup_website(url, company_name):
                 parsed = urlparse(url)
-                return f"https://{parsed.netloc}"
+                website_url = f"https://{parsed.netloc}"
+                # Verify website actually exists
+                if await self._verify_website_exists(website_url):
+                    logger.info(f"Website verified for {company_name}: {website_url}")
+                    return website_url
+                else:
+                    logger.warning(f"Website verification failed for {company_name}: {website_url}")
 
         # Fallback: try simpler query with investor
         if investor:
@@ -355,7 +385,11 @@ class BraveEnrichmentClient:
                 url = result.get("url", "")
                 if self._is_valid_startup_website(url, company_name):
                     parsed = urlparse(url)
-                    return f"https://{parsed.netloc}"
+                    website_url = f"https://{parsed.netloc}"
+                    # Verify website actually exists
+                    if await self._verify_website_exists(website_url):
+                        logger.info(f"Website verified for {company_name}: {website_url}")
+                        return website_url
 
         return None
 

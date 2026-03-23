@@ -58,6 +58,43 @@ PLAYWRIGHT_REQUIRED_FUNDS = {
 # Memory safety limit
 MAX_COMPANIES_PER_FUND = 500
 
+# Known public/established companies to NEVER flag as "stealth additions"
+# These are well-known companies that VCs have invested in for years
+# Prevents false alerts when portfolio pages are first scraped or re-scraped
+KNOWN_PUBLIC_COMPANIES = {
+    # FAANG and mega-caps
+    "google", "alphabet", "meta", "facebook", "amazon", "apple", "microsoft",
+    "nvidia", "netflix", "tesla", "twitter", "x",
+    # Major public tech companies
+    "airbnb", "doordash", "uber", "lyft", "pinterest", "snap", "snapchat",
+    "spotify", "shopify", "stripe", "instacart", "coinbase", "robinhood",
+    "snowflake", "datadog", "crowdstrike", "cloudflare", "mongodb", "elastic",
+    "palantir", "unity", "roblox", "discord", "reddit", "linkedin",
+    "salesforce", "workday", "servicenow", "atlassian", "slack", "zoom",
+    "dropbox", "box", "docusign", "okta", "twilio", "sendgrid",
+    "hubspot", "zendesk", "freshworks", "monday", "asana", "notion",
+    "figma", "canva", "miro", "airtable", "webflow",
+    "plaid", "brex", "ramp", "gusto", "rippling", "deel",
+    "stripe", "square", "block", "paypal", "klarna", "affirm", "chime",
+    # Legacy companies
+    "whatsapp", "youtube", "instagram", "waze", "nest", "fitbit",
+    "github", "gitlab", "bitbucket", "heroku", "vercel", "netlify",
+    # Hardware/Other
+    "spacex", "openai", "anthropic",
+}
+
+def _is_known_public_company(name: str) -> bool:
+    """Check if company name matches a known public/established company."""
+    name_lower = name.lower().strip()
+    # Direct match
+    if name_lower in KNOWN_PUBLIC_COMPANIES:
+        return True
+    # Check if name starts with known company (handles "Block (Square, Cash App...)")
+    for known in KNOWN_PUBLIC_COMPANIES:
+        if name_lower.startswith(known):
+            return True
+    return False
+
 # Portfolio page URLs for tracked funds
 # NOTE: Extract company names from img alt tags or specific CSS selectors
 # Some funds don't have public portfolio pages (Thrive - just a splash page)
@@ -419,23 +456,71 @@ class PortfolioDiffScraper:
     async def get_portfolio_diff(self, fund_slug: str) -> PortfolioDiff:
         """
         Get diff between current portfolio and stored snapshot.
+
+        IMPORTANT: On first-run (empty snapshot), we populate the snapshot
+        but don't report any companies as "new" to avoid false alerts for
+        established companies like Google, NVIDIA, Airbnb, etc.
         """
         # Load previous snapshot from database
         previous = await self._load_snapshot(fund_slug)
+        is_first_run = len(previous) == 0
 
         # Scrape current portfolio
         current_companies = await self.scrape_portfolio_page(fund_slug)
         current_names = {c.name.lower() for c in current_companies}
 
+        # Save current snapshot to database for next run
+        await self._save_snapshot(fund_slug, current_names)
+
+        # FIRST-RUN PROTECTION: If no previous snapshot, don't report any as "new"
+        # This prevents false alerts when portfolio is first scraped
+        if is_first_run:
+            logger.info(
+                f"First-run for {fund_slug}: populated snapshot with {len(current_names)} companies, "
+                f"skipping 'new company' alerts to avoid false positives"
+            )
+            return PortfolioDiff(
+                fund_slug=fund_slug,
+                new_companies=[],  # No alerts on first run
+                removed_companies=[],
+                snapshot_date=date.today(),
+            )
+
         # Find new companies (in current but not in previous)
         new_names = current_names - previous
-        new_companies = [c for c in current_companies if c.name.lower() in new_names]
+
+        # BULK ALERT PROTECTION: If >10 "new" companies, likely a snapshot issue
+        # (e.g., previous scrape failed, snapshot corrupted, selectors changed)
+        # Skip alerting to avoid false positive spam
+        MAX_NEW_COMPANIES_THRESHOLD = 10
+        if len(new_names) > MAX_NEW_COMPANIES_THRESHOLD:
+            logger.warning(
+                f"Bulk alert protection for {fund_slug}: {len(new_names)} new companies detected "
+                f"(threshold={MAX_NEW_COMPANIES_THRESHOLD}). Likely snapshot issue - skipping alerts."
+            )
+            return PortfolioDiff(
+                fund_slug=fund_slug,
+                new_companies=[],  # Skip bulk alerts
+                removed_companies=[],
+                snapshot_date=date.today(),
+            )
+
+        # Filter out known public/established companies
+        new_companies = []
+        filtered_count = 0
+        for c in current_companies:
+            if c.name.lower() in new_names:
+                if _is_known_public_company(c.name):
+                    logger.debug(f"Filtering known public company: {c.name}")
+                    filtered_count += 1
+                else:
+                    new_companies.append(c)
+
+        if filtered_count > 0:
+            logger.info(f"Filtered {filtered_count} known public companies from {fund_slug} diff")
 
         # Find removed companies (in previous but not in current)
         removed_names = previous - current_names
-
-        # Save current snapshot to database for next run
-        await self._save_snapshot(fund_slug, current_names)
 
         return PortfolioDiff(
             fund_slug=fund_slug,
