@@ -14,7 +14,9 @@ import re
 logger = logging.getLogger(__name__)
 
 # LinkedIn profile URL pattern - must be /in/ not /company/, /jobs/, etc.
-LINKEDIN_PROFILE_PATTERN = re.compile(r'^https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]+/?$')
+# FIX #5: Allow query params and trailing content (matches brave_enrichment.py)
+# FIX #9: Require 3+ char username
+LINKEDIN_PROFILE_PATTERN = re.compile(r'^https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]{3,}(?:/.*)?(?:\?.*)?$')
 
 # Valid URL pattern for company websites
 VALID_URL_PATTERN = re.compile(r'^https?://[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/.*)?$')

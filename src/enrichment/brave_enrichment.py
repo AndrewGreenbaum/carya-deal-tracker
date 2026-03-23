@@ -87,11 +87,11 @@ class BraveEnrichmentResult:
     enrichment_source: str = "brave_search"
 
 
-# LinkedIn profile URL pattern
-LINKEDIN_PROFILE_PATTERN = r"https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]+"
+# LinkedIn profile URL pattern (FIX #9: require 3+ char username)
+LINKEDIN_PROFILE_PATTERN = r"https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]{3,}"
 
-# LinkedIn company page URL pattern
-LINKEDIN_COMPANY_PATTERN = r"https?://(?:www\.)?linkedin\.com/company/[a-zA-Z0-9_-]+"
+# LinkedIn company page URL pattern (FIX #9: require 2+ char slug)
+LINKEDIN_COMPANY_PATTERN = r"https?://(?:www\.)?linkedin\.com/company/[a-zA-Z0-9_-]{2,}"
 
 # Skip these domains (not startup company sites)
 SKIP_DOMAINS = {
@@ -126,8 +126,11 @@ KNOWN_FALSE_POSITIVES = {
 # Domain keywords that indicate wrong industry (unless company name contains them)
 HEALTHCARE_DOMAIN_KEYWORDS = ["health", "medical", "clinic", "hospital", "pharma", "care"]
 
-# Valid TLDs for startup websites
-VALID_TLDS = ("com", "io", "ai", "co", "dev", "app", "tech", "cloud", "xyz", "me", "health", "bio", "so", "gg")
+# Valid TLDs for startup websites (FIX #7: added net, org, us, uk, eu, info)
+VALID_TLDS = (
+    "com", "io", "ai", "co", "dev", "app", "tech", "cloud", "xyz", "me",
+    "health", "bio", "so", "gg", "net", "org", "us", "uk", "eu", "info",
+)
 
 
 class BraveEnrichmentClient:
@@ -135,16 +138,32 @@ class BraveEnrichmentClient:
     Client for enriching company data via Brave Search.
 
     OPTIMIZED: Uses shared BraveClient instead of creating its own HTTP client.
+    FIX #4: Added shared HTTP client for website verification.
     """
 
     def __init__(self):
         self.rate_limit_delay = settings.brave_search_rate_limit_delay
+        self._http_client: Optional["httpx.AsyncClient"] = None
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        pass  # Client is shared, don't close it
+        # FIX #4: Close HTTP client on exit
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
+
+    async def _get_http_client(self) -> "httpx.AsyncClient":
+        """Get or create shared HTTP client for website verification."""
+        import httpx
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(5.0),
+                follow_redirects=True,
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            )
+        return self._http_client
 
     def _is_valid_startup_website(self, url: str, company_name: str) -> bool:
         """Check if URL is a valid startup website (not a false positive)."""
@@ -224,21 +243,17 @@ class BraveEnrichmentClient:
 
         Uses HEAD request with short timeout to minimize latency.
         Returns True if site responds, False otherwise.
-        """
-        import httpx
 
+        FIX #4: Uses shared HTTP client instead of creating new one each call.
+        """
         try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(5.0),
-                follow_redirects=True,
-                limits=httpx.Limits(max_connections=5),
-            ) as client:
-                response = await client.head(url)
-                if response.status_code < 400:
-                    return True
-                # Some sites block HEAD, try GET
-                response = await client.get(url)
-                return response.status_code < 400
+            client = await self._get_http_client()
+            response = await client.head(url)
+            if response.status_code < 400:
+                return True
+            # Some sites block HEAD, try GET
+            response = await client.get(url)
+            return response.status_code < 400
         except Exception as e:
             logger.debug(f"Website verification failed for {url}: {e}")
             return False
@@ -247,6 +262,7 @@ class BraveEnrichmentClient:
         """Extract LinkedIn profile URL from text.
 
         FIX #35: Validates URL is a profile page, not /jobs/, /posts/, etc.
+        FIX #3: Normalizes URL to ensure https:// prefix.
         """
         match = re.search(LINKEDIN_PROFILE_PATTERN, text)
         if match:
@@ -254,6 +270,9 @@ class BraveEnrichmentClient:
             # FIX #35: Reject non-profile LinkedIn URLs
             invalid_paths = ["/search", "/company/", "/jobs", "/posts", "/activity", "/pulse", "/learning"]
             if not any(path in url for path in invalid_paths):
+                # FIX #3: Normalize URL to https://
+                if url.startswith("http://"):
+                    url = "https://" + url[7:]
                 return url
         return None
 
@@ -261,6 +280,7 @@ class BraveEnrichmentClient:
         """Extract LinkedIn company page URL from text.
 
         Only accepts /company/ URLs, not /jobs/, /posts/, etc.
+        FIX #3: Normalizes URL to ensure https:// prefix.
         """
         match = re.search(LINKEDIN_COMPANY_PATTERN, text)
         if match:
@@ -268,6 +288,9 @@ class BraveEnrichmentClient:
             # Reject non-company paths that might be appended
             invalid_suffixes = ["/jobs", "/posts", "/people", "/about", "/life"]
             if not any(suffix in text[match.end():match.end()+10] for suffix in invalid_suffixes):
+                # FIX #3: Normalize URL to https://
+                if url.startswith("http://"):
+                    url = "https://" + url[7:]
                 return url
         return None
 
@@ -297,9 +320,27 @@ class BraveEnrichmentClient:
             if not linkedin_url:
                 continue
 
-            # Check if company name matches in title or URL slug
-            url_slug = re.sub(r'[^a-z0-9]', '', url.lower())
-            if company_slug in url_slug or company_lower in title:
+            # Extract company slug from LinkedIn URL path
+            # e.g., "linkedin.com/company/openai" -> "openai"
+            url_path_match = re.search(r'linkedin\.com/company/([a-z0-9_-]+)', url.lower())
+            if not url_path_match:
+                continue
+            url_company_slug = url_path_match.group(1)
+
+            # FIX #6 & #12: Stricter matching for short company names
+            # Require company slug to be at least 4 chars for substring match
+            # Otherwise require exact match or company name in title
+            if len(company_slug) >= 4:
+                # Longer names: allow substring match
+                if company_slug in url_company_slug or url_company_slug in company_slug:
+                    return linkedin_url
+            else:
+                # Short names (ai, gv, etc.): require exact match
+                if company_slug == url_company_slug:
+                    return linkedin_url
+
+            # Also accept if company name appears in title
+            if company_lower in title:
                 return linkedin_url
 
         return None

@@ -32,8 +32,8 @@ def _is_valid_url(url: Optional[str]) -> bool:
     if url_lower in invalid_values:
         return False
 
-    # Check for placeholder patterns
-    if any(p in url_lower for p in ["not mentioned", "not specified", "unknown"]):
+    # Check for placeholder patterns (FIX #2: added n/a to match main.py)
+    if any(p in url_lower for p in ["not mentioned", "not specified", "unknown", "n/a"]):
         return False
 
     # Must start with http or www
