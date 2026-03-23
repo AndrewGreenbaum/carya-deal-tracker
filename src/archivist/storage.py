@@ -425,30 +425,32 @@ async def find_duplicate_deal(
     """
     Check if a similar deal already exists.
 
-    Match criteria (THREE-TIER approach):
+    Match criteria (THREE-TIER approach, executed in this order):
 
-    TIER 1 - Strict Match (same company + same round + similar amount):
-    - Company names match (using smart fuzzy matching)
-    - Same round type
-    - Same normalized amount (within 15% tolerance) OR one/both amounts missing
-    - Date within 365 days (1 year) OR deals from last 365 days if no date
-
-    TIER 2 - Same-Day Match (catches same-day duplicates from multiple sources):
-    - Company names match exactly (case-insensitive)
-    - Same announced date (exact match)
-    - Any round type, any amount (news sources often report different details)
-
-    TIER 3 - Amount Match (catches same deal with different round type extraction):
+    TIER 3 - Amount Match (FIRST - catches same deal with different round type):
     - Company names match (fuzzy)
     - Same normalized amount (within 10% - tighter for cross-round matching)
     - Date within 30 days (narrower window for cross-round)
     - ANY round type (LLM often extracts "series_a" vs "growth" for same deal)
 
+    TIER 2 - Same-Day Match (SECOND - catches same-day duplicates from multiple sources):
+    - Uses TARGETED SQL query (no LIMIT) to prevent missing duplicates
+    - Company names match exactly (case-insensitive) OR normalized fuzzy match
+    - Same announced date (exact match)
+    - Any round type, any amount (news sources often report different details)
+
+    TIER 1 - Strict Match (LAST - same company + same round + similar amount):
+    - Company names match (using smart fuzzy matching)
+    - Same round type
+    - Same normalized amount (within 15% tolerance) OR one/both amounts missing
+    - Date within 365 days (1 year) OR deals from last 365 days if no date
+
     Returns existing Deal if found, None otherwise.
 
     OPTIMIZED:
     - TIER 3 uses targeted amount_usd filter for efficient matching
-    - TIER 1/2 use general query with LIMIT
+    - TIER 2 uses targeted date+company query (FIX: no LIMIT, prevents missed dupes)
+    - TIER 1 uses general query with LIMIT 200
     - Date fallback for deals without announced_date
     """
     from sqlalchemy import or_, func, and_
@@ -507,7 +509,48 @@ async def find_duplicate_deal(
                 return deal
 
     # =========================================================================
-    # TIER 1 & 2: General query for strict round match and same-day duplicates
+    # TIER 2 TARGETED: Same-day exact match (prevents LIMIT 200 bug)
+    # This runs a focused query for exact date + normalized company name match
+    # to avoid missing duplicates when deal count exceeds LIMIT
+    # =========================================================================
+    if announced_date:
+        tier2_stmt = (
+            select(Deal, PortfolioCompany)
+            .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
+            .where(Deal.announced_date == announced_date)
+            .where(func.lower(PortfolioCompany.name) == company_name.lower().strip())
+        )
+        tier2_result = await session.execute(tier2_stmt)
+        tier2_candidates = tier2_result.all()
+
+        for deal, company in tier2_candidates:
+            # Direct match - same date and exact company name
+            logger.info(
+                f"Found same-day duplicate (TIER 2 targeted): '{company_name}' matches '{company.name}' "
+                f"(deal #{deal.id}, {deal.round_type}, {deal.amount}, date={deal.announced_date})"
+            )
+            return deal
+
+        # Also check with normalized name for fuzzy match on same day
+        tier2_fuzzy_stmt = (
+            select(Deal, PortfolioCompany)
+            .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
+            .where(Deal.announced_date == announced_date)
+        )
+        tier2_fuzzy_result = await session.execute(tier2_fuzzy_stmt)
+        tier2_fuzzy_candidates = tier2_fuzzy_result.all()
+
+        for deal, company in tier2_fuzzy_candidates:
+            existing_normalized = normalize_company_name(company.name)
+            if normalized_company == existing_normalized:
+                logger.info(
+                    f"Found same-day duplicate (TIER 2 fuzzy): '{company_name}' matches '{company.name}' "
+                    f"(deal #{deal.id}, {deal.round_type}, {deal.amount}, date={deal.announced_date})"
+                )
+                return deal
+
+    # =========================================================================
+    # TIER 1: General query for strict round match
     # =========================================================================
     stmt = (
         select(Deal, PortfolioCompany)
@@ -541,17 +584,6 @@ async def find_duplicate_deal(
     candidates = result.all()
 
     for deal, company in candidates:
-        existing_normalized = normalize_company_name(company.name)
-
-        # TIER 2: Exact same-day match (catches duplicates from multiple sources)
-        if announced_date and deal.announced_date == announced_date:
-            if normalized_company == existing_normalized:
-                logger.info(
-                    f"Found same-day duplicate: '{company_name}' matches '{company.name}' "
-                    f"(deal #{deal.id}, {deal.round_type}, {deal.amount}, date={deal.announced_date})"
-                )
-                return deal
-
         # Skip if company names don't match (required for TIER 1)
         if not company_names_match(company_name, company.name):
             continue
