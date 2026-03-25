@@ -64,12 +64,17 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
         </div>
       </div>
 
-      {/* Lead Investor */}
-      {item.leadInvestor && (
-        <div className="mt-2 text-xs text-slate-500">
-          Lead: <span className="text-slate-400">{item.leadInvestor}</span>
-        </div>
-      )}
+      {/* Lead Investor & Added Date - same row */}
+      <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+        {item.leadInvestor ? (
+          <span>Lead: <span className="text-slate-400">{item.leadInvestor}</span></span>
+        ) : (
+          <span />
+        )}
+        <span className="text-[10px] text-slate-600">
+          Added {formatAddedDate(item.createdAt)}
+        </span>
+      </div>
 
       {/* Footer with metadata */}
       <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
@@ -123,10 +128,6 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
         </div>
       )}
 
-      {/* Added date - unobtrusive */}
-      <div className="mt-2 text-[10px] text-slate-600">
-        Added {formatAddedDate(item.createdAt)}
-      </div>
     </div>
   );
 }
