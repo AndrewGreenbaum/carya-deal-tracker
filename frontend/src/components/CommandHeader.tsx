@@ -12,17 +12,19 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Database, Server, Cpu, Settings, Clock, History } from 'lucide-react';
+import { Database, Server, Cpu, Settings, Clock, History, Radar } from 'lucide-react';
 import type { SystemStatus } from '../types';
 
 interface CommandHeaderProps {
   systemStatus: SystemStatus;
   onSettingsClick: () => void;
+  onPreFundingClick?: () => void;
 }
 
 export function CommandHeader({
   systemStatus,
   onSettingsClick,
+  onPreFundingClick,
 }: CommandHeaderProps) {
   // Live countdown state - updates every second
   const [countdown, setCountdown] = useState<string | null>(null);
@@ -119,6 +121,16 @@ export function CommandHeader({
         )}
 
         {/* Action Buttons */}
+        {onPreFundingClick && (
+          <button
+            onClick={onPreFundingClick}
+            className="flex items-center gap-2 px-2 py-1.5 bg-slate-900/50 rounded border border-slate-800/50 hover:border-amber-500/40 transition-colors text-slate-500 hover:text-amber-400"
+            title="Pre-Funding Signals"
+          >
+            <Radar className="w-3 h-3" />
+          </button>
+        )}
+
         <button
           onClick={() => window.location.href = '/scans'}
           className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 rounded border border-slate-800 hover:border-cyan-500/50 transition-colors text-slate-400 hover:text-cyan-400"

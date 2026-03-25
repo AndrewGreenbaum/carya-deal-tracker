@@ -371,6 +371,7 @@ function App() {
       <CommandHeader
         systemStatus={systemStatus}
         onSettingsClick={() => setSettingsOpen(true)}
+        onPreFundingClick={() => setCurrentView('prefunding')}
       />
 
       {/* Main Layout */}
