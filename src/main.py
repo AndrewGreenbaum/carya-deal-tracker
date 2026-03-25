@@ -3883,11 +3883,21 @@ async def enrich_deals(
                     if enrichment.ceo_linkedin:
                         ceo_found = any(f.get("linkedin_url") for f in founders)
                         if not ceo_found:
-                            for f in founders:
-                                if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
-                                    if not f.get("linkedin_url") or force_update:
-                                        f["linkedin_url"] = enrichment.ceo_linkedin
-                                    break
+                            # FIX: If founders list is empty, CREATE a new founder entry
+                            if not founders and enrichment.ceo_name:
+                                founders.append({
+                                    "name": enrichment.ceo_name,
+                                    "title": "CEO",
+                                    "linkedin_url": enrichment.ceo_linkedin,
+                                })
+                                logger.info(f"Added CEO as founder for {company_name}: {enrichment.ceo_name}")
+                            else:
+                                # Try to find existing CEO/founder entry to update
+                                for f in founders:
+                                    if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
+                                        if not f.get("linkedin_url") or force_update:
+                                            f["linkedin_url"] = enrichment.ceo_linkedin
+                                        break
 
                     deal.founders_json = json_module.dumps(founders)
 
