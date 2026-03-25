@@ -37,27 +37,13 @@ export function CommandSidebar({
   const toggleFilter = (key: keyof FilterState) => {
     if (key === 'selectedFund' || key === 'selectedCategory' || key === 'searchQuery' || key === 'sortDirection') return;
 
-    // Handle mutual exclusivity between aiDealsOnly and enterpriseAiOnly
-    if (key === 'enterpriseAiOnly' && !filters.enterpriseAiOnly) {
-      // Turning on Enterprise AI Only implies All AI
-      onFiltersChange({
-        ...filters,
-        aiDealsOnly: true,
-        enterpriseAiOnly: true,
-      });
-    } else if (key === 'aiDealsOnly' && filters.aiDealsOnly) {
-      // Turning off All AI also turns off Enterprise AI Only
-      onFiltersChange({
-        ...filters,
-        aiDealsOnly: false,
-        enterpriseAiOnly: false,
-      });
-    } else {
-      onFiltersChange({
-        ...filters,
-        [key]: !filters[key],
-      });
-    }
+    // Simple independent toggle - each filter works on its own
+    // Enterprise AI = B2B AI companies only
+    // Include Consumer AI = when checked, also shows consumer AI (only matters when Enterprise is off)
+    onFiltersChange({
+      ...filters,
+      [key]: !filters[key],
+    });
   };
 
   const setCategory = (category: EnterpriseCategory | undefined) => {
@@ -139,19 +125,19 @@ export function CommandSidebar({
           </div>
           <div className="space-y-3">
             <FilterCheckbox
-              label="All AI Deals"
-              checked={filters.aiDealsOnly}
-              onChange={() => toggleFilter('aiDealsOnly')}
-            />
-            <FilterCheckbox
-              label="Enterprise AI Only"
+              label="Enterprise AI"
               checked={filters.enterpriseAiOnly}
               onChange={() => toggleFilter('enterpriseAiOnly')}
             />
             <FilterCheckbox
-              label="Lead Investors Only"
+              label="Lead Investors"
               checked={filters.leadOnly}
               onChange={() => toggleFilter('leadOnly')}
+            />
+            <FilterCheckbox
+              label="Include Consumer AI"
+              checked={filters.aiDealsOnly}
+              onChange={() => toggleFilter('aiDealsOnly')}
             />
             <FilterCheckbox
               label="Show Rejected"

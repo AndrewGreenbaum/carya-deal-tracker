@@ -146,10 +146,10 @@ function App() {
     hasMore: false,
   });
 
-  // Filter state - default to All AI + Lead only
+  // Filter state - default to Enterprise AI + Lead only
   const [filters, setFilters] = useState<FilterState>({
-    aiDealsOnly: true,        // Show all AI deals by default
-    enterpriseAiOnly: false,  // Don't restrict to enterprise only by default
+    aiDealsOnly: false,       // Off by default (Enterprise AI implies AI)
+    enterpriseAiOnly: true,   // Show enterprise AI by default
     leadOnly: true,
     showRejected: false,
     selectedFund: undefined,
@@ -239,13 +239,18 @@ function App() {
       setLoading(true);
       try {
         // When showRejected is true, don't apply filters - show everything
-        // Otherwise, apply AI and Lead filters to API call
+        // Filter logic:
+        // - Enterprise AI checked → is_enterprise_ai=true (most restrictive)
+        // - Include Consumer AI checked (enterprise off) → is_ai_deal=true (all AI)
+        // - Neither checked → no AI filter (all deals)
         const result = await fetchDeals({
           limit: PAGE_SIZE,
           offset,
           is_lead: filters.showRejected ? undefined : (filters.leadOnly ? true : undefined),
-          is_ai_deal: filters.showRejected ? undefined : (filters.aiDealsOnly ? true : undefined),
-          is_enterprise_ai: filters.showRejected ? undefined : (filters.enterpriseAiOnly ? true : undefined),
+          is_ai_deal: filters.showRejected ? undefined :
+            (!filters.enterpriseAiOnly && filters.aiDealsOnly ? true : undefined),
+          is_enterprise_ai: filters.showRejected ? undefined :
+            (filters.enterpriseAiOnly ? true : undefined),
           enterprise_category: filters.selectedCategory,
           fund_slug: filters.selectedFund,
           search: debouncedSearch || undefined,
