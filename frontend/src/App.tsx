@@ -467,6 +467,7 @@ function App() {
                     isLoading={loading}
                     sortDirection={filters.sortDirection}
                     onSortChange={handleSortChange}
+                    showRejected={filters.showRejected}
                   />
                 </ErrorBoundary>
               </div>

@@ -43,6 +43,7 @@ interface DealsTableProps {
   isLoading?: boolean;
   sortDirection: SortDirection;
   onSortChange: (direction: SortDirection) => void;
+  showRejected?: boolean;
 }
 
 export function DealsTable({
@@ -55,6 +56,7 @@ export function DealsTable({
   isLoading = false,
   sortDirection,
   onSortChange,
+  showRejected = false,
 }: DealsTableProps) {
   const currentPage = Math.floor(pagination.offset / pagination.limit) + 1;
   const totalPages = Math.ceil(pagination.total / pagination.limit);
@@ -126,7 +128,7 @@ export function DealsTable({
           </thead>
           <tbody className="text-xs divide-y divide-slate-800/50">
             {deals.map((deal) => (
-              <DealRow key={deal.id} deal={deal} onClick={() => onDealClick(deal)} />
+              <DealRow key={deal.id} deal={deal} onClick={() => onDealClick(deal)} showRejected={showRejected} />
             ))}
             {deals.length === 0 && (
               <tr>
@@ -177,17 +179,20 @@ export function DealsTable({
 interface DealRowProps {
   deal: Deal;
   onClick: () => void;
+  showRejected?: boolean;
 }
 
-const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
+const DealRow = memo(function DealRow({ deal, onClick, showRejected = false }: DealRowProps) {
   // A deal is "rejected" if it's not an AI deal OR not led by a tracked fund
   const isRejected = !deal.isAiDeal || !deal.investorRoles.includes('lead');
+  // When showRejected is enabled, show all deals with full color (no greying out)
+  const shouldDim = isRejected && !showRejected;
 
   return (
     <tr
       onClick={onClick}
       className={`deal-row cursor-pointer group ${
-        isRejected ? 'opacity-50 grayscale hover:grayscale-0 hover:opacity-100' : ''
+        shouldDim ? 'opacity-50 grayscale hover:grayscale-0 hover:opacity-100' : ''
       }`}
     >
       {/* Company / Source */}
@@ -217,7 +222,7 @@ const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
 
       {/* AI Category */}
       <td className="px-6 py-4">
-        <CategoryBadge category={deal.enterpriseCategory} isRejected={isRejected} />
+        <CategoryBadge category={deal.enterpriseCategory} shouldDim={shouldDim} />
       </td>
 
       {/* Company Links */}
@@ -225,7 +230,7 @@ const DealRow = memo(function DealRow({ deal, onClick }: DealRowProps) {
         <CompanyLinks
           website={deal.companyWebsite}
           ceoLinkedin={deal.founders?.find(f => f.linkedinUrl)?.linkedinUrl}
-          isRejected={isRejected}
+          shouldDim={shouldDim}
         />
       </td>
 
@@ -277,10 +282,10 @@ const CATEGORY_ICONS: Record<EnterpriseCategory, React.ReactNode> = {
 
 function CategoryBadge({
   category,
-  isRejected,
+  shouldDim,
 }: {
   category?: EnterpriseCategory;
-  isRejected: boolean;
+  shouldDim: boolean;
 }) {
   const cat = category || 'not_ai';
   const icon = CATEGORY_ICONS[cat] || CATEGORY_ICONS['not_ai'];
@@ -302,7 +307,7 @@ function CategoryBadge({
   // Consumer AI gets a different style
   if (isConsumerAi) {
     return (
-      <div className={`category-badge category-consumer ${isRejected ? 'opacity-75' : ''}`}>
+      <div className={`category-badge category-consumer ${shouldDim ? 'opacity-75' : ''}`}>
         {icon}
         {cat.replace('_', ' ')}
       </div>
@@ -311,7 +316,7 @@ function CategoryBadge({
 
   // Enterprise AI categories
   return (
-    <div className={`category-badge category-${cat} ${isRejected ? 'opacity-75' : ''}`}>
+    <div className={`category-badge category-${cat} ${shouldDim ? 'opacity-75' : ''}`}>
       {icon}
       {cat.replace('_', ' ')}
     </div>
@@ -321,11 +326,11 @@ function CategoryBadge({
 function CompanyLinks({
   website,
   ceoLinkedin,
-  isRejected,
+  shouldDim,
 }: {
   website?: string;
   ceoLinkedin?: string;
-  isRejected: boolean;
+  shouldDim: boolean;
 }) {
   const hasWebsite = !!website;
   const hasLinkedin = !!ceoLinkedin;
@@ -345,7 +350,7 @@ function CompanyLinks({
           hasWebsite
             ? 'hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 cursor-pointer'
             : 'text-slate-700 cursor-not-allowed'
-        } ${isRejected ? 'opacity-50' : ''}`}
+        } ${shouldDim ? 'opacity-50' : ''}`}
         title={hasWebsite ? `Visit ${website}` : 'No website'}
       >
         <Globe className="w-4 h-4" />
@@ -359,7 +364,7 @@ function CompanyLinks({
           hasLinkedin
             ? 'hover:bg-slate-700 text-blue-400 hover:text-blue-300 cursor-pointer'
             : 'text-slate-700 cursor-not-allowed'
-        } ${isRejected ? 'opacity-50' : ''}`}
+        } ${shouldDim ? 'opacity-50' : ''}`}
         title={hasLinkedin ? 'CEO LinkedIn' : 'No LinkedIn'}
       >
         <Linkedin className="w-4 h-4" />
