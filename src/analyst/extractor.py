@@ -1486,9 +1486,8 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
             f"snippet '{deal.verification_snippet[:80]}...' lacks explicit lead language"
         )
         deal.lead_evidence_weak = True  # Flag for frontend display
-        # Downgrade from CONFIRMED_LEAD to LIKELY_LEAD (keeps as potential lead but flagged)
-        if deal.tracked_fund_role == LeadStatus.CONFIRMED_LEAD:
-            deal.tracked_fund_role = LeadStatus.LIKELY_LEAD
+        # Set to LIKELY_LEAD since Claude claimed lead but snippet lacks proof
+        deal.tracked_fund_role = LeadStatus.LIKELY_LEAD
 
     if deal.tracked_fund_is_lead and not deal.verification_snippet:
         logger.warning(
@@ -1496,9 +1495,8 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
             f"no verification_snippet provided"
         )
         deal.lead_evidence_weak = True  # Flag for frontend display
-        # Downgrade from CONFIRMED_LEAD to LIKELY_LEAD (keeps as potential lead but flagged)
-        if deal.tracked_fund_role == LeadStatus.CONFIRMED_LEAD:
-            deal.tracked_fund_role = LeadStatus.LIKELY_LEAD
+        # Set to LIKELY_LEAD since Claude claimed lead but no snippet provided
+        deal.tracked_fund_role = LeadStatus.LIKELY_LEAD
 
     # FIX: Track ALL confirmed lead funds to record co-leads
     confirmed_lead_funds: list[tuple[str, str, str]] = []  # (slug, name, partner)
@@ -1519,14 +1517,18 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
                     investor.partner_name or ""
                 ))
             elif not deal.tracked_fund_name:
-                # Downgrade: no snippet or invalid snippet - set as participant
-                logger.info(
-                    f"Downgrading {deal.startup_name} lead claim: "
-                    f"role={investor.role.value}, has_valid_snippet={has_valid_snippet}"
-                )
+                # Set fund name and partner
                 deal.tracked_fund_name = FUND_REGISTRY[matched_fund].name
-                deal.tracked_fund_role = LeadStatus.PARTICIPANT
                 deal.tracked_fund_partner = investor.partner_name
+                # Only set to PARTICIPANT if not already flagged as weak evidence (LIKELY_LEAD)
+                # FIX (2026-01): Previously overwrote LIKELY_LEAD from early check
+                if not deal.lead_evidence_weak:
+                    logger.info(
+                        f"Setting {deal.startup_name} as participant: "
+                        f"role={investor.role.value}, has_valid_snippet={has_valid_snippet}"
+                    )
+                    deal.tracked_fund_role = LeadStatus.PARTICIPANT
+                # else: keep LIKELY_LEAD from early weak evidence check
 
         elif matched_fund:
             # Fund matched but not in registry - log warning
