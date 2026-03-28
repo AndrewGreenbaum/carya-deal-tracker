@@ -348,6 +348,7 @@ class UpdateDealRequest(BaseModel):
     lead_partner_name: Optional[str] = None
     enterprise_category: Optional[str] = None
     is_enterprise_ai: Optional[bool] = None
+    is_ai_deal: Optional[bool] = None  # FIX 2026-01: Allow updating AI classification
     founders: Optional[List[dict]] = None  # List of {name, title, linkedin_url}
 
 
@@ -887,6 +888,7 @@ async def update_deal_endpoint(
                 lead_partner_name=request.lead_partner_name,
                 enterprise_category=request.enterprise_category,
                 is_enterprise_ai=request.is_enterprise_ai,
+                is_ai_deal=request.is_ai_deal,
                 founders_json=founders_json,
             )
 

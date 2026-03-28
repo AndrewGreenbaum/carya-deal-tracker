@@ -505,6 +505,43 @@ CONSUMER_AI_COMPANY_PATTERNS = [
     "music", "video", "stream", "play", "fun",
 ]
 
+# Keywords that indicate consumer fintech (NOT AI - traditional fintech, not AI-powered)
+# FIX 2026-01: Neobrokers, trading apps, consumer banking are NOT Enterprise AI
+CONSUMER_FINTECH_KEYWORDS = [
+    # Stock trading / brokerage
+    "neobroker", "neo-broker", "stock trading", "stock trading app",
+    "retail trading", "retail investor", "retail brokerage",
+    "commission-free trading", "zero-commission", "fractional shares",
+    "robinhood competitor", "trading platform",
+    # Consumer banking
+    "neobank", "neo-bank", "challenger bank", "digital bank",
+    "mobile banking", "consumer banking", "retail banking",
+    "checking account", "savings account", "debit card",
+    # Consumer payments
+    "mobile payments", "peer-to-peer payments", "p2p payments",
+    "money transfer", "remittance", "payment app",
+    # Consumer lending
+    "consumer lending", "personal loans", "buy now pay later", "bnpl",
+    # Insurance
+    "insurtech", "consumer insurance", "personal insurance",
+]
+
+# Company name patterns that indicate consumer fintech (NOT AI)
+CONSUMER_FINTECH_COMPANY_PATTERNS = [
+    "bank", "trade", "trading", "broker", "invest", "wealth",
+    "pay", "money", "cash", "coin", "finance", "capital",
+]
+
+# Known consumer fintech companies that should NOT be classified as AI
+KNOWN_CONSUMER_FINTECH = [
+    "trade republic", "robinhood", "revolut", "n26", "chime",
+    "sofi", "nubank", "monzo", "starling", "wise", "transferwise",
+    "venmo", "cash app", "square", "stripe", "plaid",
+    "klarna", "affirm", "afterpay", "clearpay",
+    "webull", "public.com", "m1 finance", "acorns", "stash",
+    "etoro", "freetrade", "wealthfront", "betterment",
+]
+
 
 def is_likely_crypto_article(text: str, source_url: str = "") -> bool:
     """
@@ -575,6 +612,76 @@ def _is_crypto_deal(deal: DealExtraction, article_text: str) -> bool:
         if "crypto" in investor.name.lower():
             logger.debug(f"Crypto detected by lead investor: {investor.name}")
             return True
+
+    return False
+
+
+def _is_consumer_fintech_deal(deal: DealExtraction, article_text: str) -> bool:
+    """
+    Detect if deal is consumer fintech (should be NOT_AI, not Enterprise AI).
+
+    Consumer fintech includes:
+    - Neobrokers (Trade Republic, Robinhood, eToro)
+    - Neobanks (N26, Revolut, Chime)
+    - Consumer payment apps (Venmo, Cash App)
+    - BNPL (Klarna, Affirm)
+
+    These are NOT AI companies - they're traditional fintech serving consumers.
+    The LLM sometimes confuses "Finance" in vertical_saas with consumer fintech.
+
+    Returns:
+        True if deal is consumer fintech, False otherwise
+    """
+    name_lower = deal.startup_name.lower() if deal.startup_name else ""
+    text_lower = article_text.lower()
+    desc_lower = deal.startup_description.lower() if deal.startup_description else ""
+
+    # Check 1: Known consumer fintech company (strongest signal)
+    for known in KNOWN_CONSUMER_FINTECH:
+        if known in name_lower:
+            logger.debug(f"Consumer fintech detected (known company): {deal.startup_name}")
+            return True
+
+    # Check 2: Company name contains fintech patterns AND article has fintech keywords
+    # Need both to avoid false positives (e.g., "Capital" in AI company names)
+    has_fintech_name = any(pattern in name_lower for pattern in CONSUMER_FINTECH_COMPANY_PATTERNS)
+    fintech_keyword_count = sum(1 for kw in CONSUMER_FINTECH_KEYWORDS if kw in text_lower)
+
+    if has_fintech_name and fintech_keyword_count >= 2:
+        # Additional check: must NOT have strong AI signals
+        ai_signals = ["artificial intelligence", "machine learning", "ai-powered", "ai platform",
+                      "llm", "large language model", "generative ai", "neural network"]
+        has_ai_signals = any(sig in text_lower for sig in ai_signals)
+
+        if not has_ai_signals:
+            logger.debug(
+                f"Consumer fintech detected (name + {fintech_keyword_count} keywords): "
+                f"{deal.startup_name}"
+            )
+            return True
+
+    # Check 3: High density of fintech keywords (3+) without AI signals
+    if fintech_keyword_count >= 3:
+        ai_signals = ["artificial intelligence", "machine learning", "ai-powered", "ai platform",
+                      "llm", "large language model", "generative ai", "neural network"]
+        has_ai_signals = any(sig in text_lower for sig in ai_signals)
+
+        if not has_ai_signals:
+            logger.debug(
+                f"Consumer fintech detected by keyword density ({fintech_keyword_count}): "
+                f"{deal.startup_name}"
+            )
+            return True
+
+    # Check 4: Description explicitly indicates consumer fintech
+    fintech_desc_signals = [
+        "neobroker", "neobank", "trading app", "stock trading",
+        "retail banking", "consumer banking", "payment app",
+        "buy now pay later", "bnpl", "challenger bank",
+    ]
+    if any(signal in desc_lower for signal in fintech_desc_signals):
+        logger.debug(f"Consumer fintech detected by description: {deal.startup_name}")
+        return True
 
     return False
 
@@ -1166,6 +1273,18 @@ async def extract_deal(
                     EnterpriseCategory.SOCIAL_AI,
                 ):
                     response.enterprise_category = EnterpriseCategory.CONSUMER_AI
+
+            # Post-process: detect and reclassify consumer fintech deals
+            # FIX 2026-01: Neobrokers, neobanks are NOT AI companies
+            # Trade Republic, Robinhood, etc. should be NOT_AI, not vertical_saas
+            if response and (response.is_ai_deal or response.is_enterprise_ai) and _is_consumer_fintech_deal(response, article_text):
+                logger.info(
+                    f"Reclassifying {response.startup_name} as NOT_AI: "
+                    f"consumer fintech (neobroker/neobank) detected"
+                )
+                response.is_enterprise_ai = False
+                response.is_ai_deal = False
+                response.enterprise_category = EnterpriseCategory.NOT_AI
 
             # Post-process: validate company name isn't an article title
             if response and _looks_like_article_title(response.startup_name):

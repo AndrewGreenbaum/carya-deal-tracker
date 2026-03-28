@@ -1029,6 +1029,7 @@ async def update_deal(
     lead_partner_name: Optional[str] = None,
     enterprise_category: Optional[str] = None,
     is_enterprise_ai: Optional[bool] = None,
+    is_ai_deal: Optional[bool] = None,  # FIX 2026-01: Allow updating AI classification
     founders_json: Optional[str] = None,
 ) -> Optional[Deal]:
     """
@@ -1102,6 +1103,8 @@ async def update_deal(
         deal.enterprise_category = enterprise_category
     if is_enterprise_ai is not None:
         deal.is_enterprise_ai = is_enterprise_ai
+    if is_ai_deal is not None:
+        deal.is_ai_deal = is_ai_deal
     if founders_json is not None:
         deal.founders_json = founders_json
 
