@@ -45,16 +45,11 @@ MIN_LENGTH_IMPROVEMENT_RATIO = 2.0
 
 from .schemas import DealExtraction, ArticleAnalysis, LeadStatus, RoundType, EnterpriseCategory
 from ..config.settings import settings
-from ..config.funds import FUND_REGISTRY, FundConfig, ScraperType
+from ..config.funds import FUND_REGISTRY, FundConfig, ScraperType, EXTERNAL_ONLY_FUNDS
 # Note: match_fund_name is imported lazily in _verify_tracked_fund to avoid circular import
 
-# External-only funds that need more lenient processing
-# These funds don't have working website scrapers, so deals come from news sources
-# with shorter/less reliable content
-EXTERNAL_ONLY_FUNDS = frozenset({
-    "thrive", "benchmark", "first_round",  # ScraperType.EXTERNAL
-    "greylock", "gv", "redpoint", "founders_fund",  # Low coverage from website scrapers
-})
+# EXTERNAL_ONLY_FUNDS is now imported from config.funds (single source of truth)
+# See config/funds.py:get_external_only_fund_slugs() for the definition
 
 # Source names that are external (used for auto-detection)
 EXTERNAL_SOURCE_NAMES = frozenset({
@@ -184,9 +179,21 @@ HEADLINE-ONLY CONTENT:
 Some articles may only contain a headline with minimal context. Extract what you can:
 - "Thrive Capital Leads $34M Investment Round" → tracked_fund=Thrive, amount=34M, is_lead=True
 - "Acme raises $50M in Series B funding" → company=Acme, amount=50M, round=series_b
-- Set confidence_score=0.4-0.6 for headline-only (less context = lower confidence)
 - If company name is missing from headline → startup_name="<UNKNOWN>", is_new_announcement=False
 - Headlines with clear lead language ("leads", "led") ARE sufficient for is_lead=True
+
+CONFIDENCE SCORING (0.0-1.0 scale):
+Use these guidelines to set confidence_score accurately:
+- 0.90-1.0: Explicit lead language ("led by X") + verified amount + clear announcement date
+- 0.75-0.85: Clear funding announcement but minor ambiguity (round type unclear, or "backed by" without lead language)
+- 0.50-0.70: Headline-only content OR minimal context OR external source with limited detail
+- 0.35-0.49: Very sparse info, multiple uncertainties (e.g., amount unclear AND lead unclear)
+- <0.35: Contradictory signals, unverifiable claims, or highly speculative
+
+Examples:
+- "Acme raises $50M Series A led by Sequoia" → confidence=0.95 (explicit lead + amount + round)
+- "Thrive Capital backs Acme in new funding" → confidence=0.65 ("backs" is not lead language, but funding is clear)
+- "Acme announces funding round" (no amount) → confidence=0.50 (missing key detail)
 
 Return ONE deal per article (the primary/new announcement, not historical mentions).
 Output valid JSON matching the schema."""
@@ -1474,23 +1481,30 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
     matched_leads = []
     matched_participants = []
 
-    # Validate verification snippet - WARNING ONLY (don't reject)
-    # Trust Claude's lead determination, but log for review if snippet lacks explicit lead language
+    # Validate verification snippet - DOWNGRADE if missing or lacks lead language
+    # FIX (2026-01): Previously just flagged weak evidence, now actually downgrades to LIKELY_LEAD
+    # This reduces false positives where Claude claims lead status without proof
     has_valid_snippet = _has_lead_language(deal.verification_snippet)
 
     if deal.tracked_fund_is_lead and deal.verification_snippet and not has_valid_snippet:
         logger.warning(
-            f"WEAK lead evidence for {deal.startup_name}: "
-            f"snippet '{deal.verification_snippet[:80]}...' lacks explicit lead language - trusting Claude"
+            f"DOWNGRADING lead claim for {deal.startup_name}: "
+            f"snippet '{deal.verification_snippet[:80]}...' lacks explicit lead language"
         )
         deal.lead_evidence_weak = True  # Flag for frontend display
+        # Downgrade from CONFIRMED_LEAD to LIKELY_LEAD (keeps as potential lead but flagged)
+        if deal.tracked_fund_role == LeadStatus.CONFIRMED_LEAD:
+            deal.tracked_fund_role = LeadStatus.LIKELY_LEAD
 
     if deal.tracked_fund_is_lead and not deal.verification_snippet:
         logger.warning(
-            f"WEAK lead evidence for {deal.startup_name}: "
-            f"no verification_snippet provided - trusting Claude"
+            f"DOWNGRADING lead claim for {deal.startup_name}: "
+            f"no verification_snippet provided"
         )
         deal.lead_evidence_weak = True  # Flag for frontend display
+        # Downgrade from CONFIRMED_LEAD to LIKELY_LEAD (keeps as potential lead but flagged)
+        if deal.tracked_fund_role == LeadStatus.CONFIRMED_LEAD:
+            deal.tracked_fund_role = LeadStatus.LIKELY_LEAD
 
     # FIX: Track ALL confirmed lead funds to record co-leads
     confirmed_lead_funds: list[tuple[str, str, str]] = []  # (slug, name, partner)

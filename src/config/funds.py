@@ -256,3 +256,48 @@ def get_all_funds() -> List[FundConfig]:
 def get_funds_by_scraper_type(scraper_type: ScraperType) -> List[FundConfig]:
     """Get funds that use a specific scraper type."""
     return [f for f in FUND_REGISTRY.values() if f.scraper_type == scraper_type]
+
+
+# =============================================================================
+# EXTERNAL-ONLY FUNDS (Single source of truth)
+# =============================================================================
+# Funds without working website scrapers - deals come from external news sources
+# with shorter/less reliable content. These need more lenient processing.
+
+def get_external_only_fund_slugs() -> frozenset[str]:
+    """
+    Get slugs of funds that are 'external-only' (no working website scraper).
+
+    External-only funds need more lenient processing because:
+    - Content comes from news sources, not fund websites
+    - Articles may be shorter or less detailed
+    - Headlines may be the only content available
+
+    This is the SINGLE SOURCE OF TRUTH for external-only classification.
+    Do not hardcode this list elsewhere - import and use this function.
+
+    Returns:
+        frozenset of fund slugs that are external-only
+    """
+    # Funds with ScraperType.EXTERNAL are definitively external-only
+    external_type_funds = {
+        f.slug for f in FUND_REGISTRY.values()
+        if f.scraper_type == ScraperType.EXTERNAL
+    }
+
+    # Additional funds with low website scraper coverage
+    # These have scrapers but coverage is unreliable, so external sources are primary
+    low_coverage_funds = {
+        "greylock",      # Playwright scraper exists but coverage is low
+        "gv",            # HTML scraper exists but external sources more reliable
+        "redpoint",      # Playwright required, often fails
+        "founders_fund", # Playwright, homepage blog is sparse
+        "first_round",   # No portfolio announcements page
+        "khosla",        # RSS exists but rarely updated
+    }
+
+    return frozenset(external_type_funds | low_coverage_funds)
+
+
+# Pre-computed at module load for performance
+EXTERNAL_ONLY_FUNDS: frozenset[str] = get_external_only_fund_slugs()
