@@ -4416,9 +4416,10 @@ async def delete_deal(
     """
     Delete a specific deal by ID.
 
-    Also deletes related articles and deal_investors.
+    Also deletes related records from all tables with deal_id foreign key.
     """
-    from sqlalchemy import delete
+    from sqlalchemy import delete, update
+    from .archivist.models import DateSource, FounderValidation, StealthSignal
 
     try:
         async with get_session() as session:
@@ -4429,6 +4430,20 @@ async def delete_deal(
             # Delete related deal_investors
             stmt_investors = delete(DealInvestor).where(DealInvestor.deal_id == deal_id)
             await session.execute(stmt_investors)
+
+            # Delete related date_sources
+            stmt_dates = delete(DateSource).where(DateSource.deal_id == deal_id)
+            await session.execute(stmt_dates)
+
+            # Delete related founder_validations
+            stmt_founders = delete(FounderValidation).where(FounderValidation.deal_id == deal_id)
+            await session.execute(stmt_founders)
+
+            # Unlink stealth_signals (set converted_deal_id to NULL instead of delete)
+            stmt_stealth = update(StealthSignal).where(
+                StealthSignal.converted_deal_id == deal_id
+            ).values(converted_deal_id=None)
+            await session.execute(stmt_stealth)
 
             # Delete the deal
             stmt_deal = delete(Deal).where(Deal.id == deal_id)
