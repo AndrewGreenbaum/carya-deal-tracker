@@ -143,6 +143,16 @@ DATE EXTRACTION (IMPORTANT - affects data accuracy):
 
 ROUND TYPES: pre_seed, seed, seed_plus_series_a (when Seed AND Series A announced together as single round), series_a, series_b, series_c, series_d, series_e_plus, growth, debt, unknown
 
+AMOUNT EXTRACTION (CRITICAL - distinguish funding from valuation):
+- Extract the FUNDING AMOUNT (money raised), NOT the valuation
+- "raises $50M at a $500M valuation" → amount=$50M (NOT $500M)
+- "valued at $6B" or "$6B valuation" → this is VALUATION, look for actual funding amount
+- "Series B funding of $330M, valuing the company at $6.6B" → amount=$330M
+- Headlines like "valued at $X billion" often bury the actual raise in the article
+- If only valuation mentioned with no funding amount → amount=null
+- Valuation keywords: "valued at", "valuation", "worth", "valued", "value of"
+- Funding keywords: "raises", "raised", "secures", "secured", "closes", "funding round"
+
 NEW ANNOUNCEMENT CHECK (CRITICAL - prevents false positives)
 TRUE (is_new_announcement=True): Funding IS the article's primary topic
 FALSE (is_new_announcement=False): Funding mentioned as background/context

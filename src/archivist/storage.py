@@ -433,7 +433,7 @@ async def find_duplicate_deal(
     """
     Check if a similar deal already exists.
 
-    Match criteria (THREE-TIER approach, executed in this order):
+    Match criteria (FOUR-TIER approach, executed in this order):
 
     TIER 3 - Amount Match (FIRST - catches same deal with different round type):
     - Company names match (fuzzy)
@@ -447,6 +447,12 @@ async def find_duplicate_deal(
     - Same announced date (exact match)
     - Any round type, any amount (news sources often report different details)
 
+    TIER 2.5 - Round+Date Match (catches valuation vs funding confusion):
+    - Company names match (fuzzy)
+    - Same round type
+    - Date within 7 days
+    - Amount NOT required to match (catches $6.6B valuation vs $330M funding)
+
     TIER 1 - Strict Match (LAST - same company + same round + similar amount):
     - Company names match (using smart fuzzy matching)
     - Same round type
@@ -458,6 +464,7 @@ async def find_duplicate_deal(
     OPTIMIZED:
     - TIER 3 uses targeted amount_usd filter for efficient matching
     - TIER 2 uses targeted date+company query (FIX: no LIMIT, prevents missed dupes)
+    - TIER 2.5 uses round_type + date window for amount-agnostic matching
     - TIER 1 uses general query with LIMIT 200
     - Date fallback for deals without announced_date
     """
@@ -555,6 +562,35 @@ async def find_duplicate_deal(
                 logger.info(
                     f"Found same-day duplicate (TIER 2 fuzzy): '{company_name}' matches '{company.name}' "
                     f"(deal #{deal.id}, {deal.round_type}, {deal.amount}, date={deal.announced_date})"
+                )
+                return deal
+
+    # =========================================================================
+    # TIER 2.5 (NEW): Same company + same round + date within 7 days
+    # Catches duplicates with wildly different amounts (e.g., valuation vs funding)
+    # This is a strong signal: same company raising the same round type in same week
+    # =========================================================================
+    if announced_date:
+        tier25_stmt = (
+            select(Deal, PortfolioCompany)
+            .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
+            .where(Deal.round_type == round_type)
+            .where(Deal.announced_date.between(
+                announced_date - timedelta(days=7),
+                announced_date + timedelta(days=7)
+            ))
+        )
+        tier25_result = await session.execute(tier25_stmt)
+        tier25_candidates = tier25_result.all()
+
+        for deal, company in tier25_candidates:
+            if company_names_match(company_name, company.name):
+                logger.warning(
+                    f"Found duplicate (TIER 2.5 round+date): '{company_name}' {round_type} "
+                    f"matches '{company.name}' {deal.round_type} (deal #{deal.id}, "
+                    f"amounts differ: incoming={amount}, existing={deal.amount}, "
+                    f"dates: incoming={announced_date}, existing={deal.announced_date}) "
+                    f"- likely valuation vs funding confusion"
                 )
                 return deal
 
