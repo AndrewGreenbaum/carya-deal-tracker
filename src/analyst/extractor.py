@@ -183,14 +183,11 @@ Some articles may only contain a headline with minimal context. Extract what you
 - Headlines with clear lead language ("leads", "led") ARE sufficient for is_lead=True
 
 CONFIDENCE SCORING (0.0-1.0):
-Score based on extraction completeness and certainty:
-- 0.85-1.0: Company + amount + round type + date all clear, explicit announcement language
-- 0.65-0.84: Most fields clear but 1 uncertain (e.g., round type unclear, or date missing)
-- 0.45-0.64: Headline-only OR 2+ fields uncertain OR minimal context
-- 0.25-0.44: Very sparse, company name uncertain, or background mention
-- <0.25: Cannot determine if real funding announcement
-
-Key factors: Is company name real (not article title)? Is this a NEW announcement? Is amount present?
+- 0.80-1.0: All clear (company + amount + round + date + "raises/raised/announces")
+- 0.60-0.79: Most clear, 1 field missing (e.g., date or round type unknown)
+- 0.50-0.59: Headline-only but company + amount clear (minimum for acceptance)
+- 0.35-0.49: Sparse info, some uncertainty (may be accepted for external sources)
+- <0.35: Cannot verify as real funding (company unclear OR no amount OR background mention)
 
 Return ONE deal per article (the primary/new announcement, not historical mentions).
 Output valid JSON matching the schema."""
