@@ -2768,6 +2768,87 @@ async def run_crunchbase_news_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+# ----- Crunchbase Pro Direct Ingestion -----
+
+class CrunchbaseDealInput(BaseModel):
+    """Input for a single Crunchbase deal from local bot."""
+    startup_name: str
+    round_type: str
+    amount: Optional[str] = None
+    announced_date: Optional[str] = None
+    lead_investors: List[str] = Field(default_factory=list)
+    participating_investors: List[str] = Field(default_factory=list)
+    source_url: Optional[str] = None
+    source: str = "crunchbase_pro"
+
+
+class CrunchbaseBatchRequest(BaseModel):
+    """Batch request for Crunchbase deals."""
+    deals: List[CrunchbaseDealInput]
+
+
+class CrunchbaseDirectResponse(BaseModel):
+    """Response from Crunchbase direct ingestion."""
+    deals_received: int
+    deals_saved: int
+    deals_duplicate: int
+    deals_no_tracked_fund: int
+    errors: List[str]
+
+
+@app.post("/scrapers/crunchbase-direct", response_model=CrunchbaseDirectResponse)
+async def ingest_crunchbase_deals_endpoint(
+    request: CrunchbaseBatchRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Ingest pre-structured deals from Crunchbase Pro.
+
+    This endpoint accepts structured deal data from a local Playwright bot
+    that scrapes your Crunchbase Pro saved search. No LLM extraction needed
+    since Crunchbase data is already structured.
+
+    Only saves deals where one of the 18 tracked funds is the lead investor.
+
+    Usage:
+        POST with JSON: {"deals": [{"startup_name": "...", "round_type": "series_a", ...}]}
+    """
+    from .harvester.scrapers.crunchbase_direct import (
+        process_crunchbase_deals,
+        CrunchbaseDealInput as ProcessInput,
+    )
+
+    try:
+        # Convert to internal format
+        deals = [
+            ProcessInput(
+                startup_name=d.startup_name,
+                round_type=d.round_type,
+                amount=d.amount,
+                announced_date=d.announced_date,
+                lead_investors=d.lead_investors,
+                participating_investors=d.participating_investors,
+                source_url=d.source_url,
+                source=d.source,
+            )
+            for d in request.deals
+        ]
+
+        result = await process_crunchbase_deals(deals)
+
+        return CrunchbaseDirectResponse(
+            deals_received=result.deals_received,
+            deals_saved=result.deals_saved,
+            deals_duplicate=result.deals_duplicate,
+            deals_no_tracked_fund=result.deals_no_tracked_fund,
+            errors=result.errors,
+        )
+
+    except Exception as e:
+        logger.error(f"Crunchbase direct ingestion failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ----- VentureBeat -----
 
 class VentureBeatResponse(BaseModel):
