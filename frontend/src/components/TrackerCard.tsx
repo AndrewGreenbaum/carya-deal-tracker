@@ -132,9 +132,23 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
   );
 }
 
+// Parse ISO date string to local Date, avoiding timezone shift bug
+// "YYYY-MM-DD" parsed by new Date() is treated as UTC midnight,
+// which can shift to previous day in local timezones behind UTC
+function parseLocalDate(dateString: string): Date {
+  const parts = dateString.split('T')[0].split('-');
+  if (parts.length >= 3) {
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1; // JS months are 0-indexed
+    const day = parseInt(parts[2], 10);
+    return new Date(year, month, day);
+  }
+  return new Date(dateString);
+}
+
 function formatDate(dateString: string): string {
   try {
-    const date = new Date(dateString);
+    const date = parseLocalDate(dateString);
     const now = new Date();
     const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -150,7 +164,7 @@ function formatDate(dateString: string): string {
 
 function formatAddedDate(dateString: string): string {
   try {
-    const date = new Date(dateString);
+    const date = parseLocalDate(dateString);
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   } catch {
     return '';

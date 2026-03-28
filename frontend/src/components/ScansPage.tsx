@@ -115,7 +115,23 @@ function formatDuration(seconds?: number): string {
 }
 
 function formatDate(isoString: string): string {
-  const date = new Date(isoString);
+  // For full ISO timestamps with time (e.g., "2026-01-05T14:30:00Z"),
+  // JavaScript handles timezone correctly. For date-only strings,
+  // parse components to avoid timezone shift bug.
+  let date: Date;
+  if (isoString.includes('T')) {
+    date = new Date(isoString);
+  } else {
+    const parts = isoString.split('-');
+    if (parts.length >= 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      date = new Date(year, month, day);
+    } else {
+      date = new Date(isoString);
+    }
+  }
   return date.toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',

@@ -504,6 +504,22 @@ function InfoCard({ icon, label, value, subValue, badge }: InfoCardProps) {
 function formatDate(dateString: string): string {
   if (!dateString) return 'Unknown';
   try {
+    // Parse date components to avoid timezone issues with ISO date strings
+    // "YYYY-MM-DD" parsed by new Date() is treated as UTC midnight,
+    // which can shift to previous day in local timezones behind UTC
+    const parts = dateString.split('T')[0].split('-');
+    if (parts.length >= 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1; // JS months are 0-indexed
+      const day = parseInt(parts[2], 10);
+      const date = new Date(year, month, day);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    }
+    // Fallback for other date formats
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
       year: 'numeric',
