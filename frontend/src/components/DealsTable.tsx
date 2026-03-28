@@ -183,9 +183,8 @@ interface DealRowProps {
 }
 
 const DealRow = memo(function DealRow({ deal, onClick, showRejected = false }: DealRowProps) {
-  // A deal is "rejected" only if not led by a tracked fund
-  // AI classification is informational, not a rejection criteria
-  const isRejected = !deal.investorRoles.includes('lead');
+  // A deal is "rejected" if it's not an AI deal OR not led by a tracked fund
+  const isRejected = !deal.isAiDeal || !deal.investorRoles.includes('lead');
   // When showRejected is enabled, show all deals with full color (no greying out)
   const shouldDim = isRejected && !showRejected;
 
