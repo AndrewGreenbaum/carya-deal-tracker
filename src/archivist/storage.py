@@ -539,7 +539,9 @@ async def find_duplicate_deal(
             )
             return deal
 
-        # Also check with normalized name for fuzzy match on same day
+        # Also check with company_names_match for fuzzy match on same day
+        # FIX: Use company_names_match() instead of exact normalized comparison
+        # This catches "Leona" vs "Leona Health" where 'health' is a known suffix
         tier2_fuzzy_stmt = (
             select(Deal, PortfolioCompany)
             .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
@@ -549,8 +551,7 @@ async def find_duplicate_deal(
         tier2_fuzzy_candidates = tier2_fuzzy_result.all()
 
         for deal, company in tier2_fuzzy_candidates:
-            existing_normalized = normalize_company_name(company.name)
-            if normalized_company == existing_normalized:
+            if company_names_match(company_name, company.name):
                 logger.info(
                     f"Found same-day duplicate (TIER 2 fuzzy): '{company_name}' matches '{company.name}' "
                     f"(deal #{deal.id}, {deal.round_type}, {deal.amount}, date={deal.announced_date})"
