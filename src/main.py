@@ -584,7 +584,27 @@ async def list_deals(
             if stage:
                 base_stmt = base_stmt.where(Deal.round_type == stage)
             if is_lead is not None:
-                base_stmt = base_stmt.where(Deal.is_lead_confirmed == is_lead)
+                # FIX: Filter by whether a TRACKED FUND is the lead, not just is_lead_confirmed
+                # is_lead_confirmed means "we know who led" (e.g., NEA)
+                # But the filter should mean "a tracked fund led the round"
+                if is_lead:
+                    # Only show deals where a TRACKED FUND is the lead
+                    base_stmt = base_stmt.where(
+                        Deal.id.in_(
+                            select(DealInvestor.deal_id)
+                            .where(DealInvestor.is_lead == True)
+                            .where(DealInvestor.is_tracked_fund == True)
+                        )
+                    )
+                else:
+                    # Show deals where NO tracked fund is the lead
+                    base_stmt = base_stmt.where(
+                        ~Deal.id.in_(
+                            select(DealInvestor.deal_id)
+                            .where(DealInvestor.is_lead == True)
+                            .where(DealInvestor.is_tracked_fund == True)
+                        )
+                    )
             if is_ai_deal is not None:
                 base_stmt = base_stmt.where(Deal.is_ai_deal == is_ai_deal)
             if is_enterprise_ai is not None:
@@ -765,7 +785,23 @@ async def export_deals_csv(
             if stage:
                 stmt = stmt.where(Deal.round_type == stage)
             if is_lead is not None:
-                stmt = stmt.where(Deal.is_lead_confirmed == is_lead)
+                # FIX: Filter by whether a TRACKED FUND is the lead
+                if is_lead:
+                    stmt = stmt.where(
+                        Deal.id.in_(
+                            select(DealInvestor.deal_id)
+                            .where(DealInvestor.is_lead == True)
+                            .where(DealInvestor.is_tracked_fund == True)
+                        )
+                    )
+                else:
+                    stmt = stmt.where(
+                        ~Deal.id.in_(
+                            select(DealInvestor.deal_id)
+                            .where(DealInvestor.is_lead == True)
+                            .where(DealInvestor.is_tracked_fund == True)
+                        )
+                    )
             if is_ai_deal is not None:
                 stmt = stmt.where(Deal.is_ai_deal == is_ai_deal)
             if is_enterprise_ai is not None:
