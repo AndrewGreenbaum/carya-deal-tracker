@@ -799,6 +799,18 @@ async def save_deal(
             existing_deal.date_source_count = 1
             existing_deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
+        # FIX (2026-01): Update amount if existing deal has no amount but new extraction does
+        # This handles cases where first article (e.g., VC blog post) doesn't mention amount
+        # but subsequent articles (e.g., press releases) do
+        if extraction.amount and not existing_deal.amount:
+            logger.info(
+                f"Updating deal #{existing_deal.id} amount: {extraction.amount} "
+                f"(previously null) for {extraction.startup_name}"
+            )
+            existing_deal.amount = extraction.amount
+            existing_deal.amount_usd = normalize_amount(extraction.amount)
+            existing_deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
         # FIX: Use ON CONFLICT DO NOTHING to prevent race condition
         # Between check_article_url_exists() and insert, another task could insert same URL
         stmt = pg_insert(Article).values(
