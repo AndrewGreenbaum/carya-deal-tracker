@@ -72,6 +72,14 @@ _anthropic_client = Anthropic(
 )
 client = instructor.from_anthropic(_anthropic_client)
 
+# Module-level Sonnet client for hybrid re-extraction (with same timeout config)
+# Created once at module load for efficiency (not per-call)
+_sonnet_anthropic_client = Anthropic(
+    api_key=settings.anthropic_api_key,
+    timeout=httpx.Timeout(settings.llm_timeout, connect=settings.llm_connect_timeout),
+)
+sonnet_client = instructor.from_anthropic(_sonnet_anthropic_client)
+
 # Pre-built cached system message (optimization: created once, reused across calls)
 # Anthropic's prompt caching uses content-based caching, but we save object creation overhead
 CACHED_SYSTEM_MESSAGE = [
@@ -112,6 +120,13 @@ NOT LEAD: "backed by", "participated in", "invested in", "joined"
 
 CRITICAL: Only set tracked_fund_is_lead=True if verification_snippet contains ACTUAL lead language.
 If no lead phrase exists → put in participating_investors with role=participant, NOT lead_investors.
+
+NEVER HALLUCINATE INVESTORS (CRITICAL - prevents wrong data):
+- ONLY include investors that are EXPLICITLY named in the article text
+- If NO investor names appear in article → lead_investors=[], participating_investors=[]
+- Fund context (which feed we found this on) is NOT evidence of investment
+- Do NOT assume a fund invested just because article was on their news feed
+- If article says "raised $2M in seed funding" with no investors mentioned → leave investor lists EMPTY
 
 VERIFICATION SNIPPET (CRITICAL FOR ACCURACY):
 Extract a COMPLETE sentence (15-50 words) that proves lead status. Include:
@@ -485,11 +500,7 @@ async def _reextract_with_sonnet(
         Sonnet's extraction if it's better, None if Haiku's was better or error
     """
     try:
-        # Create client with Sonnet model
-        from anthropic import Anthropic, APITimeoutError, APIError
-        anthropic_client = Anthropic()
-        sonnet_client = instructor.from_anthropic(anthropic_client)
-
+        # Use module-level sonnet_client (created at import with proper timeout config)
         # Make the call with Sonnet
         response, completion = sonnet_client.messages.create_with_completion(
             model=settings.llm_model_fallback,
@@ -1212,6 +1223,7 @@ ARTICLE TEXT:
 FUND-SPECIFIC CONTEXT:
 This article was found via {fund_context.name}'s news feed.
 Extraction notes: {fund_context.extraction_notes}
+WARNING: This does NOT mean {fund_context.name} invested. Only include them if EXPLICITLY mentioned in article.
 """
         if fund_context.negative_keywords:
             prompt += f"EXCLUDE if these appear: {', '.join(fund_context.negative_keywords)}\n"
@@ -1379,6 +1391,9 @@ async def extract_deal(
                     f"has_usage={hasattr(completion, 'usage') if completion else 'N/A'}"
                 )
 
+            # Post-process: validate investors are mentioned in article (prevents hallucination)
+            response = _validate_investors_in_text(response, article_text)
+
             # Post-process: verify tracked fund identification
             response = _verify_tracked_fund(response)
 
@@ -1475,6 +1490,45 @@ async def extract_deal(
                 )
                 if sonnet_response:
                     response = sonnet_response
+
+                    # CRITICAL: Apply same post-processing to Sonnet response
+                    # (crypto, consumer, fintech reclassification + title/background checks)
+                    if response.is_ai_deal and _is_crypto_deal(response, article_text):
+                        logger.info(f"HYBRID: Reclassifying {response.startup_name} as NOT_AI (crypto)")
+                        response.is_enterprise_ai = False
+                        response.is_ai_deal = False
+                        response.enterprise_category = EnterpriseCategory.NOT_AI
+
+                    if response.is_enterprise_ai and _is_consumer_ai_deal(response, article_text):
+                        logger.info(f"HYBRID: Reclassifying {response.startup_name} as Consumer AI")
+                        response.is_enterprise_ai = False
+                        if response.enterprise_category not in (
+                            EnterpriseCategory.CONSUMER_AI,
+                            EnterpriseCategory.GAMING_AI,
+                            EnterpriseCategory.SOCIAL_AI,
+                        ):
+                            response.enterprise_category = EnterpriseCategory.CONSUMER_AI
+
+                    if (response.is_ai_deal or response.is_enterprise_ai) and _is_consumer_fintech_deal(response, article_text):
+                        logger.info(f"HYBRID: Reclassifying {response.startup_name} as NOT_AI (consumer fintech)")
+                        response.is_enterprise_ai = False
+                        response.is_ai_deal = False
+                        response.enterprise_category = EnterpriseCategory.NOT_AI
+
+                    if _looks_like_article_title(response.startup_name):
+                        logger.warning(f"HYBRID: Rejecting article title as company name: '{response.startup_name}'")
+                        response.is_new_announcement = False
+                        response.announcement_rejection_reason = f"Company name looks like article title: {response.startup_name}"
+
+                    if response.is_new_announcement:
+                        is_background, reason = _is_background_mention(response.startup_name, article_text, is_external_source)
+                        if is_background:
+                            logger.warning(f"HYBRID: Rejecting background mention: '{response.startup_name}' - {reason}")
+                            response.is_new_announcement = False
+                            response.announcement_rejection_reason = reason
+
+                    if response.amount:
+                        response = _validate_deal_amount(response, article_text)
 
             return response
 
@@ -1730,6 +1784,113 @@ def _has_lead_language(snippet: str) -> bool:
             return True
 
     return False
+
+
+def _investor_in_text(investor_name: str, text_lower: str) -> bool:
+    """
+    Check if an investor name (or any known alias) appears in article text.
+
+    Handles:
+    - Full name match (e.g., "Index Ventures")
+    - Partial name match for multi-word names (e.g., "Sequoia" for "Sequoia Capital")
+    - Known fund aliases (e.g., "a16z" for "Andreessen Horowitz")
+
+    Args:
+        investor_name: The investor name to search for
+        text_lower: Lowercased article text
+
+    Returns:
+        True if investor appears in text (directly or via alias)
+    """
+    # Lazy import to avoid circular dependency
+    from ..harvester.fund_matcher import FUND_NAME_VARIANTS
+
+    inv_lower = investor_name.lower()
+
+    # Direct match
+    if inv_lower in text_lower:
+        return True
+
+    # Partial match for multi-word names (e.g., "Sequoia" for "Sequoia Capital")
+    name_parts = inv_lower.split()
+    if len(name_parts) > 1:
+        if any(part in text_lower for part in name_parts if len(part) >= 4):
+            return True
+
+    # Check known fund aliases (e.g., "a16z" ↔ "Andreessen Horowitz")
+    for fund_slug, aliases in FUND_NAME_VARIANTS.items():
+        # If investor matches any alias for this fund...
+        if inv_lower in [a.lower() for a in aliases]:
+            # ...check if ANY alias for this fund appears in text
+            for alias in aliases:
+                if alias.lower() in text_lower:
+                    return True
+
+    return False
+
+
+def _validate_investors_in_text(deal: DealExtraction, article_text: str) -> DealExtraction:
+    """
+    Validate that claimed investors are actually mentioned in the article text.
+
+    SAFEGUARD: Prevents hallucinated investors from being saved.
+
+    This catches cases where Claude hallucinates an investor based on fund context
+    rather than actual article content. For example, if an article came from Index Ventures'
+    news feed but doesn't mention Index Ventures, we should NOT list them as investor.
+
+    Args:
+        deal: The extracted deal
+        article_text: Original article text
+
+    Returns:
+        Modified deal with hallucinated investors removed
+    """
+    if not article_text:
+        return deal
+
+    text_lower = article_text.lower()
+
+    # Check lead investors
+    validated_leads = []
+    removed_leads = []
+    for inv in deal.lead_investors:
+        if _investor_in_text(inv.name, text_lower):
+            validated_leads.append(inv)
+        else:
+            removed_leads.append(inv.name)
+
+    # Log and update if investors were removed
+    if removed_leads:
+        logger.warning(
+            f"REMOVING hallucinated lead investors for {deal.startup_name}: "
+            f"{removed_leads} - not found in article text"
+        )
+        deal.lead_investors = validated_leads
+
+        # If all lead investors removed, update tracked fund status
+        if not validated_leads:
+            deal.tracked_fund_is_lead = False
+            deal.tracked_fund_name = None
+            deal.tracked_fund_role = None
+
+    # Check participating investors
+    validated_participants = []
+    removed_participants = []
+    for inv in deal.participating_investors:
+        if _investor_in_text(inv.name, text_lower):
+            validated_participants.append(inv)
+        else:
+            removed_participants.append(inv.name)
+
+    if removed_participants:
+        logger.warning(
+            f"REMOVING hallucinated participating investors for {deal.startup_name}: "
+            f"{removed_participants} - not found in article text"
+        )
+        deal.participating_investors = validated_participants
+
+    return deal
 
 
 def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
