@@ -2,7 +2,11 @@
  * CommandSidebar - Left panel with filters, fund list, and cost tracker
  *
  * Features:
- * - Filter toggles (Enterprise AI, Lead Only, Show Rejected)
+ * - Nested filter toggles (Option C structure):
+ *   - AI Companies Only (master toggle - when OFF shows all deals incl non-AI)
+ *     └─ Enterprise AI Only (sub-filter - only visible when AI is ON)
+ *   - Lead Investors
+ *   - Show Rejected
  * - Tracked funds list with last scraped times
  * - Category dropdown filter
  * - Cost tracker widget
@@ -37,13 +41,23 @@ export function CommandSidebar({
   const toggleFilter = (key: keyof FilterState) => {
     if (key === 'selectedFund' || key === 'selectedCategory' || key === 'searchQuery' || key === 'sortDirection') return;
 
-    // Simple independent toggle - each filter works on its own
-    // Enterprise AI = B2B AI companies only
-    // Include Consumer AI = when checked, also shows consumer AI (only matters when Enterprise is off)
-    onFiltersChange({
-      ...filters,
-      [key]: !filters[key],
-    });
+    // Option C nested filter logic:
+    // - AI Companies Only = master toggle (when OFF, shows all deals incl non-AI)
+    // - Enterprise AI Only = sub-filter (only applies when AI Companies is ON)
+    // When turning OFF "AI Companies Only", also turn off "Enterprise AI Only"
+    if (key === 'aiDealsOnly' && filters.aiDealsOnly) {
+      // Turning OFF AI filter - also turn off Enterprise AI sub-filter
+      onFiltersChange({
+        ...filters,
+        aiDealsOnly: false,
+        enterpriseAiOnly: false,
+      });
+    } else {
+      onFiltersChange({
+        ...filters,
+        [key]: !filters[key],
+      });
+    }
   };
 
   const setCategory = (category: EnterpriseCategory | undefined) => {
@@ -124,20 +138,26 @@ export function CommandSidebar({
             Filters
           </div>
           <div className="space-y-3">
+            {/* Master toggle: AI Companies Only */}
             <FilterCheckbox
-              label="Enterprise AI"
-              checked={filters.enterpriseAiOnly}
-              onChange={() => toggleFilter('enterpriseAiOnly')}
+              label="AI Companies Only"
+              checked={filters.aiDealsOnly}
+              onChange={() => toggleFilter('aiDealsOnly')}
             />
+            {/* Sub-filter: Enterprise AI Only (nested, only visible when AI is on) */}
+            {filters.aiDealsOnly && (
+              <div className="ml-4 border-l border-slate-700/50 pl-3">
+                <FilterCheckbox
+                  label="Enterprise AI Only"
+                  checked={filters.enterpriseAiOnly}
+                  onChange={() => toggleFilter('enterpriseAiOnly')}
+                />
+              </div>
+            )}
             <FilterCheckbox
               label="Lead Investors"
               checked={filters.leadOnly}
               onChange={() => toggleFilter('leadOnly')}
-            />
-            <FilterCheckbox
-              label="Include Consumer AI"
-              checked={filters.aiDealsOnly}
-              onChange={() => toggleFilter('aiDealsOnly')}
             />
             <FilterCheckbox
               label="Show Rejected"

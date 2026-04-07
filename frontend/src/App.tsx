@@ -146,10 +146,11 @@ function App() {
     hasMore: false,
   });
 
-  // Filter state - default to Enterprise AI + Lead only
+  // Filter state - default to AI Companies + Enterprise AI + Lead only
+  // Option C filter structure: AI Companies Only (master) > Enterprise AI Only (sub-filter)
   const [filters, setFilters] = useState<FilterState>({
-    aiDealsOnly: false,       // Off by default (Enterprise AI implies AI)
-    enterpriseAiOnly: true,   // Show enterprise AI by default
+    aiDealsOnly: true,        // ON by default - AI Companies Only (master toggle)
+    enterpriseAiOnly: true,   // ON by default - Enterprise AI Only (sub-filter)
     leadOnly: true,
     showRejected: false,
     selectedFund: undefined,
@@ -239,18 +240,18 @@ function App() {
       setLoading(true);
       try {
         // When showRejected is true, don't apply filters - show everything
-        // Filter logic:
-        // - Enterprise AI checked → is_enterprise_ai=true (most restrictive)
-        // - Include Consumer AI checked (enterprise off) → is_ai_deal=true (all AI)
-        // - Neither checked → no AI filter (all deals)
+        // Option C Filter logic (nested):
+        // - AI Companies Only ON + Enterprise AI ON → is_enterprise_ai=true (most restrictive)
+        // - AI Companies Only ON + Enterprise AI OFF → is_ai_deal=true (all AI incl consumer)
+        // - AI Companies Only OFF → no AI filter (all deals including non-AI)
         const result = await fetchDeals({
           limit: PAGE_SIZE,
           offset,
           is_lead: filters.showRejected ? undefined : (filters.leadOnly ? true : undefined),
           is_ai_deal: filters.showRejected ? undefined :
-            (!filters.enterpriseAiOnly && filters.aiDealsOnly ? true : undefined),
+            (filters.aiDealsOnly && !filters.enterpriseAiOnly ? true : undefined),
           is_enterprise_ai: filters.showRejected ? undefined :
-            (filters.enterpriseAiOnly ? true : undefined),
+            (filters.aiDealsOnly && filters.enterpriseAiOnly ? true : undefined),
           enterprise_category: filters.selectedCategory,
           fund_slug: filters.selectedFund,
           search: debouncedSearch || undefined,
@@ -350,10 +351,11 @@ function App() {
   };
 
   const handleExport = () => {
+    // Use same Option C filter logic as loadDeals
     const url = getExportUrl({
       is_lead: filters.leadOnly ? true : undefined,
-      is_ai_deal: filters.aiDealsOnly ? true : undefined,
-      is_enterprise_ai: filters.enterpriseAiOnly ? true : undefined,
+      is_ai_deal: filters.aiDealsOnly && !filters.enterpriseAiOnly ? true : undefined,
+      is_enterprise_ai: filters.aiDealsOnly && filters.enterpriseAiOnly ? true : undefined,
       enterprise_category: filters.selectedCategory,
       fund_slug: filters.selectedFund,
       search: debouncedSearch || undefined,

@@ -327,8 +327,8 @@ export interface DashboardStats {
 }
 
 export interface FilterState {
-  aiDealsOnly: boolean;        // Show all AI deals (enterprise + consumer)
-  enterpriseAiOnly: boolean;   // Show only enterprise AI (B2B)
+  aiDealsOnly: boolean;        // Master toggle: AI Companies Only (when OFF, shows all deals incl non-AI)
+  enterpriseAiOnly: boolean;   // Sub-filter: Enterprise AI Only (only applies when aiDealsOnly=true)
   leadOnly: boolean;
   showRejected: boolean;
   selectedFund?: string;
