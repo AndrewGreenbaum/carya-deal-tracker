@@ -534,7 +534,9 @@ async def _reextract_with_sonnet(
                 cache_write_tokens=cache_write
             )
 
-        # Apply same post-processing as Haiku
+        # Apply same post-processing as Haiku (investor validation BEFORE fund verification)
+        # This ensures fair comparison between Haiku and Sonnet results
+        response = _validate_investors_in_text(response, article_text)
         response = _verify_tracked_fund(response)
 
         # Decide which result is better
@@ -1510,13 +1512,22 @@ async def extract_deal(
                     response = sonnet_response
 
                     # CRITICAL: Apply same post-processing to Sonnet response
-                    # (crypto, consumer, fintech reclassification + title/background checks)
+                    # Must include ALL post-processing steps in the same order as Haiku
+
+                    # 1. Validate investors are mentioned in article (prevents hallucination)
+                    response = _validate_investors_in_text(response, article_text)
+
+                    # 2. Verify tracked fund identification
+                    response = _verify_tracked_fund(response)
+
+                    # 3. Crypto reclassification
                     if response.is_ai_deal and _is_crypto_deal(response, article_text):
                         logger.info(f"HYBRID: Reclassifying {response.startup_name} as NOT_AI (crypto)")
                         response.is_enterprise_ai = False
                         response.is_ai_deal = False
                         response.enterprise_category = EnterpriseCategory.NOT_AI
 
+                    # 4. Consumer AI reclassification
                     if response.is_enterprise_ai and _is_consumer_ai_deal(response, article_text):
                         logger.info(f"HYBRID: Reclassifying {response.startup_name} as Consumer AI")
                         response.is_enterprise_ai = False
@@ -1527,17 +1538,20 @@ async def extract_deal(
                         ):
                             response.enterprise_category = EnterpriseCategory.CONSUMER_AI
 
+                    # 5. Consumer fintech reclassification
                     if (response.is_ai_deal or response.is_enterprise_ai) and _is_consumer_fintech_deal(response, article_text):
                         logger.info(f"HYBRID: Reclassifying {response.startup_name} as NOT_AI (consumer fintech)")
                         response.is_enterprise_ai = False
                         response.is_ai_deal = False
                         response.enterprise_category = EnterpriseCategory.NOT_AI
 
+                    # 6. Article title validation
                     if _looks_like_article_title(response.startup_name):
                         logger.warning(f"HYBRID: Rejecting article title as company name: '{response.startup_name}'")
                         response.is_new_announcement = False
                         response.announcement_rejection_reason = f"Company name looks like article title: {response.startup_name}"
 
+                    # 7. Background mention check
                     if response.is_new_announcement:
                         is_background, reason = _is_background_mention(response.startup_name, article_text, is_external_source)
                         if is_background:
@@ -1545,6 +1559,7 @@ async def extract_deal(
                             response.is_new_announcement = False
                             response.announcement_rejection_reason = reason
 
+                    # 8. Amount validation
                     if response.amount:
                         response = _validate_deal_amount(response, article_text)
 
