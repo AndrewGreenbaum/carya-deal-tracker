@@ -179,6 +179,16 @@ COMPANY NAME: Must be actual company, NOT article titles like "America's Constru
 
 URLS: Only extract if EXPLICITLY mentioned. Never guess/construct URLs. Set to null if not in article.
 
+COMPANY WEBSITE EXTRACTION (helps users find the startup):
+Look for these patterns to extract company_website:
+- Direct mentions: "acme.com", "www.acme.io", "visit acme.ai"
+- In text: "Learn more at [domain]", "visit [startup] at [url]"
+- In company descriptions: "[Startup], available at [domain]"
+- Common TLDs: .com, .io, .ai, .co, .dev, .app, .tech, .health
+
+Extract the ROOT DOMAIN only (e.g., "https://acme.com" not "https://acme.com/about")
+If no website mentioned → company_website=null (enrichment will try to find it later)
+
 DATE EXTRACTION (IMPORTANT - affects data accuracy):
 - Extract the ANNOUNCEMENT/CLOSING date of the funding round, NOT the article's publication date
 - Look for phrases like: "announced today", "closed on", "raised on [date]", "as of [date]"
