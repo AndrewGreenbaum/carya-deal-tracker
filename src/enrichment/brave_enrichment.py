@@ -283,6 +283,9 @@ class BraveEnrichmentClient:
 
     def _is_valid_startup_website(self, url: str, company_name: str) -> bool:
         """Check if URL is a valid startup website (not a false positive)."""
+        # Guard: reject empty/whitespace company names (prevents "" in domain matching)
+        if not company_name or not company_name.strip():
+            return False
         try:
             url_lower = url.lower()
             parsed = urlparse(url_lower)
