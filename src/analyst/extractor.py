@@ -377,9 +377,14 @@ async def log_token_usage(
 # Keywords that indicate funding content (for early exit optimization)
 # Split into strong (must have) and supporting (help confirm) keywords
 # FIX (2026-01): Added "leads" for headline-only content like "Thrive Capital Leads $34M"
+# FIX (2026-01): Added 11 missing common funding verbs that were causing false negatives
 STRONG_FUNDING_KEYWORDS = [
+    # Original keywords
     "raised", "raises", "funding", "series", "seed round", "led by", "leads",
-    "investment round", "secures", "closes round", "announces funding"
+    "investment round", "secures", "closes round", "announces funding",
+    # NEW: Common funding verbs that were missing (causing false negatives)
+    "closes", "gets", "bags", "nabs", "receives", "wins",
+    "grabs", "pulls", "attracts", "lands", "raise",  # "raise" = noun form
 ]
 AMOUNT_KEYWORDS = ["million", "billion", "$", "mn", "m funding"]  # "mn" = Indian format
 SUPPORTING_KEYWORDS = [
@@ -690,28 +695,41 @@ KNOWN_CONSUMER_FINTECH = [
 
 def is_likely_crypto_article(text: str, source_url: str = "") -> bool:
     """
-    PRE-CHECK: Detect if article is crypto-focused BEFORE calling Claude.
+    PRE-CHECK: Detect if article is from a crypto news site BEFORE calling Claude.
 
-    Saves tokens by skipping crypto articles that would be rejected anyway.
-    Enhanced with URL pattern detection for crypto websites.
+    FIX (2026-01): Simplified to URL-only check. Previous keyword-count approach
+    (3+ crypto keywords) was ineffective - most crypto headlines have only 1-2 keywords.
+
+    Now only filters articles from known crypto news sites (strong signal).
+    All other articles go to Claude for proper classification, then post-extraction
+    _is_crypto_deal() marks crypto companies as is_ai_deal=False (but still saves them).
+
+    This change:
+    - Prevents false negatives on AI+blockchain companies
+    - Saves all lead deals from tracked funds (even if crypto)
+    - User can filter by is_ai_deal=True in frontend to see only AI deals
     """
-    text_lower = text.lower()
     url_lower = source_url.lower() if source_url else ""
 
-    # Check 1: URL contains crypto patterns (strong signal)
+    # Only check URL patterns (crypto news sites are strong signals)
+    # Keyword-count check removed - was catching almost nothing and risked false positives
     if url_lower:
-        for pattern in CRYPTO_URL_PATTERNS:
-            if pattern in url_lower:
-                logger.debug(f"Pre-check: Skipping crypto article (URL pattern: {pattern})")
+        # Check for crypto news sites specifically (not general crypto terms in URL)
+        crypto_news_sites = [
+            "coindesk", "cointelegraph", "theblock.co", "decrypt.co",
+            "cryptonews", "bitcoinmagazine", "cryptoslate", "coingecko",
+        ]
+        for site in crypto_news_sites:
+            if site in url_lower:
+                logger.debug(f"Pre-check: Skipping crypto news site article ({site})")
                 return True
 
-    # Check 2: Keyword density in article text
-    crypto_count = sum(1 for kw in CRYPTO_KEYWORDS if kw in text_lower)
-
-    # Threshold of 3+ keywords indicates crypto content
-    if crypto_count >= 3:
-        logger.debug(f"Pre-check: Skipping crypto article ({crypto_count} keywords)")
-        return True
+        # Check for crypto TLDs (very strong signal)
+        crypto_tlds = [".eth", ".crypto", ".sol"]
+        for tld in crypto_tlds:
+            if tld in url_lower:
+                logger.debug(f"Pre-check: Skipping crypto TLD article ({tld})")
+                return True
 
     return False
 
