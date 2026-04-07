@@ -48,6 +48,47 @@ INVALID_COMPANY_NAMES = {
     "",           # Empty string
 }
 
+# Patterns that indicate the LLM fabricated a company name instead of using <UNKNOWN>
+# FIX (2026-01): Catch fabricated names like "Unnamed Patent AI Startup"
+import re
+FABRICATED_NAME_PATTERNS = [
+    r'^unnamed\s+',           # "Unnamed X Startup"
+    r'^untitled\s+',          # "Untitled Y Company"
+    r'^unidentified\s+',      # "Unidentified Z Firm"
+    r'^undisclosed\s+',       # "Undisclosed AI Company"
+    r'\s+startup$',           # Ends with "Startup" (generic)
+    r'^the\s+company$',       # "The Company"
+    r'^a\s+new\s+',           # "A New AI Startup"
+    r'^stealth\s+',           # "Stealth Mode Company"
+]
+
+
+def is_fabricated_company_name(name: str) -> bool:
+    """
+    Detect if the company name was fabricated by the LLM.
+
+    When the LLM can't find a company name, it sometimes creates descriptive
+    placeholder names like "Unnamed Patent AI Startup" instead of returning <UNKNOWN>.
+
+    Returns True if the name appears to be fabricated, False otherwise.
+    """
+    if not name:
+        return False
+
+    name_lower = name.lower().strip()
+
+    # Check exact invalid names
+    if name_lower in {n.lower() for n in INVALID_COMPANY_NAMES}:
+        return True
+
+    # Check regex patterns
+    for pattern in FABRICATED_NAME_PATTERNS:
+        if re.search(pattern, name_lower, re.IGNORECASE):
+            return True
+
+    return False
+
+
 from sqlalchemy import select
 
 from .base_scraper import BaseScraper, NormalizedArticle
@@ -222,8 +263,14 @@ async def process_article(
         )
 
         # Extract deal information using Claude
+        # FIX (2026-01): Include article title in text to improve extraction
+        # Titles often contain the company name when text is truncated
+        article_content = article.text
+        if article.title and article.title.strip():
+            article_content = f"ARTICLE TITLE: {article.title.strip()}\n\n{article.text}"
+
         extraction = await extract_deal(
-            article_text=article.text,
+            article_text=article_content,
             source_url=article.url,
             source_name=fund_config.slug,
             fund_context=fund_config,
@@ -250,11 +297,12 @@ async def process_article(
         # FIX: Reject invalid company names like <UNKNOWN>, "the company", etc.
         # This catches cases where LLM couldn't identify the company but set is_new_announcement=True
         # These deals will likely be captured from another source with better content
+        # FIX (2026-01): Also catch fabricated names like "Unnamed Patent AI Startup"
         company_name = (extraction.startup_name or "").strip()
-        if company_name.lower() in {n.lower() for n in INVALID_COMPANY_NAMES} or not company_name:
+        if not company_name or is_fabricated_company_name(company_name):
             # Log with enough detail to manually investigate if needed
             logger.warning(
-                f"Skipping deal with invalid company name: '{extraction.startup_name}' - "
+                f"Skipping deal with invalid/fabricated company name: '{extraction.startup_name}' - "
                 f"Amount: {extraction.amount}, Fund: {extraction.tracked_fund_name}, "
                 f"URL: {article.url} - "
                 f"(Deal may be captured from another source with better content)"
