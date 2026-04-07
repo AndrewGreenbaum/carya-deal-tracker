@@ -47,12 +47,18 @@ class Settings(BaseSettings):
 
     # LLM Settings
     llm_model: str = "claude-3-5-haiku-20241022"
+    llm_model_fallback: str = "claude-sonnet-4-20250514"  # Higher-quality model for re-extraction
     llm_temperature: float = 0.0
     llm_max_tokens: int = 4096
     llm_timeout: int = 90  # Total timeout for Claude API calls (seconds)
     llm_connect_timeout: int = 30  # Connection timeout for Claude API (seconds)
     llm_max_retries: int = 3  # Max retries on transient errors
     extraction_confidence_threshold: float = 0.5  # Minimum confidence to keep extraction
+
+    # Hybrid extraction: re-extract with Sonnet for low-confidence results
+    hybrid_extraction_enabled: bool = True  # Enable Sonnet re-extraction
+    hybrid_confidence_min: float = 0.35  # Min confidence to consider for re-extraction
+    hybrid_confidence_max: float = 0.65  # Max confidence to consider for re-extraction
 
     # Embedding Settings
     embedding_model: str = "text-embedding-3-small"

@@ -113,12 +113,48 @@ NOT LEAD: "backed by", "participated in", "invested in", "joined"
 CRITICAL: Only set tracked_fund_is_lead=True if verification_snippet contains ACTUAL lead language.
 If no lead phrase exists → put in participating_investors with role=participant, NOT lead_investors.
 
-FOUNDERS (EXTRACT ALL MENTIONED)
-- CEO/Founder (REQUIRED if mentioned in article)
-- Co-founders, CTO, COO, etc. (if mentioned)
-- For each founder include: name (full name), title (CEO, CTO, Co-founder, etc.)
-- LinkedIn URL: ONLY extract if explicitly mentioned in article text. Never guess/construct URLs.
-- If no founders mentioned → leave founders list empty
+VERIFICATION SNIPPET (CRITICAL FOR ACCURACY):
+Extract a COMPLETE sentence (15-50 words) that proves lead status. Include:
+- The fund name AND the company name
+- The lead phrase ("led by", "leads", etc.)
+- Context (amount, round type if in same sentence)
+
+GOOD snippets:
+- "The $50M Series A was led by Sequoia Capital, with participation from..."
+- "Acme's seed round, led by a16z partner Marc Andreessen, closed at $12M"
+- "Benchmark led the investment, marking the firm's first AI infrastructure bet"
+
+BAD snippets (too short, missing context):
+- "led by Sequoia" (no company name, no context)
+- "Sequoia invested" (no lead language)
+- "the round" (meaningless)
+
+FOUNDERS (EXTRACT ALL MENTIONED - CRITICAL FOR DATA QUALITY)
+Look for these patterns to identify founders:
+- "founded by [NAME]", "co-founded by", "founder [NAME]"
+- "[NAME], CEO and founder", "[NAME], who founded"
+- "founded in [YEAR] by [NAME]"
+- Company bios: "[NAME] is the CEO/CTO/founder of..."
+
+Extract for EACH founder:
+- name: Full name (first + last). "John Smith", not "John" or "Smith"
+- title: CEO, CTO, Co-founder, Founder, CEO & Co-founder, etc.
+- linkedin_url: ONLY if explicitly in article text (e.g., "linkedin.com/in/johnsmith")
+
+FOUNDER EXAMPLES:
+Article: "Acme, founded by Jane Doe and John Smith, raised $10M"
+→ founders: [{name: "Jane Doe", title: "Co-founder"}, {name: "John Smith", title: "Co-founder"}]
+
+Article: "CEO Sarah Johnson announced the funding"
+→ founders: [{name: "Sarah Johnson", title: "CEO"}]
+
+Article: "The startup raised $5M" (no founders mentioned)
+→ founders: [] (empty list)
+
+DO NOT extract:
+- Investor partners as founders (e.g., "Bill Gurley of Benchmark")
+- Board members who aren't founders
+- Employees mentioned in quotes
 
 TRACKED FUNDS: Founders Fund, Benchmark, Sequoia, Khosla, Index, a16z, Insight Partners, Bessemer, Redpoint, Greylock, GV, Menlo, USV, Thrive, Accel, Felicis, General Catalyst, First Round
 
@@ -424,6 +460,104 @@ def clear_content_hash_cache() -> None:
     cache_size = len(_content_hash_cache)
     _content_hash_cache = {}
     logger.info(f"Content hash cache cleared (had {cache_size} entries)")
+
+
+# =============================================================================
+# HYBRID EXTRACTION: Re-extract with Sonnet for low-confidence results
+# =============================================================================
+
+async def _reextract_with_sonnet(
+    article_text: str,
+    source_url: str,
+    source_name: str,
+    prompt: str,
+    original_response: DealExtraction,
+) -> Optional[DealExtraction]:
+    """
+    Re-extract a deal using Sonnet when Haiku's extraction has quality issues.
+
+    Called when:
+    - Confidence is in the "salvageable" range (0.35-0.65)
+    - Deal appears valid (is_new_announcement=True)
+    - Has quality issues (weak lead evidence OR no founders)
+
+    Returns:
+        Sonnet's extraction if it's better, None if Haiku's was better or error
+    """
+    try:
+        # Create client with Sonnet model
+        from anthropic import Anthropic, APITimeoutError, APIError
+        anthropic_client = Anthropic()
+        sonnet_client = instructor.from_anthropic(anthropic_client)
+
+        # Make the call with Sonnet
+        response, completion = sonnet_client.messages.create_with_completion(
+            model=settings.llm_model_fallback,
+            max_tokens=settings.llm_max_tokens,
+            temperature=settings.llm_temperature,
+            system=CACHED_SYSTEM_MESSAGE,
+            messages=[{"role": "user", "content": prompt}],
+            response_model=DealExtraction,
+        )
+
+        # Log token usage
+        if completion and hasattr(completion, 'usage'):
+            usage = completion.usage
+            cache_read = getattr(usage, 'cache_read_input_tokens', 0) or 0
+            cache_write = getattr(usage, 'cache_creation_input_tokens', 0) or 0
+            logger.info(
+                f"Sonnet re-extraction tokens: in={usage.input_tokens}, out={usage.output_tokens}"
+            )
+            await log_token_usage(
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                source_name=f"{source_name}_sonnet_reextract",
+                article_url=source_url,
+                model=settings.llm_model_fallback,
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write
+            )
+
+        # Apply same post-processing as Haiku
+        response = _verify_tracked_fund(response)
+
+        # Decide which result is better
+        # Prefer Sonnet if: higher confidence OR more founders OR stronger lead evidence
+        haiku_score = original_response.confidence_score
+        sonnet_score = response.confidence_score
+
+        haiku_founders = len(original_response.founders)
+        sonnet_founders = len(response.founders)
+
+        haiku_weak = original_response.lead_evidence_weak
+        sonnet_weak = response.lead_evidence_weak
+
+        # Calculate improvement
+        confidence_improved = sonnet_score > haiku_score
+        founders_improved = sonnet_founders > haiku_founders
+        evidence_improved = haiku_weak and not sonnet_weak
+
+        if confidence_improved or founders_improved or evidence_improved:
+            logger.info(
+                f"HYBRID: Sonnet improved extraction for {response.startup_name} - "
+                f"confidence: {haiku_score:.2f}→{sonnet_score:.2f}, "
+                f"founders: {haiku_founders}→{sonnet_founders}, "
+                f"weak_evidence: {haiku_weak}→{sonnet_weak}"
+            )
+            return response
+        else:
+            logger.info(
+                f"HYBRID: Sonnet did not improve, keeping Haiku result for {original_response.startup_name} - "
+                f"confidence: {haiku_score:.2f}→{sonnet_score:.2f}"
+            )
+            return None
+
+    except (APITimeoutError, APIError) as e:
+        logger.warning(f"HYBRID: Sonnet re-extraction failed for {source_url}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"HYBRID: Unexpected error in Sonnet re-extraction: {e}")
+        return None
 
 
 # Keywords that indicate crypto/blockchain content (not Enterprise AI)
@@ -1317,6 +1451,30 @@ async def extract_deal(
             # FIX (2026-01): Catches cases like $150B market size → $150M funding
             if response and response.amount:
                 response = _validate_deal_amount(response, article_text)
+
+            # HYBRID EXTRACTION: Re-extract with Sonnet for low-confidence results
+            # Only if: enabled, confidence in range, valid deal, has quality issues
+            if (
+                response
+                and settings.hybrid_extraction_enabled
+                and response.is_new_announcement
+                and settings.hybrid_confidence_min <= response.confidence_score <= settings.hybrid_confidence_max
+                and (response.lead_evidence_weak or len(response.founders) == 0)
+            ):
+                logger.info(
+                    f"HYBRID: Low confidence ({response.confidence_score:.2f}) for {response.startup_name}, "
+                    f"weak_evidence={response.lead_evidence_weak}, founders={len(response.founders)} - "
+                    f"re-extracting with {settings.llm_model_fallback}"
+                )
+                sonnet_response = await _reextract_with_sonnet(
+                    article_text=article_text,
+                    source_url=source_url,
+                    source_name=source_name,
+                    prompt=prompt,
+                    original_response=response,
+                )
+                if sonnet_response:
+                    response = sonnet_response
 
             return response
 
