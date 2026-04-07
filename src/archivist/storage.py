@@ -19,6 +19,51 @@ logger = logging.getLogger(__name__)
 from ..common.url_utils import is_valid_url as _is_valid_url, sanitize_url as _sanitize_url
 
 
+def _is_valid_amount(amount: Optional[str]) -> bool:
+    """
+    Check if amount string is a valid funding amount (not a placeholder).
+
+    Returns False for:
+    - None, empty string
+    - "<UNKNOWN>", "None" (as string), "unknown", "undisclosed"
+    - Any placeholder/unknown indicator
+
+    Returns True for real amounts like "$50M", "100 million", etc.
+    """
+    if not amount:
+        return False
+
+    amount_lower = amount.lower().strip()
+
+    # List of placeholder values that indicate no real amount
+    placeholders = {
+        "<unknown>",
+        "unknown",
+        "none",
+        "null",
+        "undisclosed",
+        "not disclosed",
+        "n/a",
+        "na",
+        "tbd",
+        "confidential",
+        "",
+    }
+
+    if amount_lower in placeholders:
+        return False
+
+    # Check for partial matches (e.g., "amount undisclosed")
+    if any(p in amount_lower for p in ["unknown", "undisclosed", "not disclosed"]):
+        return False
+
+    # Valid amount should have a number
+    if not re.search(r'\d', amount):
+        return False
+
+    return True
+
+
 # FIX #20: Alert info returned from save_deal for post-commit sending
 @dataclass
 class LeadDealAlertInfo:
@@ -799,13 +844,14 @@ async def save_deal(
             existing_deal.date_source_count = 1
             existing_deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        # FIX (2026-01): Update amount if existing deal has no amount but new extraction does
+        # FIX (2026-01): Update amount if existing deal has no valid amount but new extraction does
         # This handles cases where first article (e.g., VC blog post) doesn't mention amount
         # but subsequent articles (e.g., press releases) do
-        if extraction.amount and not existing_deal.amount:
+        # FIX: Also update if existing amount is a placeholder like "<UNKNOWN>", "None", "undisclosed"
+        if _is_valid_amount(extraction.amount) and not _is_valid_amount(existing_deal.amount):
             logger.info(
                 f"Updating deal #{existing_deal.id} amount: {extraction.amount} "
-                f"(previously null) for {extraction.startup_name}"
+                f"(previously '{existing_deal.amount}') for {extraction.startup_name}"
             )
             existing_deal.amount = extraction.amount
             existing_deal.amount_usd = normalize_amount(extraction.amount)
