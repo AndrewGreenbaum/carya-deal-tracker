@@ -93,6 +93,122 @@ LINKEDIN_PROFILE_PATTERN = r"https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]{3
 # LinkedIn company page URL pattern (FIX #9: require 2+ char slug)
 LINKEDIN_COMPANY_PATTERN = r"https?://(?:www\.)?linkedin\.com/company/[a-zA-Z0-9_-]{2,}"
 
+
+def _extract_name_from_linkedin_title(title: str) -> Optional[str]:
+    """
+    Extract person's name from LinkedIn search result title.
+
+    Handles various LinkedIn title formats:
+    - "John Smith - CEO at Company | LinkedIn"
+    - "John Smith | CEO - Company"
+    - "John Smith, CEO at Company"
+    - "John Smith • CEO at Company"
+    - "John Smith – CEO at Company" (em dash)
+    - "John Smith: Founder & CEO"
+
+    Returns the name or None if parsing fails.
+    """
+    if not title:
+        return None
+
+    # Remove common suffixes first
+    title = re.sub(r'\s*\|\s*LinkedIn\s*$', '', title, flags=re.IGNORECASE)
+    title = re.sub(r'\s*-\s*LinkedIn\s*$', '', title, flags=re.IGNORECASE)
+
+    # Try multiple delimiter patterns (in order of specificity)
+    # Pattern 1: Name before common delimiters (-, |, •, –, —, :, ,)
+    delimiters = [' - ', ' | ', ' • ', ' – ', ' — ', ': ', ', ']
+    for delim in delimiters:
+        if delim in title:
+            name_part = title.split(delim)[0].strip()
+            # Validate it looks like a name (2+ words, not too long)
+            if name_part and len(name_part.split()) >= 2 and len(name_part) < 50:
+                # Reject if it looks like a title/role, not a name
+                role_indicators = ['ceo', 'cto', 'founder', 'president', 'director', 'head of', 'vp ']
+                if not any(ind in name_part.lower() for ind in role_indicators):
+                    return name_part
+
+    # Pattern 2: Fallback - just take first two words if they look like a name
+    words = title.split()
+    if len(words) >= 2:
+        potential_name = f"{words[0]} {words[1]}"
+        # Basic validation: both parts should be capitalized and reasonable length
+        if (words[0][0].isupper() and words[1][0].isupper() and
+            len(words[0]) >= 2 and len(words[1]) >= 2 and
+            len(potential_name) < 40):
+            # Reject if either word looks like a role/generic term, not a name
+            generic_words = {
+                'ceo', 'cto', 'cfo', 'coo', 'founder', 'founders', 'cofounder', 'president',
+                'director', 'manager', 'engineer', 'developer', 'designer',
+                'profile', 'page', 'company', 'linkedin', 'view', 'about',
+                'head', 'chief', 'senior', 'junior', 'lead', 'principal',
+            }
+            if (words[0].lower() not in generic_words and
+                words[1].lower() not in generic_words):
+                return potential_name
+
+    return None
+
+
+def _extract_name_from_linkedin_slug(linkedin_url: str) -> Optional[str]:
+    """
+    Extract person's name from LinkedIn URL slug as fallback.
+
+    Examples:
+    - "linkedin.com/in/john-smith" → "John Smith"
+    - "linkedin.com/in/sarah-chen-ceo" → "Sarah Chen"
+    - "linkedin.com/in/john-q-smith" → "John Smith" (skips middle initial)
+    - "linkedin.com/in/jsmith123" → None (not a parseable name)
+
+    Returns the name or None if parsing fails.
+    """
+    if not linkedin_url:
+        return None
+
+    # Extract the slug from URL
+    # FIX: Anchor to domain boundary to prevent matching "notlinkedin.com"
+    match = re.search(r'(?:^|://(?:www\.)?)linkedin\.com/in/([a-zA-Z0-9_-]+)', linkedin_url.lower())
+    if not match:
+        return None
+
+    slug = match.group(1)
+
+    # Split by hyphens
+    parts = slug.split('-')
+
+    # Filter out common suffixes that aren't name parts
+    # Note: Single letters (a, b, c, q, etc.) are filtered as they're usually:
+    # - Middle initials (we skip these for simplicity)
+    # - Duplicate disambiguation (john-smith-a vs john-smith-b)
+    non_name_parts = {
+        'ceo', 'cto', 'cfo', 'coo', 'founder', 'cofounder', 'president',
+        'md', 'mba', 'phd', 'dr', 'prof', 'jr', 'sr', 'iii', 'ii',
+        '1', '2', '3', '123', '01', '02',
+    }
+    # Filter: not in non_name_parts, not a digit, and either 2+ chars OR keep single letters initially
+    name_parts = []
+    for p in parts:
+        if not p or p in non_name_parts or p.isdigit():
+            continue
+        # Single letters are likely middle initials or suffixes - skip them
+        if len(p) == 1:
+            continue
+        name_parts.append(p)
+
+    # Need at least 2 parts for first + last name
+    if len(name_parts) < 2:
+        return None
+
+    # Take first two parts as first and last name
+    first_name = name_parts[0].capitalize()
+    last_name = name_parts[1].capitalize()
+
+    # Basic validation
+    if len(first_name) < 2 or len(last_name) < 2:
+        return None
+
+    return f"{first_name} {last_name}"
+
 # Skip these domains (not startup company sites)
 SKIP_DOMAINS = {
     # News/Media
@@ -510,7 +626,14 @@ class BraveEnrichmentClient:
         return None
 
     async def find_ceo_linkedin(self, company_name: str) -> tuple[Optional[str], Optional[str]]:
-        """Find CEO/Founder LinkedIn with startup context (legacy method)."""
+        """
+        Find CEO/Founder LinkedIn with startup context.
+
+        IMPROVED (Jan 2026):
+        1. Robust name parsing from LinkedIn title (handles -, |, •, –, etc.)
+        2. Fallback to URL slug extraction (/in/john-smith → "John Smith")
+        3. Multiple search strategies for better coverage
+        """
         if not company_name or company_name.lower() in ("<unknown>", "unknown", "n/a"):
             return (None, None)
 
@@ -531,13 +654,70 @@ class BraveEnrichmentClient:
 
             linkedin_url = self._extract_linkedin_url(url)
             if linkedin_url:
-                name_match = re.match(r"^([^-|]+)", title)
-                name = name_match.group(1).strip() if name_match else None
+                # IMPROVED: Try robust title parsing first
+                name = _extract_name_from_linkedin_title(title)
+
+                # FALLBACK: Try extracting from URL slug if title parsing fails
+                if not name:
+                    name = _extract_name_from_linkedin_slug(linkedin_url)
+                    if name:
+                        logger.debug(f"Extracted name from URL slug: {name} ({linkedin_url})")
+
                 return (name, linkedin_url)
 
             linkedin_url = self._extract_linkedin_url(description)
             if linkedin_url:
-                return (None, linkedin_url)
+                # Try to extract name from URL slug even for description URLs
+                name = _extract_name_from_linkedin_slug(linkedin_url)
+                return (name, linkedin_url)
+
+        return (None, None)
+
+    async def find_ceo_via_web_search(self, company_name: str) -> tuple[Optional[str], Optional[str]]:
+        """
+        Secondary search: Find CEO/founder via general web search.
+
+        When LinkedIn-specific search fails, try a broader web search
+        that may surface LinkedIn URLs in news articles, company pages, etc.
+
+        Returns: (ceo_name, linkedin_url) or (None, None)
+        """
+        if not company_name or company_name.lower() in ("<unknown>", "unknown", "n/a"):
+            return (None, None)
+
+        # Broader web search (not site-restricted to LinkedIn)
+        query = f'"{company_name}" CEO founder linkedin'
+        results = await self._search(query, count=10)
+
+        company_lower = company_name.lower()
+
+        for result in results:
+            url = result.get("url", "")
+            title = result.get("title", "")
+            description = result.get("description", "")
+            result_text = f"{title} {description}".lower()
+
+            # Must mention the company
+            if company_lower not in result_text and company_lower.split()[0] not in result_text:
+                continue
+
+            # Look for LinkedIn URLs in the description (often cited in news articles)
+            linkedin_url = self._extract_linkedin_url(description)
+            if linkedin_url:
+                name = _extract_name_from_linkedin_slug(linkedin_url)
+                if name:
+                    logger.info(f"Found CEO via web search for {company_name}: {name}")
+                    return (name, linkedin_url)
+
+            # Check if the URL itself is a LinkedIn profile
+            linkedin_url = self._extract_linkedin_url(url)
+            if linkedin_url:
+                name = _extract_name_from_linkedin_title(title)
+                if not name:
+                    name = _extract_name_from_linkedin_slug(linkedin_url)
+                if name:
+                    logger.info(f"Found CEO via web search for {company_name}: {name}")
+                    return (name, linkedin_url)
 
         return (None, None)
 
@@ -622,7 +802,18 @@ class BraveEnrichmentClient:
         if (not context.founders or founders_all_missing_linkedin) and not result.ceo_linkedin:
             reason = "No founders extracted" if not context.founders else "All founders missing LinkedIn"
             logger.info(f"{reason} for {context.company_name}, trying CEO fallback search")
+
+            # Try primary LinkedIn search first
             ceo_name, linkedin_url = await self.find_ceo_linkedin(context.company_name)
+
+            # IMPROVED (Jan 2026): If primary fails, try secondary web search
+            if not linkedin_url or not ceo_name:
+                logger.info(f"Primary CEO search failed for {context.company_name}, trying secondary web search")
+                await asyncio.sleep(self.rate_limit_delay)
+                ceo_name_web, linkedin_url_web = await self.find_ceo_via_web_search(context.company_name)
+                if linkedin_url_web and ceo_name_web:
+                    ceo_name, linkedin_url = ceo_name_web, linkedin_url_web
+
             if linkedin_url and ceo_name:
                 # Validate CEO LinkedIn
                 validation = await validate_founder_linkedin(
@@ -642,6 +833,14 @@ class BraveEnrichmentClient:
         # Original fallback: if still no LinkedIn found after processing founders
         elif not result.ceo_linkedin:
             ceo_name, linkedin_url = await self.find_ceo_linkedin(context.company_name)
+
+            # IMPROVED (Jan 2026): Secondary web search as fallback
+            if not linkedin_url or not ceo_name:
+                await asyncio.sleep(self.rate_limit_delay)
+                ceo_name_web, linkedin_url_web = await self.find_ceo_via_web_search(context.company_name)
+                if linkedin_url_web and ceo_name_web:
+                    ceo_name, linkedin_url = ceo_name_web, linkedin_url_web
+
             if linkedin_url and ceo_name:
                 # Validate CEO LinkedIn
                 validation = await validate_founder_linkedin(
