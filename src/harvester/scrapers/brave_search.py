@@ -653,7 +653,7 @@ class BraveSearchScraper:
 
         return results
 
-    # Funds with disabled/weak website scrapers that need web search for coverage
+    # Funds with disabled/weak website scrapers - covered by partner queries instead
     EXTERNAL_ONLY_FUNDS = {"benchmark", "thrive", "first_round", "khosla", "founders_fund", "gv", "greylock"}
 
     async def search_partner_names_parallel(
@@ -665,9 +665,12 @@ class BraveSearchScraper:
 
         OPTIMIZED:
         - Uses batch queries with 3x concurrency
-        - External-only funds use BOTH News AND Web APIs
-        - Other funds use News API only (have working website scrapers)
+        - News API only (Web API added marginal value for funding news)
         - Caches results for 12 hours
+
+        COST OPTIMIZATION (Jan 2026): Removed Web API queries for external-only
+        funds. Funding announcements are news events covered by News API.
+        Web API returned ~80% duplicates. Savings: ~$9.50/month.
         """
         # Build all queries upfront
         queries: List[Tuple[str, str, int, str, bool]] = []
@@ -675,13 +678,9 @@ class BraveSearchScraper:
 
         for fund_slug, partner_queries in PARTNER_QUERIES.items():
             for query in partner_queries:
-                # Always search news API
+                # News API only - funding announcements are news events
                 queries.append((query, "news", 25, freshness, True))
                 query_to_fund[query] = fund_slug
-
-                # External-only funds also get web search for max coverage
-                if fund_slug in self.EXTERNAL_ONLY_FUNDS:
-                    queries.append((query, "web", 25, freshness, True))
 
         # Execute in parallel with caching
         client = get_brave_client()
