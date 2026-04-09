@@ -502,15 +502,22 @@ async def find_duplicate_deal(
     """
     Check if a similar deal already exists.
 
-    Match criteria (FOUR-TIER approach, executed in this order):
+    Match criteria (FIVE-TIER approach, executed in this order):
 
-    TIER 3 - Amount Match (FIRST - catches same deal with different round type):
+    TIER 4 - Prefix Match (FIRST - catches name variations like MEQ Probe/MEQ Solutions):
+    - Company names share same first 3 characters after normalization
+    - EXACT amount match (within 5%)
+    - EXACT date match
+    - SAME round type
+    - High confidence: all facts match except name suffix
+
+    TIER 3 - Amount Match (catches same deal with different round type):
     - Company names match (fuzzy)
     - Same normalized amount (within 10% - tighter for cross-round matching)
     - Date within 30 days (narrower window for cross-round)
     - ANY round type (LLM often extracts "series_a" vs "growth" for same deal)
 
-    TIER 2 - Same-Day Match (SECOND - catches same-day duplicates from multiple sources):
+    TIER 2 - Same-Day Match (catches same-day duplicates from multiple sources):
     - Uses TARGETED SQL query (no LIMIT) to prevent missing duplicates
     - Company names match exactly (case-insensitive) OR normalized fuzzy match
     - Same announced date (exact match)
@@ -531,6 +538,7 @@ async def find_duplicate_deal(
     Returns existing Deal if found, None otherwise.
 
     OPTIMIZED:
+    - TIER 4 uses exact amount+date+round for prefix name matching
     - TIER 3 uses targeted amount_usd filter for efficient matching
     - TIER 2 uses targeted date+company query (FIX: no LIMIT, prevents missed dupes)
     - TIER 2.5 uses round_type + date window for amount-agnostic matching
@@ -544,7 +552,49 @@ async def find_duplicate_deal(
     normalized_company = normalize_company_name(company_name)
 
     # =========================================================================
-    # TIER 3 FIRST: Targeted amount-based query (most efficient for cross-round)
+    # TIER 4 (NEW): Exact match on amount+date+round with company prefix match
+    # Catches name variations like "MEQ Probe" vs "MEQ Solutions" that share
+    # the same prefix but have different suffixes not in our known list.
+    # Very high confidence: exact amount + exact date + same round = same deal.
+    # =========================================================================
+    if normalized_amount and announced_date:
+        # Very tight tolerance (5%) for this tier since we're relaxing name match
+        amount_low = int(normalized_amount * 0.95)
+        amount_high = int(normalized_amount * 1.05)
+
+        tier4_stmt = (
+            select(Deal, PortfolioCompany)
+            .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
+            .where(Deal.amount_usd.between(amount_low, amount_high))
+            .where(Deal.announced_date == announced_date)
+            .where(Deal.round_type == round_type)
+        )
+        tier4_result = await session.execute(tier4_stmt)
+        tier4_candidates = tier4_result.all()
+
+        for deal, company in tier4_candidates:
+            existing_normalized = normalize_company_name(company.name)
+            # Check if first 3 characters match (catches "meqprobe" vs "meqsolutions")
+            if len(normalized_company) >= 3 and len(existing_normalized) >= 3:
+                if normalized_company[:3] == existing_normalized[:3]:
+                    logger.warning(
+                        f"Found duplicate (TIER 4 prefix+exact): '{company_name}' {round_type} "
+                        f"matches '{company.name}' (deal #{deal.id}, amount={deal.amount}, "
+                        f"date={deal.announced_date}) - same prefix '{normalized_company[:3]}'"
+                    )
+                    return deal
+
+    # =========================================================================
+    # TIER 3.5 (NEW): Website match for same round+date range
+    # If incoming deal has a website that matches an existing company's website,
+    # they're the same company regardless of name variations.
+    # =========================================================================
+    # Note: This requires the incoming extraction to have a website, which
+    # Crunchbase CSV import provides. We'd need to add website parameter to
+    # find_duplicate_deal to use this tier.
+
+    # =========================================================================
+    # TIER 3: Targeted amount-based query (most efficient for cross-round)
     # Uses amount_usd column for SQL filtering before Python name matching
     # =========================================================================
     if normalized_amount:
