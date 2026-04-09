@@ -44,6 +44,10 @@ class CrunchbaseDealInput(BaseModel):
     participating_investors: List[str] = Field(default_factory=list)
     source_url: Optional[str] = None
     source: str = "crunchbase_pro"
+    # New fields for AI classification and enrichment
+    description: Optional[str] = None  # Company description
+    industries: List[str] = Field(default_factory=list)  # List of industries
+    website: Optional[str] = None  # Company website URL
 
 
 class CrunchbaseBatchInput(BaseModel):
@@ -131,6 +135,149 @@ def _find_tracked_fund_lead(lead_investors: List[InvestorMention]) -> Tuple[bool
     return False, None
 
 
+def _classify_ai_from_industries(
+    industries: List[str],
+    description: Optional[str] = None,
+) -> Tuple[bool, bool, EnterpriseCategory]:
+    """
+    Classify a company as AI/Enterprise AI based on industries and description.
+
+    Returns:
+        (is_ai_deal, is_enterprise_ai, enterprise_category)
+    """
+    # Normalize industries to lowercase for matching
+    industries_lower = [ind.lower().strip() for ind in industries]
+    desc_lower = (description or "").lower()
+
+    # AI indicators in industries
+    AI_INDUSTRY_KEYWORDS = {
+        "artificial intelligence", "ai", "machine learning", "ml",
+        "generative ai", "deep learning", "natural language processing",
+        "nlp", "computer vision", "robotics", "automation",
+    }
+
+    # Enterprise verticals
+    ENTERPRISE_INDUSTRIES = {
+        "enterprise software", "saas", "developer tools", "developer platform",
+        "analytics", "data analytics", "business intelligence", "devops",
+        "cloud computing", "infrastructure", "platform as a service",
+        "software as a service", "information technology", "it services",
+    }
+
+    # Security verticals
+    SECURITY_INDUSTRIES = {
+        "cyber security", "cybersecurity", "network security", "security",
+        "information security", "identity management", "fraud detection",
+    }
+
+    # Vertical SaaS industries (Healthcare, Finance, Legal, HR B2B)
+    VERTICAL_SAAS_INDUSTRIES = {
+        "health care", "healthcare", "medical", "health tech", "healthtech",
+        "life science", "biotechnology", "therapeutics", "pharmaceuticals",
+        "fintech", "financial services", "banking", "payments", "insurance",
+        "insurtech", "regtech", "wealthtech",
+        "legal tech", "legaltech", "compliance",
+        "hr tech", "hrtech", "human resources", "recruiting", "workforce",
+    }
+
+    # Data/Infrastructure industries
+    DATA_INDUSTRIES = {
+        "data storage", "database", "data management", "data infrastructure",
+        "big data", "data science", "data engineering",
+    }
+
+    # Consumer/Non-enterprise (exclude from enterprise_ai)
+    CONSUMER_INDUSTRIES = {
+        "consumer", "e-commerce", "ecommerce", "retail", "marketplace",
+        "social media", "social network", "dating", "gaming", "games",
+        "entertainment", "media", "music", "video", "streaming",
+        "food delivery", "food tech", "consumer electronics",
+        "travel", "hospitality", "real estate",
+    }
+
+    # Crypto/Blockchain (not AI)
+    CRYPTO_INDUSTRIES = {
+        "cryptocurrency", "crypto", "blockchain", "web3", "defi",
+        "nft", "decentralized", "bitcoin", "ethereum",
+    }
+
+    # Check for crypto (not AI)
+    is_crypto = any(
+        any(kw in ind for kw in CRYPTO_INDUSTRIES)
+        for ind in industries_lower
+    )
+    if is_crypto:
+        return False, False, EnterpriseCategory.NOT_AI
+
+    # Check if it's an AI company
+    is_ai = any(
+        any(kw in ind for kw in AI_INDUSTRY_KEYWORDS)
+        for ind in industries_lower
+    )
+
+    # Also check description for AI mentions
+    if not is_ai and desc_lower:
+        ai_desc_keywords = ["ai-", "ai ", " ai", "artificial intelligence", "machine learning", "ml-powered", "llm"]
+        is_ai = any(kw in desc_lower for kw in ai_desc_keywords)
+
+    if not is_ai:
+        return False, False, EnterpriseCategory.NOT_AI
+
+    # It's an AI company - now determine if it's enterprise
+    is_consumer = any(
+        any(kw in ind for kw in CONSUMER_INDUSTRIES)
+        for ind in industries_lower
+    )
+
+    if is_consumer:
+        # Consumer AI - still AI but not enterprise
+        return True, False, EnterpriseCategory.NOT_AI
+
+    # Check enterprise categories in priority order
+    is_security = any(
+        any(kw in ind for kw in SECURITY_INDUSTRIES)
+        for ind in industries_lower
+    )
+    if is_security:
+        return True, True, EnterpriseCategory.SECURITY
+
+    is_vertical_saas = any(
+        any(kw in ind for kw in VERTICAL_SAAS_INDUSTRIES)
+        for ind in industries_lower
+    )
+    if is_vertical_saas:
+        return True, True, EnterpriseCategory.VERTICAL_SAAS
+
+    is_data = any(
+        any(kw in ind for kw in DATA_INDUSTRIES)
+        for ind in industries_lower
+    )
+    if is_data:
+        return True, True, EnterpriseCategory.DATA_INTELLIGENCE
+
+    is_enterprise = any(
+        any(kw in ind for kw in ENTERPRISE_INDUSTRIES)
+        for ind in industries_lower
+    )
+    if is_enterprise:
+        return True, True, EnterpriseCategory.INFRASTRUCTURE
+
+    # Check description for enterprise signals
+    if desc_lower:
+        enterprise_signals = ["enterprise", "b2b", "business", "platform", "saas", "developer"]
+        if any(sig in desc_lower for sig in enterprise_signals):
+            return True, True, EnterpriseCategory.INFRASTRUCTURE
+
+    # Default: AI but category unclear - mark as infrastructure (most common)
+    # If it has developer/software industries, it's likely enterprise
+    has_software = any("software" in ind or "developer" in ind for ind in industries_lower)
+    if has_software:
+        return True, True, EnterpriseCategory.INFRASTRUCTURE
+
+    # AI company but not clearly enterprise
+    return True, False, EnterpriseCategory.NOT_AI
+
+
 # ----- Main Conversion Function -----
 
 def crunchbase_deal_to_extraction(deal: CrunchbaseDealInput) -> DealExtraction:
@@ -154,10 +301,16 @@ def crunchbase_deal_to_extraction(deal: CrunchbaseDealInput) -> DealExtraction:
     # Check if any tracked fund is a lead
     tracked_fund_is_lead, tracked_fund_name = _find_tracked_fund_lead(lead_investors)
 
+    # Classify AI/Enterprise AI based on industries and description
+    is_ai_deal, is_enterprise_ai, enterprise_category = _classify_ai_from_industries(
+        industries=deal.industries,
+        description=deal.description,
+    )
+
     return DealExtraction(
         startup_name=deal.startup_name,
-        startup_description=None,
-        company_website=None,
+        startup_description=deal.description,
+        company_website=deal.website,
         company_linkedin=None,
         founders=[],
         round_label=_map_round_type(deal.round_type),
@@ -173,10 +326,10 @@ def crunchbase_deal_to_extraction(deal: CrunchbaseDealInput) -> DealExtraction:
         reasoning=ChainOfThought(
             final_reasoning="Structured data from Crunchbase Pro (no LLM extraction needed)"
         ),
-        # Conservative AI classification - will be enriched later
-        enterprise_category=EnterpriseCategory.NOT_AI,
-        is_enterprise_ai=False,
-        is_ai_deal=False,
+        # AI classification from industries
+        enterprise_category=enterprise_category,
+        is_enterprise_ai=is_enterprise_ai,
+        is_ai_deal=is_ai_deal,
         # Verification
         verification_snippet=f"Lead investors: {', '.join(deal.lead_investors)}" if deal.lead_investors else None,
         lead_evidence_weak=False,  # Crunchbase data is reliable
