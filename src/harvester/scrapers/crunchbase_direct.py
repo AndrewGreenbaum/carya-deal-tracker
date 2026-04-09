@@ -240,6 +240,8 @@ async def process_crunchbase_deals(
                     source_fund_slug="crunchbase_pro",
                     article_published_date=_parse_date(deal_input.announced_date),
                     scan_job_id=scan_job_id,
+                    # Crunchbase amounts are from official filings - high quality
+                    amount_source="crunchbase",
                 )
 
                 if saved_deal is None:

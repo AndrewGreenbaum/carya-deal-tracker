@@ -444,6 +444,8 @@ class SECEdgarScraper:
     ) -> NormalizedArticle:
         """
         Convert Form D filing to NormalizedArticle for extraction pipeline.
+
+        SEC amounts are preserved in sec_amount_usd for priority over LLM extraction.
         """
         # Build text content for extraction
         text_parts = [
@@ -472,6 +474,16 @@ class SECEdgarScraper:
         if filing.state_of_incorporation == "DE":
             tags.append("delaware")
 
+        # Parse SEC amount to integer for priority storage
+        # SEC amounts are official legal filings - highest authority source
+        sec_amount_usd = None
+        if filing.amount_raised:
+            try:
+                # Remove $ and commas, convert to int
+                sec_amount_usd = int(filing.amount_raised.replace("$", "").replace(",", ""))
+            except (ValueError, AttributeError):
+                logger.warning(f"Could not parse SEC amount: {filing.amount_raised}")
+
         return NormalizedArticle(
             url=filing.filing_url,
             title=f"SEC Form D: {filing.company_name} - {filing.amount_raised or 'Amount TBD'}",
@@ -481,6 +493,8 @@ class SECEdgarScraper:
             tags=tags,
             fund_slug=fund_slug or "",
             fetched_at=datetime.now(timezone.utc),
+            sec_amount_usd=sec_amount_usd,
+            amount_source="sec_form_d" if sec_amount_usd else None,
         )
 
     async def scrape_all(

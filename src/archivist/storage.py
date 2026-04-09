@@ -178,6 +178,30 @@ def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
             return int(num)
 
 
+def format_sec_amount(sec_amount_usd: int) -> str:
+    """
+    Format SEC Form D amount as human-readable string.
+
+    SEC amounts are exact legal figures that need clean formatting.
+    Strips trailing zeros from decimal portion before adding suffix.
+
+    Examples:
+        47500000 → "$47.5M"
+        50000000 → "$50M"
+        1000000000 → "$1B"
+        1500000000 → "$1.5B"
+        500000 → "$500,000"
+    """
+    if sec_amount_usd >= 1_000_000_000:
+        num_str = f"{sec_amount_usd / 1_000_000_000:.2f}".rstrip('0').rstrip('.')
+        return f"${num_str}B"
+    elif sec_amount_usd >= 1_000_000:
+        num_str = f"{sec_amount_usd / 1_000_000:.2f}".rstrip('0').rstrip('.')
+        return f"${num_str}M"
+    else:
+        return f"${sec_amount_usd:,}"
+
+
 def normalize_company_name(name: str) -> str:
     """
     Normalize company name for fuzzy matching.
@@ -725,6 +749,8 @@ async def save_deal(
     source_fund_slug: Optional[str] = None,
     article_published_date: Optional[date] = None,
     scan_job_id: Optional[int] = None,
+    sec_amount_usd: Optional[int] = None,
+    amount_source: Optional[str] = None,
 ) -> Tuple[Optional[Deal], Optional[LeadDealAlertInfo]]:
     """
     Save an extracted deal to the database.
@@ -734,6 +760,11 @@ async def save_deal(
     - Deal record
     - DealInvestor records for all investors
     - Article record linked to the deal
+
+    Args:
+        sec_amount_usd: Official SEC Form D amount (if from SEC EDGAR)
+        amount_source: Source of amount ("sec_form_d" | "article" | "crunchbase")
+                      SEC amounts are prioritized over LLM-extracted amounts.
 
     Returns:
         Tuple of (Deal, LeadDealAlertInfo) where:
@@ -848,13 +879,37 @@ async def save_deal(
         # This handles cases where first article (e.g., VC blog post) doesn't mention amount
         # but subsequent articles (e.g., press releases) do
         # FIX: Also update if existing amount is a placeholder like "<UNKNOWN>", "None", "undisclosed"
-        if _is_valid_amount(extraction.amount) and not _is_valid_amount(existing_deal.amount):
+        # FIX (2026-01): SEC Form D amounts always override non-SEC amounts (higher authority)
+        should_update_amount = False
+        new_amount = extraction.amount
+        new_amount_usd = normalize_amount(extraction.amount)
+        new_amount_source = amount_source or "article"
+
+        # SEC Form D amount provided - highest priority
+        # OPTIMIZATION: Check if we need to update BEFORE formatting
+        if sec_amount_usd and amount_source == "sec_form_d":
+            # SEC overrides non-SEC amounts (regardless of existing amount validity)
+            if existing_deal.amount_source != "sec_form_d":
+                new_amount = format_sec_amount(sec_amount_usd)
+                new_amount_usd = sec_amount_usd
+                new_amount_source = "sec_form_d"
+                should_update_amount = True
+                logger.info(
+                    f"SEC amount overriding deal #{existing_deal.id}: {new_amount} (${new_amount_usd:,}) "
+                    f"replaces '{existing_deal.amount}' (source: {existing_deal.amount_source or 'unknown'})"
+                )
+        # Non-SEC: only update if existing is invalid/placeholder
+        elif _is_valid_amount(new_amount) and not _is_valid_amount(existing_deal.amount):
+            should_update_amount = True
             logger.info(
-                f"Updating deal #{existing_deal.id} amount: {extraction.amount} "
+                f"Updating deal #{existing_deal.id} amount: {new_amount} "
                 f"(previously '{existing_deal.amount}') for {extraction.startup_name}"
             )
-            existing_deal.amount = extraction.amount
-            existing_deal.amount_usd = normalize_amount(extraction.amount)
+
+        if should_update_amount:
+            existing_deal.amount = new_amount
+            existing_deal.amount_usd = new_amount_usd
+            existing_deal.amount_source = new_amount_source
             existing_deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # FIX: Use ON CONFLICT DO NOTHING to prevent race condition
@@ -899,14 +954,37 @@ async def save_deal(
 
     # announced_date was already determined above for duplicate check
 
+    # Determine best amount: SEC Form D > LLM extraction > none
+    # SEC amounts are official legal filings with exact values
+    # LLM extractions often round (e.g., "$47.5M" -> "$50M")
+    final_amount: Optional[str] = None
+    final_amount_usd: Optional[int] = None
+    final_amount_source: Optional[str] = None
+
+    if sec_amount_usd and amount_source == "sec_form_d":
+        # Use official SEC amount (highest priority)
+        final_amount = format_sec_amount(sec_amount_usd)
+        final_amount_usd = sec_amount_usd
+        final_amount_source = "sec_form_d"
+        logger.info(
+            f"Using SEC Form D amount: {final_amount} (${sec_amount_usd:,}) for {extraction.startup_name} "
+            f"(LLM extracted: {extraction.amount})"
+        )
+    else:
+        # Fall back to LLM extraction
+        final_amount = extraction.amount
+        final_amount_usd = normalize_amount(extraction.amount)
+        final_amount_source = amount_source or "article"
+
     # Create deal with enterprise AI classification
     # FIX: Set date_confidence based on extraction source
     # FIX: Populate amount_usd for numeric queries/sorting
     deal = Deal(
         company_id=company.id,
         round_type=extraction.round_label.value,
-        amount=extraction.amount,
-        amount_usd=normalize_amount(extraction.amount),  # FIX: Store normalized amount
+        amount=final_amount,
+        amount_usd=final_amount_usd,
+        amount_source=final_amount_source,
         valuation=extraction.valuation,
         announced_date=announced_date,
         date_confidence=date_confidence,  # FIX: Set based on source

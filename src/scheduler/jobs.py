@@ -786,6 +786,9 @@ async def process_external_articles(
                         source_fund_slug=article.fund_slug,
                         article_published_date=article.published_date,
                         scan_job_id=scan_job_id,
+                        # Pass SEC amount if available (from NormalizedArticle)
+                        sec_amount_usd=getattr(article, 'sec_amount_usd', None),
+                        amount_source=getattr(article, 'amount_source', None),
                     )
 
                 # Update stats thread-safely

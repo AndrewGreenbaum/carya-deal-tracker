@@ -41,6 +41,9 @@ class NormalizedArticle:
     tags: List[str] = field(default_factory=list)
     fund_slug: str = ""  # Which fund's feed this came from
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # SEC Form D official amount (if from SEC EDGAR)
+    sec_amount_usd: Optional[int] = None  # Official SEC amount in USD (e.g., 47500000)
+    amount_source: Optional[str] = None  # "sec_form_d" | "article" | "crunchbase"
 
 
 class BaseScraper(ABC):
