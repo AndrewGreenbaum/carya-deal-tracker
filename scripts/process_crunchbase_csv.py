@@ -156,6 +156,25 @@ def _parse_row(row: Dict[str, str]) -> Optional[Dict[str, Any]]:
         None
     )
 
+    # Get company description
+    description = (
+        row.get("Organization Description") or
+        ""
+    ).strip() or None
+
+    # Get industries (comma-separated list)
+    industries_raw = (
+        row.get("Organization Industries") or
+        ""
+    ).strip()
+    industries = [ind.strip() for ind in industries_raw.split(",") if ind.strip()] if industries_raw else []
+
+    # Get company website
+    website = (
+        row.get("Organization Website") or
+        ""
+    ).strip() or None
+
     # Parse date
     announced_date = _parse_date(date_str)
 
@@ -171,6 +190,10 @@ def _parse_row(row: Dict[str, str]) -> Optional[Dict[str, Any]]:
         "participating_investors": participating,
         "source_url": source_url,
         "source": "crunchbase_csv",
+        # New fields for AI classification
+        "description": description,
+        "industries": industries,
+        "website": website,
     }
 
 
@@ -234,20 +257,56 @@ def _normalize_round_type(funding_type: str) -> str:
 
 # ----- API Client -----
 
+BATCH_SIZE = 100  # Process deals in batches to avoid timeout
+
 async def send_to_backend(deals: List[Dict], dry_run: bool = False) -> Dict:
-    """POST deals to backend API."""
+    """POST deals to backend API in batches."""
     if dry_run:
         logger.info(f"DRY RUN: Would send {len(deals)} deals to backend")
         return {"dry_run": True, "deals_count": len(deals)}
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(
-            f"{BACKEND_API_URL}/scrapers/crunchbase-direct",
-            json={"deals": deals},
-            headers={"X-API-Key": API_KEY},
-        )
-        response.raise_for_status()
-        return response.json()
+    total_saved = 0
+    total_duplicate = 0
+    total_no_tracked = 0
+    total_errors = []
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        for i in range(0, len(deals), BATCH_SIZE):
+            batch = deals[i:i + BATCH_SIZE]
+            batch_num = i // BATCH_SIZE + 1
+            total_batches = (len(deals) + BATCH_SIZE - 1) // BATCH_SIZE
+
+            logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} deals)")
+
+            try:
+                response = await client.post(
+                    f"{BACKEND_API_URL}/scrapers/crunchbase-direct",
+                    json={"deals": batch},
+                    headers={"X-API-Key": API_KEY},
+                )
+                response.raise_for_status()
+                result = response.json()
+
+                total_saved += result.get("deals_saved", 0)
+                total_duplicate += result.get("deals_duplicate", 0)
+                total_no_tracked += result.get("deals_no_tracked_fund", 0)
+                if result.get("errors"):
+                    total_errors.extend(result["errors"])
+
+                logger.info(f"  Batch {batch_num}: {result.get('deals_saved', 0)} saved, "
+                           f"{result.get('deals_duplicate', 0)} dupe, "
+                           f"{result.get('deals_no_tracked_fund', 0)} no tracked")
+            except Exception as e:
+                logger.error(f"  Batch {batch_num} failed: {e}")
+                total_errors.append(str(e))
+
+    return {
+        "deals_received": len(deals),
+        "deals_saved": total_saved,
+        "deals_duplicate": total_duplicate,
+        "deals_no_tracked_fund": total_no_tracked,
+        "errors": total_errors,
+    }
 
 
 # ----- Main -----

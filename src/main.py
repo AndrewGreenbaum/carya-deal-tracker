@@ -2818,6 +2818,10 @@ class CrunchbaseDealInput(BaseModel):
     participating_investors: List[str] = Field(default_factory=list)
     source_url: Optional[str] = None
     source: str = "crunchbase_pro"
+    # New fields for AI classification and enrichment
+    description: Optional[str] = None
+    industries: List[str] = Field(default_factory=list)
+    website: Optional[str] = None
 
 
 class CrunchbaseBatchRequest(BaseModel):
@@ -2868,6 +2872,10 @@ async def ingest_crunchbase_deals_endpoint(
                 participating_investors=d.participating_investors,
                 source_url=d.source_url,
                 source=d.source,
+                # New fields for AI classification
+                description=d.description,
+                industries=d.industries,
+                website=d.website,
             )
             for d in request.deals
         ]
