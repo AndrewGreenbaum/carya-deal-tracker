@@ -77,8 +77,12 @@ FUND_SEARCH_NAMES = {
 
 # Exclusion terms to filter noise - enhanced for generic fund names
 # NOTE: Be careful not to exclude common startup terms (e.g., don't exclude "accelerate" for Accel)
+# FIXED 2026-01: GV exclusions were too aggressive, causing 0 leads. Relaxed to only exclude
+# direct NYSE ticker references and known false positives.
 EXCLUSION_TERMS = {
-    "gv": ["-NYSE", "-stock", "-ticker", "-dividend", "-\"Visionary Holdings\""],
+    # RELAXED: Only exclude direct ticker references, not general stock/dividend mentions
+    # Articles about startups sometimes mention stock options, public markets, etc.
+    "gv": ["-\"NYSE:GV\"", "-\"GV stock\"", "-\"Visionary Holdings\"", "-\"GV ticker\""],
     # FIXED: Removed "-wellness" - was too broad, excluded any article mentioning wellness sector
     "thrive": ["-\"Thrive Global\"", "-\"Thrive IT\"", "-\"Thrive Market\"", "-\"Thrive Wellness\""],
     "sequoia": ["-\"Sequoia National\"", "-HongShan", "-\"Peak XV\"", "-\"Sequoia India\"", "-\"Sequoia China\""],
@@ -212,51 +216,85 @@ PARTNER_QUERIES = {
         '"Brian Singerman" AND (startup OR investment OR funding OR venture)',
     ],
     # LOW COVERAGE - needs partner queries
-    # GV partners: https://gv.com/team
-    # GPs: M.G. Siegler, Crystal Huang, Terri Burns, Krishna Yeshwant, Frédérique Dame,
-    #      Brendan Bulik-Sullivan, Issi Rozen, Sangeen Zeb, David Krane, Tyson Clark
+    # FIXED 2026-01: Expanded GV queries - was getting 0 leads due to over-filtering
+    # GV partners: https://gv.com/team (44 partners total)
+    # Key GPs: David Krane, Krishna Yeshwant, M.G. Siegler, Crystal Huang, Terri Burns,
+    #          Frédérique Dame, Sangeen Zeb, Michael McBride (AI focus), Tyson Clark
     "gv": [
-        # Fund-level queries - be very specific to avoid NYSE:GV noise
+        # Fund-level queries - prefer "Google Ventures" (unambiguous) over "GV" (noisy)
         '"Google Ventures" AND (funding OR raises OR raised OR investment)',
-        '"Google Ventures" AND "Series A" AND startup',
-        '"Google Ventures" AND "Series B" AND startup',
-        '"Google Ventures" AND (leads OR led) AND funding',
-        'GV AND "venture capital" AND (funding OR investment OR startup)',
+        '"Google Ventures" AND (leads OR led) AND (funding OR round OR million)',
+        '"Google Ventures" AND "Series A" AND (startup OR million)',
+        '"Google Ventures" AND "Series B" AND (startup OR million)',
+        '"Google Ventures" AND "seed" AND (startup OR million)',
+        '"Google Ventures" AND (backs OR backed OR invests) AND startup',
+        # GV-specific queries (more restrictive to avoid NYSE noise)
         '"led by GV" AND (funding OR million OR startup)',
-        # GP partner queries
+        'GV AND "venture capital" AND (leads OR led) AND startup',
+        'GV AND Alphabet AND (funding OR investment OR startup)',
+        # Key GP partner queries - David Krane is most prominent
+        '"David Krane" AND (startup OR investment OR funding OR venture OR GV)',
+        '"David Krane" AND (leads OR led) AND (funding OR investment)',
+        # General Partners
         '"M.G. Siegler" AND (startup OR investment OR funding OR venture)',
-        '"Crystal Huang" AND GV AND (investment OR funding OR startup)',
-        '"Terri Burns" AND GV AND (investment OR funding OR startup)',
-        '"Krishna Yeshwant" AND GV AND (investment OR funding)',
-        '"Frédérique Dame" AND GV AND (investment OR funding)',
-        '"David Krane" AND GV AND (investment OR funding OR startup)',
-        '"Tyson Clark" AND GV AND (investment OR funding OR startup)',
-        '"Brendan Bulik-Sullivan" AND GV AND (investment OR funding)',
+        '"Crystal Huang" AND (startup OR investment OR funding OR venture OR GV)',
+        '"Terri Burns" AND (startup OR investment OR funding OR venture)',
+        '"Krishna Yeshwant" AND (startup OR investment OR funding OR GV)',
+        '"Frédérique Dame" AND (startup OR investment OR funding OR venture)',
+        '"Sangeen Zeb" AND (startup OR investment OR funding OR GV)',
+        '"Tyson Clark" AND (startup OR investment OR funding OR GV)',
+        # Michael McBride - AI focus (joined from GitLab)
+        '"Michael McBride" AND GV AND (investment OR funding OR AI OR startup)',
+        '"Michael McBride" AND "Google Ventures" AND (investment OR funding)',
+        # Other partners
+        '"Brendan Bulik-Sullivan" AND (startup OR investment OR funding OR GV)',
+        '"John Lyman" AND GV AND (investment OR funding)',
+        '"Issi Rozen" AND GV AND (investment OR funding OR startup)',
     ],
     # LOW COVERAGE - needs partner queries
+    # FIXED 2026-01: Expanded Greylock queries - was getting only 1 lead
     # Greylock partners: https://greylock.com/team
     # Partners: Asheem Chandna, Jerry Chen, Mor Chen, Mike Duboe, Reid Hoffman, Christine Kim,
-    #           Sophia Luo, Saam Motamedi, Corinne Riley, Seth Rosenberg, Shreya Shekhar
-    # Venture Partners: Josh Elman, David Thacker, Mustafa Suleyman
+    #           Sophia Luo, Saam Motamedi, Corinne Riley, Jason Risch, Seth Rosenberg, Shreya Shekhar
+    # Venture Partners: Josh Elman, John Lilly, Josh McFarland, James Slavet, Mustafa Suleyman, David Thacker
+    # Advisory: Bill Helman, David Sze
+    # High-profile EIRs: DJ Patil, Jeff Weiner
     "greylock": [
-        # Fund-level queries
+        # Fund-level queries (expanded)
         '"Greylock Partners" AND (funding OR raises OR raised OR investment)',
-        '"Greylock" AND "Series A" AND (startup OR funding)',
-        '"Greylock" AND "Series B" AND (startup OR funding)',
+        '"Greylock Partners" AND (leads OR led) AND (funding OR round OR million)',
+        '"Greylock" AND "Series A" AND (startup OR funding OR million)',
+        '"Greylock" AND "Series B" AND (startup OR funding OR million)',
+        '"Greylock" AND "seed" AND (startup OR funding OR million)',
         '"Greylock" AND (leads OR led) AND funding',
         '"Greylock" AND (backs OR backed OR invests) AND startup',
         '"led by Greylock" AND (funding OR million OR startup)',
-        # Current partner queries
+        # Reid Hoffman - most prominent partner
         '"Reid Hoffman" AND (startup OR investment OR funding OR venture)',
+        '"Reid Hoffman" AND (leads OR led) AND (funding OR investment)',
+        # Current Partners
         '"Asheem Chandna" AND (startup OR investment OR funding OR venture)',
-        '"Jerry Chen" AND Greylock AND (investment OR funding OR startup)',
+        '"Jerry Chen" AND (startup OR investment OR funding OR venture OR Greylock)',
+        '"Mor Chen" AND (startup OR investment OR funding OR Greylock)',
         '"Saam Motamedi" AND (startup OR investment OR funding OR venture)',
         '"Seth Rosenberg" AND (startup OR investment OR funding OR venture)',
         '"Mike Duboe" AND (startup OR investment OR funding OR venture)',
-        '"David Sze" AND (startup OR investment OR funding OR Greylock)',
+        '"Corinne Riley" AND (startup OR investment OR funding OR Greylock)',
+        '"Christine Kim" AND (startup OR investment OR funding OR Greylock)',
+        '"Sophia Luo" AND (startup OR investment OR funding OR Greylock)',
+        '"Jason Risch" AND (startup OR investment OR funding OR Greylock)',
+        '"Shreya Shekhar" AND (startup OR investment OR funding OR Greylock)',
+        # Venture Partners
         '"Josh Elman" AND (startup OR investment OR funding OR venture)',
-        '"Corinne Riley" AND Greylock AND (investment OR funding)',
-        '"Christine Kim" AND Greylock AND (investment OR funding)',
+        '"Mustafa Suleyman" AND (startup OR investment OR funding OR AI)',
+        '"John Lilly" AND (startup OR investment OR funding OR Greylock)',
+        '"David Thacker" AND (startup OR investment OR funding OR Greylock)',
+        '"Josh McFarland" AND (startup OR investment OR funding OR Greylock)',
+        # Advisory Partners
+        '"David Sze" AND (startup OR investment OR funding OR Greylock)',
+        # High-profile EIRs (often announce investments)
+        '"DJ Patil" AND (startup OR investment OR funding OR venture)',
+        '"Jeff Weiner" AND Greylock AND (investment OR funding OR startup)',
     ],
 }
 
