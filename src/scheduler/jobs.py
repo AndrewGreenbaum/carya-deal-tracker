@@ -214,7 +214,11 @@ async def enrich_new_deals(limit: int = 25):
         import json
 
         # First, fetch all deals needing enrichment (read-only query)
+        # FIX: Now also enriches deals that have website but missing LinkedIn
+        # Priority: 1) No website, 2) Has founders but no LinkedIn, 3) No founders (discover CEO)
         async with get_session() as db:
+            from sqlalchemy import or_, and_, not_, text
+
             query = (
                 select(Deal)
                 .options(
@@ -223,7 +227,18 @@ async def enrich_new_deals(limit: int = 25):
                 )
                 .join(Deal.company)
                 .where(
-                    (PortfolioCompany.website.is_(None)) | (PortfolioCompany.website == "")
+                    or_(
+                        # Original: deals without website
+                        (PortfolioCompany.website.is_(None)) | (PortfolioCompany.website == ""),
+                        # NEW: deals with founders but no LinkedIn URL (text comparison)
+                        and_(
+                            Deal.founders_json.isnot(None),
+                            Deal.founders_json != "[]",
+                            not_(Deal.founders_json.like('%linkedin.com%'))
+                        ),
+                        # NEW: deals with no founders at all (need to discover CEO)
+                        or_(Deal.founders_json.is_(None), Deal.founders_json == "[]"),
+                    )
                 )
                 .order_by(Deal.created_at.desc())
                 .limit(limit)

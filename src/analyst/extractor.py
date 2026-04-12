@@ -144,30 +144,33 @@ BAD snippets (too short, missing context):
 - "Sequoia invested" (no lead language)
 - "the round" (meaningless)
 
-FOUNDERS (EXTRACT ALL MENTIONED - CRITICAL FOR DATA QUALITY)
-Look for these patterns to identify founders:
-- "founded by [NAME]", "co-founded by", "founder [NAME]"
-- "[NAME], CEO and founder", "[NAME], who founded"
-- "founded in [YEAR] by [NAME]"
-- Company bios: "[NAME] is the CEO/CTO/founder of..."
+FOUNDER/CEO (EXTRACT ONLY THE TOP PERSON - ONE ENTRY MAX)
+Look for the CEO or lead founder. Priority order:
+1. CEO (highest priority)
+2. CEO & Founder / CEO & Co-founder
+3. Founder / Co-founder (if no CEO mentioned)
 
-Extract for EACH founder:
+Extract ONLY ONE person:
 - name: Full name (first + last). "John Smith", not "John" or "Smith"
-- title: CEO, CTO, Co-founder, Founder, CEO & Co-founder, etc.
+- title: CEO, CEO & Founder, Founder, Co-founder, etc.
 - linkedin_url: ONLY if explicitly in article text (e.g., "linkedin.com/in/johnsmith")
 
 FOUNDER EXAMPLES:
-Article: "Acme, founded by Jane Doe and John Smith, raised $10M"
-→ founders: [{name: "Jane Doe", title: "Co-founder"}, {name: "John Smith", title: "Co-founder"}]
+Article: "Acme, founded by Jane Doe and John Smith, raised $10M. Jane is CEO."
+→ founders: [{name: "Jane Doe", title: "CEO"}]  (ONLY the CEO)
 
 Article: "CEO Sarah Johnson announced the funding"
 → founders: [{name: "Sarah Johnson", title: "CEO"}]
+
+Article: "The startup, co-founded by Mike Chen, raised $5M"
+→ founders: [{name: "Mike Chen", title: "Co-founder"}]  (only 1 person)
 
 Article: "The startup raised $5M" (no founders mentioned)
 → founders: [] (empty list)
 
 DO NOT extract:
-- Investor partners as founders (e.g., "Bill Gurley of Benchmark")
+- Multiple founders (pick the CEO or first-mentioned founder ONLY)
+- Investor partners (e.g., "Bill Gurley of Benchmark")
 - Board members who aren't founders
 - Employees mentioned in quotes
 
