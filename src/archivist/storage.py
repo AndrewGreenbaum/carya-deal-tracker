@@ -114,8 +114,9 @@ def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
     clean = amount_str.replace("$", "").replace("€", "").replace("£", "").replace("₹", "")
     clean = clean.replace(",", "").strip().lower()
 
-    # Remove currency prefixes
-    clean = re.sub(r'^(usd|eur|gbp|inr)\s*', '', clean)
+    # Remove currency prefixes (including "US $" which becomes "us " after $ removal)
+    # Note: longer matches must come first (usd before us) due to regex alternation
+    clean = re.sub(r'^(usd|us|eur|gbp|inr)\s*', '', clean)
 
     # FIX: Remove approximate/range prefixes that LLM might include
     clean = re.sub(r'^(approximately|approx\.?|around|about|up\s+to|nearly|over|more\s+than|less\s+than|~)\s*', '', clean)
