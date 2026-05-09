@@ -5598,17 +5598,37 @@ async def run_dedup_migration(
                 ids_to_delete = ids[1:]
 
                 for del_id in ids_to_delete:
-                    # Reassign articles
+                    # Reassign articles to kept deal
                     await session.execute(
                         text("UPDATE articles SET deal_id = :kept WHERE deal_id = :del"),
                         {"kept": kept_id, "del": del_id}
                     )
-                    # Delete investors
+                    # Delete from all tables that reference deals (foreign keys)
+                    await session.execute(
+                        text("DELETE FROM date_sources WHERE deal_id = :id"),
+                        {"id": del_id}
+                    )
+                    await session.execute(
+                        text("DELETE FROM founder_validations WHERE deal_id = :id"),
+                        {"id": del_id}
+                    )
+                    await session.execute(
+                        text("DELETE FROM thesis_drift WHERE deal_id = :id"),
+                        {"id": del_id}
+                    )
                     await session.execute(
                         text("DELETE FROM deal_investors WHERE deal_id = :id"),
                         {"id": del_id}
                     )
-                    # Delete deal
+                    await session.execute(
+                        text("DELETE FROM tracker_items WHERE deal_id = :id"),
+                        {"id": del_id}
+                    )
+                    await session.execute(
+                        text("DELETE FROM stealth_signals WHERE converted_deal_id = :id"),
+                        {"id": del_id}
+                    )
+                    # Finally delete the deal
                     await session.execute(
                         text("DELETE FROM deals WHERE id = :id"),
                         {"id": del_id}
