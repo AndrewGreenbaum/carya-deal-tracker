@@ -2,6 +2,7 @@
 Storage pipeline for persisting extracted deals to the database.
 """
 
+import hashlib
 import json
 import re
 import logging
@@ -13,6 +14,67 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_company_name_for_dedup(name: str) -> str:
+    """
+    Normalize company name for dedup key generation.
+
+    Inline version to avoid forward reference issues.
+    Mirrors normalize_company_name() logic.
+    """
+    name = name.lower().strip()
+    if name.startswith("the "):
+        name = name[4:]
+    suffixes = [
+        ", incorporated", " incorporated", ", technologies", " technologies",
+        ", corporation", " corporation", ", limited", " limited",
+        ", company", " company", ", inc.", " inc.", ", inc", " inc",
+        ", llc", " llc", ", ltd.", " ltd.", ", ltd", " ltd",
+        ", corp.", " corp.", ", corp", " corp", ", co.", " co.",
+        ", co", " co", " labs", " lab", " tech", " ai",
+    ]
+    for suffix in suffixes:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+            break
+    return re.sub(r'[^a-z0-9]', '', name)
+
+
+def make_dedup_key(company_name: str, round_type: str, announced_date: Optional[date]) -> str:
+    """
+    Generate a deduplication key for a deal.
+
+    This key is used for database-level uniqueness constraint to prevent
+    race condition duplicates when processing deals in parallel.
+
+    The key is based on:
+    - Normalized company name (lowercase, no suffixes)
+    - Round type
+    - Date bucket (rounded to 3-day windows to catch near-duplicates)
+
+    Returns:
+        A 32-character hex string (MD5 hash)
+    """
+    # normalize_company_name is defined later in this file
+    normalized_name = _normalize_company_name_for_dedup(company_name)
+
+    # Round date to 3-day buckets to catch near-duplicates
+    # e.g., Jan 1-3 all map to bucket 0, Jan 4-6 to bucket 1, etc.
+    if announced_date:
+        # Use days since epoch, rounded to 3-day buckets
+        days_since_epoch = (announced_date - date(1970, 1, 1)).days
+        date_bucket = days_since_epoch // 3
+        date_str = str(date_bucket)
+    else:
+        # For deals without dates, use "nodate" + current week bucket
+        # This catches race condition duplicates created within the same week
+        today = date.today()
+        week_bucket = (today - date(1970, 1, 1)).days // 7
+        date_str = f"nodate_{week_bucket}"
+
+    key_data = f"{normalized_name}|{round_type}|{date_str}"
+    return hashlib.md5(key_data.encode()).hexdigest()
 
 
 # ----- URL Validation (FIX #1: Use shared module) -----
@@ -503,9 +565,16 @@ async def find_duplicate_deal(
     """
     Check if a similar deal already exists.
 
-    Match criteria (FIVE-TIER approach, executed in this order):
+    Match criteria (SIX-TIER approach, executed in this order):
 
-    TIER 4 - Prefix Match (FIRST - catches name variations like MEQ Probe/MEQ Solutions):
+    TIER 0 - Exact Company Match (FIRST - catches race condition duplicates):
+    - Company names match EXACTLY (case-insensitive)
+    - Same round type
+    - Date within ±3 days (or both null)
+    - Most aggressive tier to catch parallel processing race conditions
+    - Example: Torq Series D on Jan 11 vs Jan 12 from different sources
+
+    TIER 4 - Prefix Match (catches name variations like MEQ Probe/MEQ Solutions):
     - Company names share same first 3 characters after normalization
     - EXACT amount match (within 5%)
     - EXACT date match
@@ -539,6 +608,7 @@ async def find_duplicate_deal(
     Returns existing Deal if found, None otherwise.
 
     OPTIMIZED:
+    - TIER 0 uses exact company name + round + date window (most aggressive)
     - TIER 4 uses exact amount+date+round for prefix name matching
     - TIER 3 uses targeted amount_usd filter for efficient matching
     - TIER 2 uses targeted date+company query (FIX: no LIMIT, prevents missed dupes)
@@ -553,7 +623,57 @@ async def find_duplicate_deal(
     normalized_company = normalize_company_name(company_name)
 
     # =========================================================================
-    # TIER 4 (NEW): Exact match on amount+date+round with company prefix match
+    # TIER 0 (NEW): Exact company name + same round + date within ±3 days
+    # This is the most aggressive tier to catch race condition duplicates.
+    # When multiple articles about the same deal are processed in parallel,
+    # the duplicate check may run before the first deal is committed.
+    # This tier catches: Torq Series D Jan 11 vs Jan 12, Protege Series A same day
+    # =========================================================================
+    tier0_stmt = (
+        select(Deal, PortfolioCompany)
+        .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
+        .where(func.lower(PortfolioCompany.name) == company_name.lower().strip())
+        .where(Deal.round_type == round_type)
+    )
+
+    # Date filter: within ±3 days, or both null (recent deals)
+    if announced_date:
+        tier0_stmt = tier0_stmt.where(
+            or_(
+                Deal.announced_date.between(
+                    announced_date - timedelta(days=3),
+                    announced_date + timedelta(days=3)
+                ),
+                # Also match deals with null date if they're recent
+                and_(
+                    Deal.announced_date.is_(None),
+                    Deal.created_at >= (datetime.now(timezone.utc) - timedelta(days=7)).replace(tzinfo=None)
+                )
+            )
+        )
+    else:
+        # No date provided: match recent deals with null date or recent dates
+        recent_cutoff_dt = (datetime.now(timezone.utc) - timedelta(days=14)).replace(tzinfo=None)
+        tier0_stmt = tier0_stmt.where(
+            or_(
+                Deal.announced_date.is_(None),
+                Deal.announced_date >= (date.today() - timedelta(days=14))
+            )
+        ).where(Deal.created_at >= recent_cutoff_dt)
+
+    tier0_result = await session.execute(tier0_stmt)
+    tier0_candidates = tier0_result.all()
+
+    for deal, company in tier0_candidates:
+        logger.info(
+            f"Found duplicate deal (TIER 0 exact company+round): '{company_name}' {round_type} "
+            f"matches '{company.name}' {deal.round_type} (deal #{deal.id}, {deal.amount}, "
+            f"date: incoming={announced_date}, existing={deal.announced_date})"
+        )
+        return deal
+
+    # =========================================================================
+    # TIER 4: Exact match on amount+date+round with company prefix match
     # Catches name variations like "MEQ Probe" vs "MEQ Solutions" that share
     # the same prefix but have different suffixes not in our known list.
     # Very high confidence: exact amount + exact date + same round = same deal.
@@ -1027,33 +1147,81 @@ async def save_deal(
         final_amount_usd = normalize_amount(extraction.amount)
         final_amount_source = amount_source or "article"
 
-    # Create deal with enterprise AI classification
-    # FIX: Set date_confidence based on extraction source
-    # FIX: Populate amount_usd for numeric queries/sorting
-    deal = Deal(
-        company_id=company.id,
-        round_type=extraction.round_label.value,
-        amount=final_amount,
-        amount_usd=final_amount_usd,
-        amount_source=final_amount_source,
-        valuation=extraction.valuation,
-        announced_date=announced_date,
-        date_confidence=date_confidence,  # FIX: Set based on source
-        date_source_count=1 if announced_date else 0,  # FIX: Initialize source count
-        is_lead_confirmed=extraction.tracked_fund_is_lead,
-        lead_partner_name=extraction.tracked_fund_partner,
-        verification_snippet=extraction.verification_snippet,
-        lead_evidence_weak=getattr(extraction, 'lead_evidence_weak', False),
-        enterprise_category=extraction.enterprise_category.value if extraction.enterprise_category else None,
-        is_enterprise_ai=extraction.is_enterprise_ai,
-        is_ai_deal=getattr(extraction, 'is_ai_deal', extraction.is_enterprise_ai),  # Fallback for backwards compat
-        founders_json=founders_json,
-        confidence_score=extraction.confidence_score,
-        thesis_drift_score=0.0,  # Field removed from LLM extraction for token efficiency
-        scan_job_id=scan_job_id,
+    # FIX Jan 2026: Use dedup_key + ON CONFLICT to prevent race condition duplicates
+    # This is a database-level safety net that catches duplicates even when
+    # find_duplicate_deal() runs before the first deal is committed
+    dedup_key = make_dedup_key(
+        extraction.startup_name,
+        extraction.round_label.value,
+        announced_date
     )
-    session.add(deal)
-    await session.flush()
+
+    # Create deal with enterprise AI classification using atomic INSERT ... ON CONFLICT
+    # If a concurrent request already inserted a deal with the same dedup_key,
+    # this will return None and we'll link the article to the existing deal instead
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    deal_values = {
+        "company_id": company.id,
+        "dedup_key": dedup_key,
+        "round_type": extraction.round_label.value,
+        "amount": final_amount,
+        "amount_usd": final_amount_usd,
+        "amount_source": final_amount_source,
+        "valuation": extraction.valuation,
+        "announced_date": announced_date,
+        "date_confidence": date_confidence,
+        "date_source_count": 1 if announced_date else 0,
+        "is_lead_confirmed": extraction.tracked_fund_is_lead,
+        "lead_partner_name": extraction.tracked_fund_partner,
+        "verification_snippet": extraction.verification_snippet,
+        "lead_evidence_weak": getattr(extraction, 'lead_evidence_weak', False),
+        "enterprise_category": extraction.enterprise_category.value if extraction.enterprise_category else None,
+        "is_enterprise_ai": extraction.is_enterprise_ai,
+        "is_ai_deal": getattr(extraction, 'is_ai_deal', extraction.is_enterprise_ai),
+        "founders_json": founders_json,
+        "confidence_score": extraction.confidence_score,
+        "thesis_drift_score": 0.0,
+        "scan_job_id": scan_job_id,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    stmt = pg_insert(Deal).values(**deal_values).on_conflict_do_nothing(
+        index_elements=['dedup_key']
+    ).returning(Deal)
+
+    result = await session.execute(stmt)
+    deal = result.scalar_one_or_none()
+
+    # If deal is None, a concurrent insert already created this deal
+    # Find the existing deal by dedup_key and link the article to it
+    if deal is None:
+        logger.warning(
+            f"Race condition duplicate prevented by dedup_key: {extraction.startup_name} "
+            f"{extraction.round_label.value} (key={dedup_key})"
+        )
+        # Find the existing deal by dedup_key
+        existing_stmt = select(Deal).where(Deal.dedup_key == dedup_key)
+        existing_result = await session.execute(existing_stmt)
+        existing_deal = existing_result.scalar_one_or_none()
+
+        if existing_deal:
+            # Link article to existing deal
+            article_stmt = pg_insert(Article).values(
+                deal_id=existing_deal.id,
+                url=article_url,
+                title=article_title,
+                source_fund_slug=source_fund_slug,
+                extracted_text=article_text,
+                is_processed=True,
+            ).on_conflict_do_nothing(index_elements=['url'])
+            await session.execute(article_stmt)
+            await session.flush()
+            logger.info(f"Linked article to existing deal #{existing_deal.id} (race condition)")
+        else:
+            logger.error(f"Could not find deal with dedup_key={dedup_key} after conflict")
+
+        return None, None  # Signal duplicate
 
     # FIX: Populate DateSource table for traceability
     if announced_date and date_source_type:
