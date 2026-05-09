@@ -3939,9 +3939,11 @@ async def enrich_deals(
     )
 
     if skip_enriched:
-        # Only get deals where company website is missing
+        # Get deals where website OR founders are missing/incomplete
+        # This ensures we enrich both website and founder LinkedIn data
         query = query.where(
-            (PortfolioCompany.website.is_(None)) | (PortfolioCompany.website == "")
+            (PortfolioCompany.website.is_(None)) | (PortfolioCompany.website == "") |
+            (Deal.founders_json.is_(None)) | (Deal.founders_json == "[]") | (Deal.founders_json == "")
         )
 
     query = query.order_by(Deal.created_at.desc()).limit(limit)
@@ -4002,7 +4004,7 @@ async def enrich_deals(
                     # Update existing founders with LinkedIn URLs
                     for f in founders:
                         founder_name = f.get("name", "")
-                        if founder_name in enrichment.founder_linkedins:
+                        if enrichment.founder_linkedins and founder_name in enrichment.founder_linkedins:
                             if not f.get("linkedin_url") or force_update:
                                 f["linkedin_url"] = enrichment.founder_linkedins[founder_name]
 
@@ -4020,8 +4022,10 @@ async def enrich_deals(
                                 logger.info(f"Added CEO as founder for {company_name}: {enrichment.ceo_name}")
                             else:
                                 # Try to find existing CEO/founder entry to update
+                                # Use substring matching for compound titles like "Founder & CEO"
                                 for f in founders:
-                                    if f.get("title", "").lower() in ("ceo", "founder", "co-founder"):
+                                    title_lower = f.get("title", "").lower()
+                                    if any(role in title_lower for role in ("ceo", "founder")):
                                         if not f.get("linkedin_url") or force_update:
                                             f["linkedin_url"] = enrichment.ceo_linkedin
                                         break
@@ -5491,6 +5495,148 @@ async def delete_feedback(
     except Exception as e:
         logger.error("Failed to delete feedback: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to delete feedback")
+
+
+# ----- Admin: Run Migration -----
+
+class MigrationResponse(BaseModel):
+    success: bool
+    message: str
+    duplicates_removed: int = 0
+
+
+@app.post("/admin/run-dedup-migration", response_model=MigrationResponse)
+async def run_dedup_migration(
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run the dedup_key migration manually.
+
+    This adds the dedup_key column if not exists, backfills existing deals,
+    removes duplicates, and creates the unique index.
+
+    Should only be run once after deployment.
+    """
+    import hashlib
+    import re
+    from sqlalchemy import text
+
+    def normalize_name(name: str) -> str:
+        name = name.lower().strip()
+        if name.startswith("the "):
+            name = name[4:]
+        suffixes = [
+            ", incorporated", " incorporated", ", technologies", " technologies",
+            ", corporation", " corporation", ", limited", " limited",
+            ", company", " company", ", inc.", " inc.", ", inc", " inc",
+            ", llc", " llc", ", ltd.", " ltd.", ", ltd", " ltd",
+            ", corp.", " corp.", ", corp", " corp", ", co.", " co.",
+            ", co", " co", " labs", " lab", " tech", " ai",
+        ]
+        for suffix in suffixes:
+            if name.endswith(suffix):
+                name = name[:-len(suffix)]
+                break
+        return re.sub(r'[^a-z0-9]', '', name)
+
+    def make_key(company_name: str, round_type: str, announced_date) -> str:
+        from datetime import date as date_type
+        normalized = normalize_name(company_name)
+        if announced_date:
+            days = (announced_date - date_type(1970, 1, 1)).days
+            bucket = days // 3
+            date_str = str(bucket)
+        else:
+            today = date_type.today()
+            week = (today - date_type(1970, 1, 1)).days // 7
+            date_str = f"nodate_{week}"
+        return hashlib.md5(f"{normalized}|{round_type}|{date_str}".encode()).hexdigest()
+
+    duplicates_removed = 0
+
+    try:
+        async with get_session() as session:
+            # Step 1: Add column if not exists
+            await session.execute(text(
+                "ALTER TABLE deals ADD COLUMN IF NOT EXISTS dedup_key VARCHAR(32)"
+            ))
+            await session.commit()
+            logger.info("Added dedup_key column (or already exists)")
+
+            # Step 2: Backfill existing deals
+            result = await session.execute(text("""
+                SELECT d.id, pc.name, d.round_type, d.announced_date
+                FROM deals d
+                JOIN portfolio_companies pc ON d.company_id = pc.id
+                WHERE d.dedup_key IS NULL
+            """))
+            rows = result.fetchall()
+
+            for row in rows:
+                deal_id, company_name, round_type, announced_date = row
+                key = make_key(company_name, round_type, announced_date)
+                await session.execute(
+                    text("UPDATE deals SET dedup_key = :key WHERE id = :id"),
+                    {"key": key, "id": deal_id}
+                )
+            await session.commit()
+            logger.info(f"Backfilled {len(rows)} deals with dedup_key")
+
+            # Step 3: Find and remove duplicates
+            dup_result = await session.execute(text("""
+                SELECT dedup_key, array_agg(id ORDER BY id) as ids
+                FROM deals
+                WHERE dedup_key IS NOT NULL
+                GROUP BY dedup_key
+                HAVING count(*) > 1
+            """))
+            duplicates = dup_result.fetchall()
+
+            for dup_row in duplicates:
+                dedup_key, ids = dup_row
+                kept_id = ids[0]
+                ids_to_delete = ids[1:]
+
+                for del_id in ids_to_delete:
+                    # Reassign articles
+                    await session.execute(
+                        text("UPDATE articles SET deal_id = :kept WHERE deal_id = :del"),
+                        {"kept": kept_id, "del": del_id}
+                    )
+                    # Delete investors
+                    await session.execute(
+                        text("DELETE FROM deal_investors WHERE deal_id = :id"),
+                        {"id": del_id}
+                    )
+                    # Delete deal
+                    await session.execute(
+                        text("DELETE FROM deals WHERE id = :id"),
+                        {"id": del_id}
+                    )
+                    duplicates_removed += 1
+
+            await session.commit()
+            logger.info(f"Removed {duplicates_removed} duplicate deals")
+
+            # Step 4: Create unique index (if not exists)
+            try:
+                await session.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_deals_dedup_key ON deals(dedup_key)"
+                ))
+                await session.commit()
+                logger.info("Created unique index on dedup_key")
+            except Exception as idx_err:
+                logger.warning(f"Index creation note: {idx_err}")
+
+            return MigrationResponse(
+                success=True,
+                message=f"Migration complete. Backfilled {len(rows)} deals, removed {duplicates_removed} duplicates.",
+                duplicates_removed=duplicates_removed,
+            )
+
+    except Exception as e:
+        logger.error(f"Migration failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Migration failed: {str(e)}")
 
 
 # ----- CLI Runner -----

@@ -84,11 +84,6 @@ class Deal(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     company_id: int = Field(foreign_key="portfolio_companies.id")
 
-    # Deduplication key (FIX Jan 2026: prevent race condition duplicates)
-    # Hash of normalized_company_name + round_type + date_bucket
-    # Unique constraint prevents parallel inserts of same deal
-    dedup_key: Optional[str] = Field(default=None, max_length=32, index=True)
-
     # Round details
     round_type: str  # seed, series_a, series_b, etc.
     amount: Optional[str] = None  # "$50M"
