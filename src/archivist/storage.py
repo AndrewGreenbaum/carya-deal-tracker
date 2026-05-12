@@ -1147,34 +1147,81 @@ async def save_deal(
         final_amount_usd = normalize_amount(extraction.amount)
         final_amount_source = amount_source or "article"
 
-    # Create deal with enterprise AI classification
-    # FIX: Set date_confidence based on extraction source
-    # FIX: Populate amount_usd for numeric queries/sorting
-    # NOTE: dedup_key-based ON CONFLICT is temporarily disabled until migration runs
-    deal = Deal(
-        company_id=company.id,
-        round_type=extraction.round_label.value,
-        amount=final_amount,
-        amount_usd=final_amount_usd,
-        amount_source=final_amount_source,
-        valuation=extraction.valuation,
-        announced_date=announced_date,
-        date_confidence=date_confidence,  # FIX: Set based on source
-        date_source_count=1 if announced_date else 0,  # FIX: Initialize source count
-        is_lead_confirmed=extraction.tracked_fund_is_lead,
-        lead_partner_name=extraction.tracked_fund_partner,
-        verification_snippet=extraction.verification_snippet,
-        lead_evidence_weak=getattr(extraction, 'lead_evidence_weak', False),
-        enterprise_category=extraction.enterprise_category.value if extraction.enterprise_category else None,
-        is_enterprise_ai=extraction.is_enterprise_ai,
-        is_ai_deal=getattr(extraction, 'is_ai_deal', extraction.is_enterprise_ai),  # Fallback for backwards compat
-        founders_json=founders_json,
-        confidence_score=extraction.confidence_score,
-        thesis_drift_score=0.0,  # Field removed from LLM extraction for token efficiency
-        scan_job_id=scan_job_id,
+    # FIX Jan 2026: Use dedup_key + ON CONFLICT to prevent race condition duplicates
+    # This is a database-level safety net that catches duplicates even when
+    # find_duplicate_deal() runs before the first deal is committed
+    dedup_key = make_dedup_key(
+        extraction.startup_name,
+        extraction.round_label.value,
+        announced_date
     )
-    session.add(deal)
-    await session.flush()
+
+    # Create deal with enterprise AI classification using atomic INSERT ... ON CONFLICT
+    # If a concurrent request already inserted a deal with the same dedup_key,
+    # this will return None and we'll link the article to the existing deal instead
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    deal_values = {
+        "company_id": company.id,
+        "dedup_key": dedup_key,
+        "round_type": extraction.round_label.value,
+        "amount": final_amount,
+        "amount_usd": final_amount_usd,
+        "amount_source": final_amount_source,
+        "valuation": extraction.valuation,
+        "announced_date": announced_date,
+        "date_confidence": date_confidence,
+        "date_source_count": 1 if announced_date else 0,
+        "is_lead_confirmed": extraction.tracked_fund_is_lead,
+        "lead_partner_name": extraction.tracked_fund_partner,
+        "verification_snippet": extraction.verification_snippet,
+        "lead_evidence_weak": getattr(extraction, 'lead_evidence_weak', False),
+        "enterprise_category": extraction.enterprise_category.value if extraction.enterprise_category else None,
+        "is_enterprise_ai": extraction.is_enterprise_ai,
+        "is_ai_deal": getattr(extraction, 'is_ai_deal', extraction.is_enterprise_ai),
+        "founders_json": founders_json,
+        "confidence_score": extraction.confidence_score,
+        "thesis_drift_score": 0.0,
+        "scan_job_id": scan_job_id,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    stmt = pg_insert(Deal).values(**deal_values).on_conflict_do_nothing(
+        index_elements=['dedup_key']
+    ).returning(Deal)
+
+    result = await session.execute(stmt)
+    deal = result.scalar_one_or_none()
+
+    # If deal is None, a concurrent insert already created this deal
+    # Find the existing deal by dedup_key and link the article to it
+    if deal is None:
+        logger.warning(
+            f"Race condition duplicate prevented by dedup_key: {extraction.startup_name} "
+            f"{extraction.round_label.value} (key={dedup_key})"
+        )
+        # Find the existing deal by dedup_key
+        existing_stmt = select(Deal).where(Deal.dedup_key == dedup_key)
+        existing_result = await session.execute(existing_stmt)
+        existing_deal = existing_result.scalar_one_or_none()
+
+        if existing_deal:
+            # Link article to existing deal
+            article_stmt = pg_insert(Article).values(
+                deal_id=existing_deal.id,
+                url=article_url,
+                title=article_title,
+                source_fund_slug=source_fund_slug,
+                extracted_text=article_text,
+                is_processed=True,
+            ).on_conflict_do_nothing(index_elements=['url'])
+            await session.execute(article_stmt)
+            await session.flush()
+            logger.info(f"Linked article to existing deal #{existing_deal.id} (race condition)")
+        else:
+            logger.error(f"Could not find deal with dedup_key={dedup_key} after conflict")
+
+        return None, None  # Signal duplicate
 
     # FIX: Populate DateSource table for traceability
     if announced_date and date_source_type:
