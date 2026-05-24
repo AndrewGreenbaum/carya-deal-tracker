@@ -1235,25 +1235,12 @@ async def save_deal(
                 f"({existing_round}) - likely same deal with different round classification"
             )
 
-            # FIX: Prefer more specific round types (series_X > growth/unknown)
-            # Specific series are more accurate than vague "growth" or "unknown"
-            SPECIFIC_ROUNDS = {'pre_seed', 'seed', 'seed_plus_series_a', 'series_a', 'series_b',
-                              'series_c', 'series_d', 'series_e_plus', 'debt'}
-            VAGUE_ROUNDS = {'growth', 'unknown', 'late_stage', 'expansion'}
-
-            new_is_specific = new_round in SPECIFIC_ROUNDS
-            existing_is_specific = existing_round in SPECIFIC_ROUNDS
-
-            if new_is_specific and not existing_is_specific:
-                # New extraction has more specific round type - update existing deal
-                logger.info(
-                    f"Upgrading round type from '{existing_round}' to '{new_round}' "
-                    f"for deal #{existing_deal_by_amount.id} (more specific)"
-                )
-                existing_deal_by_amount.round_type = new_round
-                # Also update dedup_key since it includes round_type
-                existing_deal_by_amount.dedup_key = make_dedup_key(
-                    extraction.startup_name, new_round, existing_deal_by_amount.announced_date
+            # Log if round types differ - may need manual review
+            # Don't auto-upgrade: "growth" might be legitimately correct, not all large rounds are Series X
+            if new_round != existing_round:
+                logger.warning(
+                    f"ROUND_TYPE_MISMATCH: Deal #{existing_deal_by_amount.id} has '{existing_round}' "
+                    f"but new article says '{new_round}' - may need manual review"
                 )
 
             # Link article to existing deal
