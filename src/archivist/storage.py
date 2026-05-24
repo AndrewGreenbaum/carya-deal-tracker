@@ -77,6 +77,60 @@ def make_dedup_key(company_name: str, round_type: str, announced_date: Optional[
     return hashlib.md5(key_data.encode()).hexdigest()
 
 
+def make_amount_dedup_key(company_name: str, amount_usd: Optional[int], announced_date: Optional[date]) -> Optional[str]:
+    """
+    Generate a secondary deduplication key based on amount instead of round_type.
+
+    This catches race condition duplicates where LLM classifies the SAME deal
+    with DIFFERENT round types (e.g., "growth" vs "series_d" for Parloa $350M).
+
+    The key is based on:
+    - Normalized company name (lowercase, no suffixes)
+    - Amount bucket (rounded to capture similar amounts)
+    - Date bucket (rounded to 3-day windows)
+
+    Only generated when amount is known (>= $1M). Returns None otherwise.
+
+    Amount buckets (logarithmic to handle wide range):
+    - <$1M: no key (too small, too many potential false positives)
+    - $1M-$10M: bucket by $2M increments
+    - $10M-$100M: bucket by $20M increments
+    - $100M-$1B: bucket by $100M increments
+    - >$1B: bucket by $500M increments
+
+    Returns:
+        A 32-character hex string (MD5 hash) or None if amount is unknown/too small
+    """
+    # Only generate if we have a meaningful amount
+    if not amount_usd or amount_usd < 1_000_000:
+        return None
+
+    normalized_name = _normalize_company_name_for_dedup(company_name)
+
+    # Calculate amount bucket (logarithmic buckets)
+    if amount_usd < 10_000_000:  # $1M-$10M
+        amount_bucket = amount_usd // 2_000_000  # $2M increments
+    elif amount_usd < 100_000_000:  # $10M-$100M
+        amount_bucket = 5 + (amount_usd // 20_000_000)  # $20M increments, offset by 5
+    elif amount_usd < 1_000_000_000:  # $100M-$1B
+        amount_bucket = 10 + (amount_usd // 100_000_000)  # $100M increments, offset by 10
+    else:  # >$1B
+        amount_bucket = 20 + (amount_usd // 500_000_000)  # $500M increments, offset by 20
+
+    # Date bucket (same as dedup_key)
+    if announced_date:
+        days_since_epoch = (announced_date - date(1970, 1, 1)).days
+        date_bucket = days_since_epoch // 3
+        date_str = str(date_bucket)
+    else:
+        today = date.today()
+        week_bucket = (today - date(1970, 1, 1)).days // 7
+        date_str = f"nodate_{week_bucket}"
+
+    key_data = f"{normalized_name}|amt{amount_bucket}|{date_str}"
+    return hashlib.md5(key_data.encode()).hexdigest()
+
+
 # ----- URL Validation (FIX #1: Use shared module) -----
 from ..common.url_utils import is_valid_url as _is_valid_url, sanitize_url as _sanitize_url
 
@@ -1156,6 +1210,65 @@ async def save_deal(
         announced_date
     )
 
+    # FIX Jan 2026 (Parloa bug): Generate amount_dedup_key for same-deal-different-round-type detection
+    # This catches cases where LLM classifies same deal as "growth" vs "series_d"
+    amount_dedup_key = make_amount_dedup_key(
+        extraction.startup_name,
+        final_amount_usd,
+        announced_date
+    )
+
+    # FIX Jan 2026 (Parloa bug): Check if a deal with same amount_dedup_key already exists
+    # This catches duplicates where the round_type differs but company+amount+date match
+    if amount_dedup_key:
+        existing_by_amount = await session.execute(
+            select(Deal).where(Deal.amount_dedup_key == amount_dedup_key)
+        )
+        existing_deal_by_amount = existing_by_amount.scalar_one_or_none()
+        if existing_deal_by_amount:
+            new_round = extraction.round_label.value
+            existing_round = existing_deal_by_amount.round_type
+
+            logger.warning(
+                f"Found duplicate by amount_dedup_key: {extraction.startup_name} "
+                f"{new_round} matches existing deal #{existing_deal_by_amount.id} "
+                f"({existing_round}) - likely same deal with different round classification"
+            )
+
+            # FIX: Prefer more specific round types (series_X > growth/unknown)
+            # Specific series are more accurate than vague "growth" or "unknown"
+            SPECIFIC_ROUNDS = {'pre_seed', 'seed', 'seed_plus_series_a', 'series_a', 'series_b',
+                              'series_c', 'series_d', 'series_e_plus', 'debt'}
+            VAGUE_ROUNDS = {'growth', 'unknown', 'late_stage', 'expansion'}
+
+            new_is_specific = new_round in SPECIFIC_ROUNDS
+            existing_is_specific = existing_round in SPECIFIC_ROUNDS
+
+            if new_is_specific and not existing_is_specific:
+                # New extraction has more specific round type - update existing deal
+                logger.info(
+                    f"Upgrading round type from '{existing_round}' to '{new_round}' "
+                    f"for deal #{existing_deal_by_amount.id} (more specific)"
+                )
+                existing_deal_by_amount.round_type = new_round
+                # Also update dedup_key since it includes round_type
+                existing_deal_by_amount.dedup_key = make_dedup_key(
+                    extraction.startup_name, new_round, existing_deal_by_amount.announced_date
+                )
+
+            # Link article to existing deal
+            article_stmt = pg_insert(Article).values(
+                deal_id=existing_deal_by_amount.id,
+                url=article_url,
+                title=article_title,
+                source_fund_slug=source_fund_slug,
+                extracted_text=article_text,
+                is_processed=True,
+            ).on_conflict_do_nothing(index_elements=['url'])
+            await session.execute(article_stmt)
+            await session.flush()
+            return None, None  # Signal duplicate
+
     # Create deal with enterprise AI classification using atomic INSERT ... ON CONFLICT
     # If a concurrent request already inserted a deal with the same dedup_key,
     # this will return None and we'll link the article to the existing deal instead
@@ -1163,6 +1276,7 @@ async def save_deal(
     deal_values = {
         "company_id": company.id,
         "dedup_key": dedup_key,
+        "amount_dedup_key": amount_dedup_key,
         "round_type": extraction.round_label.value,
         "amount": final_amount,
         "amount_usd": final_amount_usd,

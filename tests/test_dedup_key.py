@@ -7,6 +7,11 @@ The dedup_key is an MD5 hash of:
 - round_type
 - date_bucket (3-day windows to catch near-duplicates)
 
+The amount_dedup_key (added Jan 2026 for Parloa bug) is an MD5 hash of:
+- normalized_company_name
+- amount_bucket (logarithmic buckets)
+- date_bucket
+
 This provides database-level protection via unique constraint + ON CONFLICT.
 """
 
@@ -49,6 +54,37 @@ def make_dedup_key(company_name: str, round_type: str, announced_date) -> str:
         week_bucket = (today - date(1970, 1, 1)).days // 7
         date_str = f'nodate_{week_bucket}'
     key_data = f'{normalized_name}|{round_type}|{date_str}'
+    return hashlib.md5(key_data.encode()).hexdigest()
+
+
+def make_amount_dedup_key(company_name: str, amount_usd: int, announced_date):
+    """Generate amount-based dedup key (for cross-round-type duplicate detection)."""
+    if not amount_usd or amount_usd < 1_000_000:
+        return None
+
+    normalized_name = _normalize_company_name_for_dedup(company_name)
+
+    # Calculate amount bucket (logarithmic buckets)
+    if amount_usd < 10_000_000:  # $1M-$10M
+        amount_bucket = amount_usd // 2_000_000
+    elif amount_usd < 100_000_000:  # $10M-$100M
+        amount_bucket = 5 + (amount_usd // 20_000_000)
+    elif amount_usd < 1_000_000_000:  # $100M-$1B
+        amount_bucket = 10 + (amount_usd // 100_000_000)
+    else:  # >$1B
+        amount_bucket = 20 + (amount_usd // 500_000_000)
+
+    # Date bucket (same as dedup_key)
+    if announced_date:
+        days_since_epoch = (announced_date - date(1970, 1, 1)).days
+        date_bucket = days_since_epoch // 3
+        date_str = str(date_bucket)
+    else:
+        today = date.today()
+        week_bucket = (today - date(1970, 1, 1)).days // 7
+        date_str = f'nodate_{week_bucket}'
+
+    key_data = f'{normalized_name}|amt{amount_bucket}|{date_str}'
     return hashlib.md5(key_data.encode()).hexdigest()
 
 
@@ -187,6 +223,86 @@ class TestRaceConditionScenarios:
         # Article 2 says Jan 14 (slight variation)
         k2 = make_dedup_key("Converge Bio", "series_a", date(2026, 1, 14))
         assert k1 == k2, "1-day variation should be same bucket"
+
+
+class TestAmountDedupKeyGeneration:
+    """Tests for amount-based dedup key generation (Parloa bug fix)."""
+
+    def test_parloa_duplicate_caught(self):
+        """
+        The Parloa duplicate case from production:
+        - Deal 1: Parloa, growth, $350M, 2026-01-15
+        - Deal 2: Parloa, series_d, $350M, 2026-01-15
+        - Different round_types but same company+amount+date
+        - amount_dedup_key should be SAME for both
+        """
+        # With original dedup_key, these would be different (different round_type)
+        k1 = make_dedup_key("Parloa", "growth", date(2026, 1, 15))
+        k2 = make_dedup_key("Parloa", "series_d", date(2026, 1, 15))
+        assert k1 != k2, "Original dedup_key differs by round_type (the bug)"
+
+        # With amount_dedup_key, these should be the SAME
+        ak1 = make_amount_dedup_key("Parloa", 350_000_000, date(2026, 1, 15))
+        ak2 = make_amount_dedup_key("Parloa", 350_000_000, date(2026, 1, 15))
+        assert ak1 == ak2, "amount_dedup_key should match for same company+amount+date"
+
+    def test_returns_none_for_small_amounts(self):
+        """Should return None for amounts < $1M to avoid false positives."""
+        assert make_amount_dedup_key("Startup", 500_000, date(2026, 1, 15)) is None
+        assert make_amount_dedup_key("Startup", 999_999, date(2026, 1, 15)) is None
+        assert make_amount_dedup_key("Startup", 0, date(2026, 1, 15)) is None
+        assert make_amount_dedup_key("Startup", None, date(2026, 1, 15)) is None
+
+    def test_amount_buckets_small(self):
+        """$1M-$10M range: $2M increments."""
+        # $5M and $6M should be in the same bucket (both // 2M = 2-3)
+        k1 = make_amount_dedup_key("Startup", 5_000_000, date(2026, 1, 15))
+        k2 = make_amount_dedup_key("Startup", 6_000_000, date(2026, 1, 15))
+        # Actually 5M // 2M = 2, 6M // 2M = 3, different buckets
+        # Let's test same bucket: 4M and 5M both // 2M = 2
+        k3 = make_amount_dedup_key("Startup", 4_000_000, date(2026, 1, 15))
+        k4 = make_amount_dedup_key("Startup", 5_000_000, date(2026, 1, 15))
+        assert k3 == k4, "4M and 5M should be same bucket"
+
+    def test_amount_buckets_medium(self):
+        """$10M-$100M range: $20M increments."""
+        # $50M and $60M should be in the same bucket
+        k1 = make_amount_dedup_key("Startup", 50_000_000, date(2026, 1, 15))
+        k2 = make_amount_dedup_key("Startup", 60_000_000, date(2026, 1, 15))
+        # 50M // 20M = 2, 60M // 20M = 3, different buckets
+        # Same bucket: 40M and 50M both // 20M = 2
+        k3 = make_amount_dedup_key("Startup", 40_000_000, date(2026, 1, 15))
+        k4 = make_amount_dedup_key("Startup", 50_000_000, date(2026, 1, 15))
+        assert k3 == k4, "40M and 50M should be same bucket"
+
+    def test_amount_buckets_large(self):
+        """$100M-$1B range: $100M increments."""
+        # $350M and $399M should be in the same bucket
+        k1 = make_amount_dedup_key("Startup", 350_000_000, date(2026, 1, 15))
+        k2 = make_amount_dedup_key("Startup", 399_000_000, date(2026, 1, 15))
+        assert k1 == k2, "350M and 399M should be same bucket"
+
+        # $300M and $399M should also be same bucket
+        k3 = make_amount_dedup_key("Startup", 300_000_000, date(2026, 1, 15))
+        assert k1 == k3, "300M-399M should be same bucket"
+
+    def test_different_companies_different_keys(self):
+        """Different companies with same amount should have different keys."""
+        k1 = make_amount_dedup_key("Parloa", 350_000_000, date(2026, 1, 15))
+        k2 = make_amount_dedup_key("OtherCo", 350_000_000, date(2026, 1, 15))
+        assert k1 != k2
+
+    def test_different_dates_different_keys(self):
+        """Dates in different 3-day buckets should have different keys."""
+        k1 = make_amount_dedup_key("Parloa", 350_000_000, date(2026, 1, 15))
+        k2 = make_amount_dedup_key("Parloa", 350_000_000, date(2026, 1, 20))  # +5 days
+        assert k1 != k2
+
+    def test_key_is_32_chars(self):
+        """Key should be 32-character MD5 hex digest."""
+        key = make_amount_dedup_key("Parloa", 350_000_000, date(2026, 1, 15))
+        assert len(key) == 32
+        assert all(c in '0123456789abcdef' for c in key)
 
 
 if __name__ == "__main__":

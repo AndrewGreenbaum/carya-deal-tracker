@@ -1830,7 +1830,7 @@ async def run_brave_search_scraper_endpoint(
             articles = await scraper.scrape_all(
                 freshness=freshness,
                 include_enterprise=True,
-                include_participation=True,
+                include_participation=False,  # Lead-only focus (Jan 2026)
                 include_stealth=True,
                 include_regional=include_regional,
                 include_early_signals=include_early_signals,
@@ -1839,8 +1839,8 @@ async def run_brave_search_scraper_endpoint(
 
         cache.invalidate("deals")
 
-        # Calculate query count - now includes partner queries
-        queries_executed = 38  # Base: 18 lead + 18 participation + 1 enterprise + 1 stealth
+        # Calculate query count - now includes partner queries (participation disabled Jan 2026)
+        queries_executed = 20  # Base: 18 lead + 1 enterprise + 1 stealth
         queries_executed += 57  # Partner name queries for all funds
         if include_regional:
             queries_executed += 10  # 10 regions
@@ -3143,7 +3143,7 @@ async def run_all_sources(
                 articles = await scraper.scrape_all(
                     freshness=freshness,
                     include_enterprise=True,
-                    include_participation=True,
+                    include_participation=False,  # Lead-only focus (Jan 2026)
                     include_stealth=True,
                     include_partner_names=True,  # Critical for disabled fund scrapers
                 )
@@ -3154,7 +3154,7 @@ async def run_all_sources(
             stats = await process_external_articles(articles, "brave_search", skip_title_filter=True)
 
             results["brave_search"] = BraveSearchResponse(
-                queries_executed=38,
+                queries_executed=20,  # Was 38, now 20 after participation disabled
                 results_found=len(articles),
                 articles_generated=len(articles),
                 deals_extracted=stats.get("deals_extracted", 0),
@@ -5656,6 +5656,170 @@ async def run_dedup_migration(
 
     except Exception as e:
         logger.error(f"Migration failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Migration failed: {str(e)}")
+
+
+@app.post("/admin/run-amount-dedup-migration", response_model=MigrationResponse)
+async def run_amount_dedup_migration(
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Run the amount_dedup_key migration (Parloa duplicate fix).
+
+    This adds the amount_dedup_key column if not exists, backfills existing deals,
+    removes cross-round-type duplicates (same company+amount+date, different round_type),
+    and creates an index.
+
+    FIX Jan 2026: Catches duplicates where LLM assigns different round types to same deal.
+    """
+    import hashlib
+    import re
+    from sqlalchemy import text
+
+    def normalize_name(name: str) -> str:
+        name = name.lower().strip()
+        if name.startswith("the "):
+            name = name[4:]
+        suffixes = [
+            ", incorporated", " incorporated", ", technologies", " technologies",
+            ", corporation", " corporation", ", limited", " limited",
+            ", company", " company", ", inc.", " inc.", ", inc", " inc",
+            ", llc", " llc", ", ltd.", " ltd.", ", ltd", " ltd",
+            ", corp.", " corp.", ", corp", " corp", ", co.", " co.",
+            ", co", " co", " labs", " lab", " tech", " ai",
+        ]
+        for suffix in suffixes:
+            if name.endswith(suffix):
+                name = name[:-len(suffix)]
+                break
+        return re.sub(r'[^a-z0-9]', '', name)
+
+    def make_amount_key(company_name: str, amount_usd: int, announced_date) -> str:
+        from datetime import date as date_type
+        normalized = normalize_name(company_name)
+
+        # Calculate amount bucket (logarithmic buckets)
+        if amount_usd < 10_000_000:  # $1M-$10M
+            amount_bucket = amount_usd // 2_000_000
+        elif amount_usd < 100_000_000:  # $10M-$100M
+            amount_bucket = 5 + (amount_usd // 20_000_000)
+        elif amount_usd < 1_000_000_000:  # $100M-$1B
+            amount_bucket = 10 + (amount_usd // 100_000_000)
+        else:  # >$1B
+            amount_bucket = 20 + (amount_usd // 500_000_000)
+
+        if announced_date:
+            days = (announced_date - date_type(1970, 1, 1)).days
+            bucket = days // 3
+            date_str = str(bucket)
+        else:
+            today = date_type.today()
+            week = (today - date_type(1970, 1, 1)).days // 7
+            date_str = f"nodate_{week}"
+
+        return hashlib.md5(f"{normalized}|amt{amount_bucket}|{date_str}".encode()).hexdigest()
+
+    duplicates_removed = 0
+    backfilled = 0
+
+    try:
+        async with get_session() as session:
+            # Step 1: Add column if not exists
+            await session.execute(text(
+                "ALTER TABLE deals ADD COLUMN IF NOT EXISTS amount_dedup_key VARCHAR(32)"
+            ))
+            await session.commit()
+            logger.info("Added amount_dedup_key column (or already exists)")
+
+            # Step 2: Backfill existing deals (only those with amount >= $1M)
+            result = await session.execute(text("""
+                SELECT d.id, pc.name, d.amount_usd, d.announced_date
+                FROM deals d
+                JOIN portfolio_companies pc ON d.company_id = pc.id
+                WHERE d.amount_usd IS NOT NULL AND d.amount_usd >= 1000000
+                AND d.amount_dedup_key IS NULL
+            """))
+            rows = result.fetchall()
+
+            for row in rows:
+                deal_id, company_name, amount_usd, announced_date = row
+                key = make_amount_key(company_name, amount_usd, announced_date)
+                await session.execute(
+                    text("UPDATE deals SET amount_dedup_key = :key WHERE id = :id"),
+                    {"key": key, "id": deal_id}
+                )
+                backfilled += 1
+            await session.commit()
+            logger.info(f"Backfilled {backfilled} deals with amount_dedup_key")
+
+            # Step 3: Find and remove cross-round-type duplicates
+            dup_result = await session.execute(text("""
+                SELECT amount_dedup_key, array_agg(id ORDER BY id) as ids
+                FROM deals
+                WHERE amount_dedup_key IS NOT NULL
+                GROUP BY amount_dedup_key
+                HAVING count(*) > 1
+            """))
+            dup_rows = dup_result.fetchall()
+
+            for dup_row in dup_rows:
+                amount_key, ids = dup_row
+                kept_id = ids[0]
+                ids_to_delete = ids[1:]
+
+                logger.info(f"Removing {len(ids_to_delete)} duplicates for amount_dedup_key={amount_key[:8]}... (keeping #{kept_id})")
+
+                for del_id in ids_to_delete:
+                    # Reassign articles to kept deal
+                    await session.execute(
+                        text("UPDATE articles SET deal_id = :kept_id WHERE deal_id = :del_id"),
+                        {"kept_id": kept_id, "del_id": del_id}
+                    )
+                    # Delete from referencing tables
+                    await session.execute(
+                        text("DELETE FROM date_sources WHERE deal_id = :id"),
+                        {"id": del_id}
+                    )
+                    await session.execute(
+                        text("DELETE FROM deal_investors WHERE deal_id = :id"),
+                        {"id": del_id}
+                    )
+                    await session.execute(
+                        text("DELETE FROM tracker_items WHERE deal_id = :id"),
+                        {"id": del_id}
+                    )
+                    await session.execute(
+                        text("DELETE FROM stealth_signals WHERE converted_deal_id = :id"),
+                        {"id": del_id}
+                    )
+                    # Delete the deal
+                    await session.execute(
+                        text("DELETE FROM deals WHERE id = :id"),
+                        {"id": del_id}
+                    )
+                    duplicates_removed += 1
+
+            await session.commit()
+            logger.info(f"Removed {duplicates_removed} cross-round-type duplicates")
+
+            # Step 4: Create index (not unique - NULLs are allowed)
+            try:
+                await session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_deals_amount_dedup_key ON deals(amount_dedup_key)"
+                ))
+                await session.commit()
+                logger.info("Created index on amount_dedup_key")
+            except Exception as idx_err:
+                logger.warning(f"Index creation note: {idx_err}")
+
+            return MigrationResponse(
+                success=True,
+                message=f"Amount dedup migration complete. Backfilled {backfilled} deals, removed {duplicates_removed} duplicates.",
+                duplicates_removed=duplicates_removed,
+            )
+
+    except Exception as e:
+        logger.error(f"Amount dedup migration failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Migration failed: {str(e)}")
 
 

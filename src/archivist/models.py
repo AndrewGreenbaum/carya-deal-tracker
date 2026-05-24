@@ -89,6 +89,12 @@ class Deal(SQLModel, table=True):
     # Unique constraint prevents parallel inserts of same deal
     dedup_key: Optional[str] = Field(default=None, max_length=32, index=True)
 
+    # Secondary deduplication key based on amount (FIX Jan 2026: Parloa duplicate bug)
+    # Hash of normalized_company_name + amount_bucket + date_bucket
+    # Catches duplicates where LLM assigns different round_types to same deal
+    # (e.g., "growth" vs "series_d" for the same $350M raise)
+    amount_dedup_key: Optional[str] = Field(default=None, max_length=32, index=True)
+
     # Round details
     round_type: str  # seed, series_a, series_b, etc.
     amount: Optional[str] = None  # "$50M"
