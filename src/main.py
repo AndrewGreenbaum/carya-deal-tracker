@@ -3910,6 +3910,7 @@ async def enrich_single_company(
 @app.post("/enrichment/deals", response_model=EnrichmentResponse)
 async def enrich_deals(
     limit: int = Query(10, ge=1, le=50, description="Max deals to enrich"),
+    offset: int = Query(0, ge=0, description="Number of deals to skip for pagination"),
     skip_enriched: bool = Query(True, description="Skip deals that already have data"),
     force_update: bool = Query(False, description="Overwrite existing data with new enrichment"),
     api_key: str = Depends(verify_api_key),
@@ -3946,7 +3947,7 @@ async def enrich_deals(
             (Deal.founders_json.is_(None)) | (Deal.founders_json == "[]") | (Deal.founders_json == "")
         )
 
-    query = query.order_by(Deal.created_at.desc()).limit(limit)
+    query = query.order_by(Deal.created_at.desc()).offset(offset).limit(limit)
 
     result = await db.execute(query)
     deals = result.scalars().all()
