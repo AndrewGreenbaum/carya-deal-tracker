@@ -12,19 +12,21 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Database, Server, Cpu, Settings, Clock, History, Radar } from 'lucide-react';
+import { Database, Server, Cpu, Settings, Clock, History, Radar, Menu } from 'lucide-react';
 import type { SystemStatus } from '../types';
 
 interface CommandHeaderProps {
   systemStatus: SystemStatus;
   onSettingsClick: () => void;
   onPreFundingClick?: () => void;
+  onMenuClick?: () => void;
 }
 
 export function CommandHeader({
   systemStatus,
   onSettingsClick,
   onPreFundingClick,
+  onMenuClick,
 }: CommandHeaderProps) {
   // Live countdown state - updates every second
   const [countdown, setCountdown] = useState<string | null>(null);
@@ -65,17 +67,27 @@ export function CommandHeader({
   const nextScrape = countdown;
 
   return (
-    <header className="h-16 border-b border-slate-800 bg-[#0a0a0c] flex items-center justify-between px-6 shrink-0 z-20">
-      {/* Logo */}
-      <div className="flex items-center gap-4">
-        <div className="w-3 h-3 bg-emerald-500 rounded-full pulse-glow" />
-        <h1 className="text-xl font-bold tracking-tighter bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 bg-clip-text text-transparent animate-shimmer bg-[length:200%_100%]">
+    <header className="h-14 md:h-16 border-b border-slate-800 bg-[#0a0a0c] flex items-center justify-between px-3 md:px-6 shrink-0 z-20">
+      {/* Left: Menu button (mobile) + Logo */}
+      <div className="flex items-center gap-2 md:gap-4">
+        {/* Hamburger menu - mobile only */}
+        {onMenuClick && (
+          <button
+            onClick={onMenuClick}
+            className="md:hidden flex items-center justify-center w-10 h-10 -ml-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 rounded transition-colors"
+            aria-label="Toggle menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        )}
+        <div className="w-2.5 h-2.5 md:w-3 md:h-3 bg-emerald-500 rounded-full pulse-glow" />
+        <h1 className="text-base md:text-xl font-bold tracking-tighter bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 bg-clip-text text-transparent animate-shimmer bg-[length:200%_100%]">
           Carya Eagle Eye
         </h1>
       </div>
 
-      {/* Status Indicators */}
-      <div className="flex gap-4 text-xs font-medium">
+      {/* Status Indicators - hidden on mobile, visible on md+ */}
+      <div className="hidden md:flex gap-4 text-xs font-medium">
         {/* SEC EDGAR */}
         <StatusBadge
           icon={<Database className="w-3 h-3 text-blue-400" />}
@@ -120,7 +132,7 @@ export function CommandHeader({
           </div>
         )}
 
-        {/* Action Buttons */}
+        {/* Action Buttons - Desktop */}
         {onPreFundingClick && (
           <button
             onClick={onPreFundingClick}
@@ -145,6 +157,17 @@ export function CommandHeader({
           title="Settings"
         >
           <Settings className="w-3 h-3" />
+        </button>
+      </div>
+
+      {/* Mobile Action Buttons - visible only on mobile */}
+      <div className="flex md:hidden items-center gap-1">
+        <button
+          onClick={onSettingsClick}
+          className="flex items-center justify-center w-10 h-10 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 rounded transition-colors"
+          title="Settings"
+        >
+          <Settings className="w-4 h-4" />
         </button>
       </div>
     </header>

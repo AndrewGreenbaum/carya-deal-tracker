@@ -17,7 +17,7 @@ interface StatsCardsProps {
 
 export const StatsCards = memo(function StatsCards({ stats }: StatsCardsProps) {
   return (
-    <div className="grid grid-cols-3 gap-4 p-6 border-b border-slate-800 bg-[#0a0a0c]">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 p-4 sm:p-6 border-b border-slate-800 bg-[#0a0a0c]">
       {/* Total Deals Scanned */}
       <StatCard
         title="Total Deals"

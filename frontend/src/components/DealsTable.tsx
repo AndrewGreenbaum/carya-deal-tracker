@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import type { Deal, EnterpriseCategory, InvestmentStage, PaginatedDeals, SortDirection } from '../types';
 import { STAGE_LABELS } from '../types';
+import { DealCard } from './DealCard';
 
 interface DealsTableProps {
   deals: Deal[];
@@ -64,34 +65,55 @@ export function DealsTable({
   return (
     <>
       {/* Header */}
-      <div className="px-6 py-3 border-b border-slate-800 bg-[#0a0a0c] flex justify-between items-center">
-        <h2 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
-          <List className="w-4 h-4" /> Latest Extractions
-          <span className="text-slate-500 font-normal">({pagination.total} total)</span>
+      <div className="px-4 sm:px-6 py-3 border-b border-slate-800 bg-[#0a0a0c] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0">
+        <h2 className="text-xs sm:text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
+          <List className="w-4 h-4" />
+          <span className="hidden sm:inline">Latest Extractions</span>
+          <span className="sm:hidden">Deals</span>
+          <span className="text-slate-500 font-normal">({pagination.total})</span>
         </h2>
-        <div className="flex gap-2">
+        <div className="flex gap-2 w-full sm:w-auto">
           <button
             onClick={onExport}
-            className="btn-primary flex items-center gap-1.5"
+            className="btn-primary flex items-center justify-center gap-1.5 flex-1 sm:flex-none"
             aria-label="Export deals to CSV"
           >
             <Download className="w-3 h-3" />
-            EXPORT CSV
+            <span className="hidden sm:inline">EXPORT CSV</span>
+            <span className="sm:hidden">EXPORT</span>
           </button>
           <button
             onClick={onRefresh}
             disabled={isLoading}
-            className="btn-secondary flex items-center gap-1.5"
+            className="btn-secondary flex items-center justify-center gap-1.5 flex-1 sm:flex-none"
             aria-label={isLoading ? 'Refreshing deals...' : 'Refresh deals'}
           >
             <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
-            REFRESH
+            <span className="hidden sm:inline">REFRESH</span>
+            <span className="sm:hidden">{isLoading ? '...' : 'REFRESH'}</span>
           </button>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto">
+      {/* Mobile Card View */}
+      <div className="md:hidden flex-1 overflow-auto p-4 space-y-3">
+        {deals.map((deal) => (
+          <DealCard
+            key={deal.id}
+            deal={deal}
+            onClick={() => onDealClick(deal)}
+            showRejected={showRejected}
+          />
+        ))}
+        {deals.length === 0 && (
+          <div className="py-12 text-center text-slate-500">
+            {isLoading ? 'Loading deals...' : 'No deals found matching your filters'}
+          </div>
+        )}
+      </div>
+
+      {/* Desktop Table View */}
+      <div className="hidden md:block flex-1 overflow-auto">
         <table className="w-full text-left border-collapse">
           <thead className="bg-[#0a0a0c] sticky top-0 z-10 text-[10px] uppercase font-bold text-slate-500">
             <tr>
@@ -143,31 +165,32 @@ export function DealsTable({
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="px-6 py-3 border-t border-slate-800 bg-[#0a0a0c] flex justify-between items-center">
-          <div className="text-xs text-slate-500">
-            Showing {pagination.offset + 1}-
-            {Math.min(pagination.offset + pagination.limit, pagination.total)} of{' '}
-            {pagination.total}
+        <div className="px-4 sm:px-6 py-3 border-t border-slate-800 bg-[#0a0a0c] flex flex-col sm:flex-row justify-between items-center gap-2">
+          <div className="text-xs text-slate-500 order-2 sm:order-1">
+            <span className="hidden sm:inline">Showing </span>
+            {pagination.offset + 1}-{Math.min(pagination.offset + pagination.limit, pagination.total)}
+            <span className="hidden sm:inline"> of</span>
+            <span className="sm:hidden">/</span> {pagination.total}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 order-1 sm:order-2 w-full sm:w-auto justify-between sm:justify-end">
             <button
               onClick={() => onPageChange(Math.max(0, pagination.offset - pagination.limit))}
               disabled={pagination.offset === 0}
-              className="btn-secondary flex items-center gap-1 disabled:opacity-50"
+              className="btn-secondary flex items-center justify-center gap-1 disabled:opacity-50 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0"
             >
-              <ChevronLeft className="w-3 h-3" />
-              Previous
+              <ChevronLeft className="w-4 h-4 sm:w-3 sm:h-3" />
+              <span className="hidden sm:inline">Previous</span>
             </button>
-            <span className="px-3 py-1.5 text-xs text-slate-400">
-              Page {currentPage} of {totalPages}
+            <span className="px-3 py-1.5 text-xs text-slate-400 flex items-center">
+              {currentPage}/{totalPages}
             </span>
             <button
               onClick={() => onPageChange(pagination.offset + pagination.limit)}
               disabled={!pagination.hasMore}
-              className="btn-secondary flex items-center gap-1 disabled:opacity-50"
+              className="btn-secondary flex items-center justify-center gap-1 disabled:opacity-50 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0"
             >
-              Next
-              <ChevronRight className="w-3 h-3" />
+              <span className="hidden sm:inline">Next</span>
+              <ChevronRight className="w-4 h-4 sm:w-3 sm:h-3" />
             </button>
           </div>
         </div>

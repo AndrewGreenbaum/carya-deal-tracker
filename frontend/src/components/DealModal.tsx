@@ -173,13 +173,13 @@ export const DealModal = memo(function DealModal({ deal, onClose, onDealUpdated 
         role="dialog"
         aria-modal="true"
         aria-labelledby="deal-modal-title"
-        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl mx-4 bg-[#0a0a0c] border border-slate-800 rounded-lg shadow-2xl"
+        className="fixed inset-4 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 w-auto sm:w-full sm:max-w-2xl sm:mx-4 bg-[#0a0a0c] border border-slate-800 rounded-lg shadow-2xl overflow-y-auto max-h-[calc(100vh-2rem)] sm:max-h-[90vh]"
       >
         {/* Header */}
-        <div className="flex items-start justify-between p-6 border-b border-slate-800">
-          <div>
-            <h2 id="deal-modal-title" className="text-2xl font-bold text-white">{currentDeal.startupName}</h2>
-            <div className="flex items-center gap-2 mt-2 text-sm">
+        <div className="flex items-start justify-between p-4 sm:p-6 border-b border-slate-800">
+          <div className="min-w-0 flex-1 mr-2">
+            <h2 id="deal-modal-title" className="text-xl sm:text-2xl font-bold text-white truncate">{currentDeal.startupName}</h2>
+            <div className="flex items-center gap-2 mt-2 text-sm flex-wrap">
               <span className={`stage-badge stage-${currentDeal.investmentStage}`}>
                 {STAGE_LABELS[currentDeal.investmentStage]}
               </span>
@@ -229,9 +229,9 @@ export const DealModal = memo(function DealModal({ deal, onClose, onDealUpdated 
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-6">
+        <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
           {/* Main Info Grid */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             {/* Lead Investor */}
             <InfoCard
               icon={<Users className="w-4 h-4 text-emerald-400" />}
@@ -337,12 +337,12 @@ export const DealModal = memo(function DealModal({ deal, onClose, onDealUpdated 
               </label>
               <div className="space-y-2">
                 {currentDeal.founders.map((founder, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-slate-900/50 border border-slate-800 rounded">
-                    <div className="flex items-center gap-2">
-                      <User className="w-4 h-4 text-slate-400" />
-                      <span className="text-white">{founder.name}</span>
+                  <div key={index} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-900/50 border border-slate-800 rounded gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <User className="w-4 h-4 text-slate-400 shrink-0" />
+                      <span className="text-white truncate">{founder.name}</span>
                       {founder.title && (
-                        <span className="text-slate-500 text-sm">• {founder.title}</span>
+                        <span className="text-slate-500 text-sm truncate hidden sm:inline">• {founder.title}</span>
                       )}
                     </div>
                     {/* LinkedIn - always show status */}
@@ -351,14 +351,14 @@ export const DealModal = memo(function DealModal({ deal, onClose, onDealUpdated 
                         href={founder.linkedinUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-sm transition-colors"
+                        className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-sm transition-colors shrink-0"
                         title={founder.linkedinUrl}
                       >
                         <Linkedin className="w-3 h-3" />
                         LinkedIn
                       </a>
                     ) : (
-                      <span className="flex items-center gap-1 text-slate-600 text-sm" title="LinkedIn not found">
+                      <span className="flex items-center gap-1 text-slate-600 text-sm shrink-0" title="LinkedIn not found">
                         <Linkedin className="w-3 h-3" />
                         No LinkedIn
                       </span>
@@ -424,7 +424,7 @@ export const DealModal = memo(function DealModal({ deal, onClose, onDealUpdated 
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-800 flex justify-end gap-3">
+        <div className="px-4 sm:px-6 py-4 border-t border-slate-800 flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3">
           <button onClick={onClose} className="btn-secondary">
             Close
           </button>

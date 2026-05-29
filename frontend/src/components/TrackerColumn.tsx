@@ -48,47 +48,47 @@ export function TrackerColumn({
   const colorClasses = TRACKER_COLOR_CLASSES[column.color] || TRACKER_COLOR_CLASSES.slate;
 
   return (
-    <div className="flex flex-col w-72 shrink-0 group">
+    <div className="flex flex-col w-64 sm:w-72 shrink-0 group">
       {/* Column Header */}
       <div className="flex items-center gap-2 mb-3 px-1">
         <div className={`w-2 h-2 rounded-full ${colorClasses.dot}`} />
-        <h3 className="text-sm font-medium text-white">{column.displayName}</h3>
-        <span className="px-2 py-0.5 text-xs bg-slate-800 text-slate-400 rounded-full">
+        <h3 className="text-sm font-medium text-white truncate">{column.displayName}</h3>
+        <span className="px-2 py-0.5 text-xs bg-slate-800 text-slate-400 rounded-full shrink-0">
           {count}
         </span>
-        {/* Column Actions (show on hover) */}
-        <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Column Actions (always visible on mobile, hover on desktop) */}
+        <div className="ml-auto flex items-center gap-0.5 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
           {!isFirst && (
             <button
               onClick={() => onMoveLeft(column)}
-              className="p-1 text-slate-500 hover:text-white hover:bg-slate-700 rounded transition-colors"
+              className="p-2 sm:p-1 text-slate-500 hover:text-white hover:bg-slate-700 rounded transition-colors"
               title="Move left"
             >
-              <ChevronLeft className="w-3.5 h-3.5" />
+              <ChevronLeft className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
             </button>
           )}
           {!isLast && (
             <button
               onClick={() => onMoveRight(column)}
-              className="p-1 text-slate-500 hover:text-white hover:bg-slate-700 rounded transition-colors"
+              className="p-2 sm:p-1 text-slate-500 hover:text-white hover:bg-slate-700 rounded transition-colors"
               title="Move right"
             >
-              <ChevronRight className="w-3.5 h-3.5" />
+              <ChevronRight className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
             </button>
           )}
           <button
             onClick={() => onEditColumn(column)}
-            className="p-1 text-slate-500 hover:text-white hover:bg-slate-700 rounded transition-colors"
+            className="p-2 sm:p-1 text-slate-500 hover:text-white hover:bg-slate-700 rounded transition-colors"
             title="Edit column"
           >
-            <Pencil className="w-3.5 h-3.5" />
+            <Pencil className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
           </button>
           <button
             onClick={() => onDeleteColumn(column)}
-            className="p-1 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded transition-colors"
+            className="p-2 sm:p-1 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded transition-colors"
             title="Delete column"
           >
-            <Trash2 className="w-3.5 h-3.5" />
+            <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
           </button>
         </div>
       </div>

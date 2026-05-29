@@ -128,21 +128,21 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
       {/* Panel */}
       <div className="fixed top-0 right-0 h-full w-full max-w-lg z-50 bg-[#0a0a0c] border-l border-slate-800 shadow-2xl animate-slide-in overflow-y-auto">
         {/* Header */}
-        <div className="sticky top-0 z-10 flex items-center justify-between p-6 border-b border-slate-800 bg-[#0a0a0c]">
+        <div className="sticky top-0 z-10 flex items-center justify-between p-4 sm:p-6 border-b border-slate-800 bg-[#0a0a0c]">
           <div className="flex items-center gap-3">
             <Bell className="w-5 h-5 text-emerald-400" />
             <h2 className="text-lg font-bold text-white">Settings</h2>
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-slate-800 rounded transition-colors text-slate-400 hover:text-white"
+            className="p-2.5 sm:p-2 hover:bg-slate-800 rounded transition-colors text-slate-400 hover:text-white min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-8">
+        <div className="p-4 sm:p-6 space-y-6 sm:space-y-8">
           {/* Slack Configuration */}
           <section>
             <div className="flex items-center gap-2 mb-4">
@@ -355,7 +355,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         </div>
 
         {/* Footer */}
-        <div className="sticky bottom-0 p-6 border-t border-slate-800 bg-[#0a0a0c]">
+        <div className="sticky bottom-0 p-4 sm:p-6 border-t border-slate-800 bg-[#0a0a0c]">
           {saveStatus === 'success' && (
             <div className="flex items-center gap-2 text-emerald-400 text-sm mb-4">
               <CheckCircle className="w-4 h-4" />
@@ -401,12 +401,12 @@ function ToggleSwitch({ enabled, onChange }: ToggleSwitchProps) {
   return (
     <button
       onClick={() => onChange(!enabled)}
-      className={`relative w-11 h-6 rounded-full transition-colors ${
+      className={`relative w-12 h-7 sm:w-11 sm:h-6 rounded-full transition-colors min-w-[44px] ${
         enabled ? 'bg-emerald-500' : 'bg-slate-700'
       }`}
     >
       <div
-        className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
+        className={`absolute top-1 sm:top-1 w-5 h-5 sm:w-4 sm:h-4 bg-white rounded-full transition-transform ${
           enabled ? 'translate-x-6' : 'translate-x-1'
         }`}
       />

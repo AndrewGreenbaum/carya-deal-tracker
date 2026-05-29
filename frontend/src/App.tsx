@@ -131,6 +131,7 @@ function App() {
   const [currentView, setCurrentView] = useState<ViewType>(getInitialView);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Data state (deals stored in pagination.deals to avoid redundancy)
   const [funds, setFunds] = useState<Fund[]>([]);
@@ -379,13 +380,14 @@ function App() {
         systemStatus={systemStatus}
         onSettingsClick={() => setSettingsOpen(true)}
         onPreFundingClick={() => setCurrentView('prefunding')}
+        onMenuClick={() => setMobileMenuOpen(true)}
       />
 
       {/* Main Layout */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Sidebar */}
+        {/* Sidebar - hidden on mobile (shown via drawer), visible on desktop */}
         <div
-          className={`h-full transition-all duration-300 ease-in-out shrink-0 ${
+          className={`hidden md:block h-full transition-all duration-300 ease-in-out shrink-0 ${
             sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-64'
           }`}
         >
@@ -402,10 +404,25 @@ function App() {
           </div>
         </div>
 
-        {/* Sidebar Toggle Button - subtle, appears on hover */}
+        {/* Mobile Sidebar Drawer */}
+        <div className="md:hidden">
+          <CommandSidebar
+            filters={filters}
+            onFiltersChange={setFilters}
+            funds={funds}
+            currentView={currentView}
+            onViewChange={setCurrentView}
+            onOpenFeedback={() => setFeedbackOpen(true)}
+            onOpenAircraft={() => setAircraftTrackerOpen(true)}
+            isMobileOpen={mobileMenuOpen}
+            onMobileClose={() => setMobileMenuOpen(false)}
+          />
+        </div>
+
+        {/* Sidebar Toggle Button - hidden on mobile, visible on desktop */}
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className={`absolute top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-4 h-8 bg-slate-900/80 hover:bg-slate-700 border border-slate-800 hover:border-slate-600 rounded-r text-slate-600 hover:text-slate-300 opacity-40 hover:opacity-100 transition-all duration-300 ${
+          className={`hidden md:flex absolute top-1/2 -translate-y-1/2 z-20 items-center justify-center w-4 h-8 bg-slate-900/80 hover:bg-slate-700 border border-slate-800 hover:border-slate-600 rounded-r text-slate-600 hover:text-slate-300 opacity-40 hover:opacity-100 transition-all duration-300 ${
             sidebarCollapsed ? 'left-0' : 'left-64'
           }`}
           title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}

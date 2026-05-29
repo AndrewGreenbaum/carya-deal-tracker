@@ -351,34 +351,36 @@ export function Tracker() {
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-800 gap-3 sm:gap-0">
         <div>
-          <h1 className="text-xl font-bold text-white">Deal Tracker</h1>
+          <h1 className="text-lg sm:text-xl font-bold text-white">Deal Tracker</h1>
           <p className="text-sm text-slate-400">
             {stats?.total || 0} companies in pipeline
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
           <button
             onClick={loadAll}
-            className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
+            className="p-2.5 sm:p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center"
             title="Refresh"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
           <button
             onClick={() => setIsBulkAddModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded font-medium transition-colors"
+            className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 sm:py-2 bg-slate-700 hover:bg-slate-600 text-white rounded font-medium transition-colors flex-1 sm:flex-none min-h-[44px] sm:min-h-0"
           >
             <Upload className="w-4 h-4" />
-            Bulk Add
+            <span className="hidden sm:inline">Bulk Add</span>
+            <span className="sm:hidden">Bulk</span>
           </button>
           <button
             onClick={handleCreateNew}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-medium transition-colors"
+            className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 sm:py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-medium transition-colors flex-1 sm:flex-none min-h-[44px] sm:min-h-0"
           >
             <Plus className="w-4 h-4" />
-            Add Company
+            <span className="hidden sm:inline">Add Company</span>
+            <span className="sm:hidden">Add</span>
           </button>
         </div>
       </div>
@@ -397,7 +399,7 @@ export function Tracker() {
       )}
 
       {/* Kanban Board */}
-      <div className="flex-1 min-h-0 overflow-auto p-6">
+      <div className="flex-1 min-h-0 overflow-auto p-4 sm:p-6">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
@@ -405,7 +407,7 @@ export function Tracker() {
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex gap-4 min-h-full" style={{ minWidth: 'max-content' }}>
+          <div className="flex gap-3 sm:gap-4 min-h-full pb-4" style={{ minWidth: 'max-content' }}>
             {columns.map((column) => {
               const columnItems = getItemsByStatus(column.slug);
               return (
@@ -427,7 +429,7 @@ export function Tracker() {
             {/* Add Column Button */}
             <button
               onClick={handleAddColumn}
-              className="flex flex-col items-center justify-center w-72 shrink-0 h-32 border-2 border-dashed border-slate-700 rounded-lg text-slate-500 hover:border-slate-600 hover:text-slate-400 transition-colors"
+              className="flex flex-col items-center justify-center w-64 sm:w-72 shrink-0 h-32 border-2 border-dashed border-slate-700 rounded-lg text-slate-500 hover:border-slate-600 hover:text-slate-400 transition-colors min-h-[44px]"
             >
               <Plus className="w-6 h-6 mb-1" />
               <span className="text-sm">Add Column</span>

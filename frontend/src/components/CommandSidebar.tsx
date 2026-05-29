@@ -12,7 +12,7 @@
  * - Cost tracker widget
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Home, ChevronDown, ChevronUp, Search, X, Kanban, Mail, Plane } from 'lucide-react';
 import type { FilterState, EnterpriseCategory, Fund, ViewType } from '../types';
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
@@ -25,6 +25,8 @@ interface CommandSidebarProps {
   onViewChange: (view: ViewType) => void;
   onOpenFeedback?: () => void;
   onOpenAircraft?: () => void;
+  isMobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
 export function CommandSidebar({
@@ -35,8 +37,28 @@ export function CommandSidebar({
   onViewChange,
   onOpenFeedback,
   onOpenAircraft,
+  isMobileOpen = false,
+  onMobileClose,
 }: CommandSidebarProps) {
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+
+  // Close sidebar when navigating on mobile
+  const handleViewChange = (view: ViewType) => {
+    onViewChange(view);
+    onMobileClose?.();
+  };
+
+  // Prevent body scroll when mobile sidebar is open
+  useEffect(() => {
+    if (isMobileOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isMobileOpen]);
 
   const toggleFilter = (key: keyof FilterState) => {
     if (key === 'selectedFund' || key === 'selectedCategory' || key === 'searchQuery' || key === 'sortDirection') return;
@@ -86,26 +108,56 @@ export function CommandSidebar({
   });
 
   return (
-    <aside className="w-64 h-full bg-[#0a0a0d] border-r border-slate-800/60 flex flex-col shrink-0">
-      {/* Scrollable content area - entire sidebar scrolls */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        {/* Navigation */}
-        <nav className="px-5 py-4 border-b border-slate-800/40">
-          <div className="space-y-2">
-            <NavItem
-              icon={<Home className="w-4 h-4" />}
-              label="Dashboard"
-              active={currentView === 'dashboard'}
-              onClick={() => onViewChange('dashboard')}
-            />
-            <NavItem
-              icon={<Kanban className="w-4 h-4" />}
-              label="Tracker"
-              active={currentView === 'tracker'}
-              onClick={() => onViewChange('tracker')}
-            />
-          </div>
-        </nav>
+    <>
+      {/* Mobile overlay backdrop */}
+      {isMobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-40 md:hidden"
+          onClick={onMobileClose}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar - fixed on mobile, static on desktop */}
+      <aside
+        className={`
+          w-64 h-full bg-[#0a0a0d] border-r border-slate-800/60 flex flex-col shrink-0
+          md:relative md:translate-x-0
+          fixed top-0 left-0 z-50 transition-transform duration-300 ease-in-out
+          ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        `}
+      >
+        {/* Mobile close button */}
+        <div className="md:hidden flex items-center justify-between px-4 py-2 border-b border-slate-800/40">
+          <span className="text-sm font-semibold text-slate-300">Menu</span>
+          <button
+            onClick={onMobileClose}
+            className="w-11 h-11 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 rounded transition-colors"
+            aria-label="Close menu"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Scrollable content area - entire sidebar scrolls */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {/* Navigation */}
+          <nav className="px-5 py-4 border-b border-slate-800/40">
+            <div className="space-y-2">
+              <NavItem
+                icon={<Home className="w-4 h-4" />}
+                label="Dashboard"
+                active={currentView === 'dashboard'}
+                onClick={() => handleViewChange('dashboard')}
+              />
+              <NavItem
+                icon={<Kanban className="w-4 h-4" />}
+                label="Tracker"
+                active={currentView === 'tracker'}
+                onClick={() => handleViewChange('tracker')}
+              />
+            </div>
+          </nav>
 
         {/* Search */}
         <div className="px-5 py-4 border-b border-slate-800/40">
@@ -169,7 +221,7 @@ export function CommandSidebar({
             <div className="mt-4 pt-2">
               <button
                 onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
-                className="w-full flex items-center justify-between text-sm text-slate-400 hover:text-slate-200 py-2 px-3 bg-slate-900/50 rounded border border-slate-700/50"
+                className="w-full flex items-center justify-between text-sm text-slate-400 hover:text-slate-200 py-3 md:py-2 px-3 bg-slate-900/50 rounded border border-slate-700/50 min-h-[44px] md:min-h-0"
               >
                 <span>
                   {filters.selectedCategory
@@ -187,7 +239,7 @@ export function CommandSidebar({
                 <div className="mt-1 bg-slate-900/80 border border-slate-700/50 rounded overflow-hidden">
                   <button
                     onClick={() => setCategory(undefined)}
-                    className={`w-full text-left text-xs px-3 py-2 hover:bg-slate-800/50 ${
+                    className={`w-full text-left text-xs px-3 py-3 md:py-2 hover:bg-slate-800/50 min-h-[44px] md:min-h-0 ${
                       !filters.selectedCategory ? 'text-cyan-500' : 'text-slate-400'
                     }`}
                   >
@@ -199,7 +251,7 @@ export function CommandSidebar({
                       <button
                         key={category}
                         onClick={() => setCategory(category)}
-                        className={`w-full text-left text-xs px-3 py-2 hover:bg-slate-800/50 ${
+                        className={`w-full text-left text-xs px-3 py-3 md:py-2 hover:bg-slate-800/50 min-h-[44px] md:min-h-0 ${
                           filters.selectedCategory === category
                             ? 'text-cyan-500'
                             : 'text-slate-400'
@@ -243,7 +295,7 @@ export function CommandSidebar({
                       setFund(fund.slug === filters.selectedFund ? undefined : fund.slug);
                     }
                   }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded text-left transition-colors cursor-pointer ${
+                  className={`w-full flex items-center justify-between px-3 py-3 md:py-2 rounded text-left transition-colors cursor-pointer min-h-[44px] md:min-h-0 ${
                     fund.slug === filters.selectedFund
                       ? 'bg-cyan-950/40 text-cyan-500 border-l-2 border-cyan-700'
                       : 'hover:bg-slate-800/40 hover:text-slate-200'
@@ -262,24 +314,25 @@ export function CommandSidebar({
         </div>
       </div>
 
-      {/* Footer Actions - fixed at bottom */}
-      <div className="px-5 py-4 border-t border-slate-800/40 flex items-center justify-center gap-3 shrink-0">
-        <button
-          onClick={onOpenAircraft}
-          className="p-2 hover:bg-slate-800/50 text-slate-500 hover:text-cyan-500 rounded transition-colors"
-          title="Live Aircraft Tracker"
-        >
-          <Plane className="w-5 h-5" />
-        </button>
-        <button
-          onClick={onOpenFeedback}
-          className="p-2 hover:bg-slate-800/50 text-slate-500 hover:text-slate-300 rounded transition-colors"
-          title="Submit feedback"
-        >
-          <Mail className="w-5 h-5" />
-        </button>
-      </div>
-    </aside>
+        {/* Footer Actions - fixed at bottom */}
+        <div className="px-5 py-4 border-t border-slate-800/40 flex items-center justify-center gap-3 shrink-0">
+          <button
+            onClick={onOpenAircraft}
+            className="p-2 hover:bg-slate-800/50 text-slate-500 hover:text-cyan-500 rounded transition-colors"
+            title="Live Aircraft Tracker"
+          >
+            <Plane className="w-5 h-5" />
+          </button>
+          <button
+            onClick={onOpenFeedback}
+            className="p-2 hover:bg-slate-800/50 text-slate-500 hover:text-slate-300 rounded transition-colors"
+            title="Submit feedback"
+          >
+            <Mail className="w-5 h-5" />
+          </button>
+        </div>
+      </aside>
+    </>
   );
 }
 
@@ -296,7 +349,7 @@ function NavItem({ icon, label, active, disabled, onClick }: NavItemProps) {
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded text-sm transition-colors ${
+      className={`w-full flex items-center gap-3 px-3 py-3 md:py-2.5 rounded text-sm transition-colors min-h-[44px] md:min-h-0 ${
         active
           ? 'bg-cyan-950/40 text-cyan-500 border-l-2 border-cyan-700'
           : disabled
@@ -321,9 +374,9 @@ interface FilterCheckboxProps {
 
 function FilterCheckbox({ label, checked, onChange }: FilterCheckboxProps) {
   return (
-    <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-white group">
+    <label className="flex items-center gap-3 text-sm cursor-pointer hover:text-white group min-h-[44px] md:min-h-0 py-1 md:py-0">
       <div
-        className={`filter-checkbox ${checked ? 'checked' : 'unchecked'}`}
+        className={`filter-checkbox ${checked ? 'checked' : 'unchecked'} w-5 h-5 md:w-4 md:h-4`}
         onClick={onChange}
       >
         {checked && '✓'}
