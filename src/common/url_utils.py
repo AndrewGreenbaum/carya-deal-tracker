@@ -30,6 +30,8 @@ INVALID_WEBSITE_DOMAINS = {
     'youtube.com', 'tiktok.com', 'x.com',
     # Content platforms
     'medium.com', 'substack.com', 'blogspot.com', 'wordpress.com',
+    # Code hosting (not company websites)
+    'github.com', 'gitlab.com', 'bitbucket.org',
     # Data/news sites
     'crunchbase.com', 'pitchbook.com', 'techcrunch.com', 'bloomberg.com',
     'reuters.com', 'forbes.com', 'wsj.com', 'nytimes.com',

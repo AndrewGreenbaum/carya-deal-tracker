@@ -4,7 +4,7 @@ Tests for bug fixes (bugs 1-23 from the bug report).
 These tests validate the critical, high-priority, and medium-priority fixes
 across storage, enrichment, and scraper modules.
 
-Note: Tests that require importing from src.analyst or src.harvester are skipped
+Note: Tests that require importing from src.analyst or src.archivist are skipped
 due to Python 3.9 compatibility issues with the instructor/playwright libraries.
 """
 
@@ -13,18 +13,18 @@ import pytest
 from datetime import date
 from unittest.mock import MagicMock, patch
 
-# Python 3.9 has issues with instructor library's use of Python 3.10+ syntax
-SKIP_ARCHIVIST_TESTS = sys.version_info < (3, 10)
+# Import test helpers
+from tests.test_helpers import (
+    skip_no_archivist,
+    skip_no_enrichment,
+    skip_if_import_fails,
+    can_import_archivist,
+    can_import_enrichment,
+    SKIP_PY39,
+)
 
-
-# Skip tests that require modules with Python 3.10+ dependencies
-def skip_if_import_fails(module_path: str, reason: str = "Module not available"):
-    """Decorator to skip test if import fails."""
-    try:
-        __import__(module_path)
-        return lambda f: f
-    except (ImportError, TypeError):
-        return pytest.mark.skip(reason=reason)
+# Backward compatibility alias
+SKIP_ARCHIVIST_TESTS = SKIP_PY39 or not can_import_archivist()
 
 
 # =============================================================================
