@@ -61,6 +61,8 @@ _extraction_stats = {
     "article_title_rejected": 0,   # Deals rejected for company name looking like title
     "lead_evidence_downgraded": 0, # Lead claims downgraded to LIKELY_LEAD
     "amount_flagged_for_review": 0,  # Amounts flagged for market size confusion
+    "round_type_corrected": 0,     # Round types corrected to UNKNOWN (invalid enum)
+    "founders_removed": 0,         # Founders removed for not being in text
 }
 _extraction_stats_thread_lock = threading.Lock()
 
@@ -2083,6 +2085,103 @@ def _validate_company_in_text(deal: DealExtraction, article_text: str) -> DealEx
     deal.announcement_rejection_reason = (
         f"Company name '{deal.startup_name}' not found in article text - likely hallucinated"
     )
+
+    return deal
+
+
+def _validate_round_type(deal: DealExtraction) -> DealExtraction:
+    """
+    Validate that the extracted round_label is a valid RoundType enum value.
+
+    SAFEGUARD: Prevents invalid round types from corrupting the database and
+    bypassing deduplication logic (which depends on consistent round_type values).
+
+    Invalid values like "growth_a", "seed_plus", or "pre_series_a" would:
+    - Create inconsistent dedup_keys (different invalid values = different keys)
+    - Bypass TIER 1 dedup (which requires matching round_type)
+    - Corrupt analytics queries that filter by round_type
+
+    Args:
+        deal: The extracted deal
+
+    Returns:
+        Modified deal with valid round_type (UNKNOWN if original was invalid)
+    """
+    # Get valid round type values from enum
+    valid_round_types = {rt.value for rt in RoundType}
+
+    # Check if current round_label is valid
+    # Note: Pydantic should have already coerced to enum, but LLM might return
+    # invalid values that bypass validation in edge cases
+    current_value = deal.round_label.value if isinstance(deal.round_label, RoundType) else str(deal.round_label)
+
+    if current_value not in valid_round_types:
+        logger.warning(
+            f"CORRECTING invalid round_type for {deal.startup_name}: "
+            f"'{current_value}' is not a valid RoundType - setting to UNKNOWN"
+        )
+        increment_extraction_stat("round_type_corrected")
+        deal.round_label = RoundType.UNKNOWN
+
+    return deal
+
+
+def _validate_founders_in_text(deal: DealExtraction, article_text: str) -> DealExtraction:
+    """
+    Validate that extracted founders are actually mentioned in the article text.
+
+    SAFEGUARD: Prevents hallucinated founder names from being saved.
+
+    This catches cases where Claude hallucinates founder names based on
+    company description or investment thesis rather than actual article content.
+
+    Args:
+        deal: The extracted deal
+        article_text: Original article text
+
+    Returns:
+        Modified deal with hallucinated founders removed
+    """
+    if not article_text or not deal.founders:
+        return deal
+
+    text_lower = article_text.lower()
+    validated_founders = []
+    removed_founders = []
+
+    for founder in deal.founders:
+        founder_name = founder.name.lower().strip() if founder.name else ""
+        if not founder_name:
+            continue
+
+        # Check if founder name appears in article
+        # Use word-based matching to avoid false positives
+        name_parts = [p for p in founder_name.split() if len(p) >= 3]
+
+        if not name_parts:
+            # Very short name parts - require exact match
+            if founder_name in text_lower:
+                validated_founders.append(founder)
+            else:
+                removed_founders.append(founder.name)
+            continue
+
+        # Require at least 2 significant name parts to appear in text
+        # This prevents "John" matching when only the last name "Smith" is in the article
+        parts_found = sum(1 for part in name_parts if part in text_lower)
+
+        if parts_found >= min(2, len(name_parts)):  # At least 2 parts, or all if fewer
+            validated_founders.append(founder)
+        else:
+            removed_founders.append(founder.name)
+
+    if removed_founders:
+        logger.warning(
+            f"REMOVING hallucinated founders for {deal.startup_name}: "
+            f"{removed_founders} - not found in article text"
+        )
+        increment_extraction_stat("founders_removed", len(removed_founders))
+        deal.founders = validated_founders
 
     return deal
 
