@@ -215,7 +215,7 @@ class PRWireRSSScraper:
                     tag.decompose()
 
                 # PR wire article selectors (PRNewswire, GlobeNewswire, BusinessWire)
-                for selector in [
+                selectors_tried = [
                     '.release-body',  # PRNewswire
                     '.main-body',  # PRNewswire alt
                     '#content-body',  # GlobeNewswire
@@ -225,13 +225,19 @@ class PRWireRSSScraper:
                     'article',
                     '.post-content',
                     'main',
-                ]:
+                ]
+                for selector in selectors_tried:
                     content = soup.select_one(selector)
                     if content:
                         text = content.get_text(separator='\n', strip=True)
                         if len(text) > 200:
                             return text[:8000]
 
+                # FIX (2026-01): Log when all selectors fail (helps debug site changes)
+                logger.debug(
+                    f"No content found for PR wire article {url} - "
+                    f"all selectors failed: {selectors_tried}"
+                )
                 return None
 
             except httpx.TimeoutException:

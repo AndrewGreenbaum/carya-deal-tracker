@@ -457,22 +457,47 @@ class BraveEnrichmentClient:
         except Exception:
             return False
 
-    async def _verify_website_exists(self, url: str) -> bool:
+    async def _verify_website_exists(self, url: str, company_name: Optional[str] = None) -> bool:
         """Verify that a website URL responds with 2xx status.
 
         Uses HEAD request with short timeout to minimize latency.
         Returns True if site responds, False otherwise.
 
         FIX #4: Uses shared HTTP client instead of creating new one each call.
+        FIX (2026-01): Check final URL domain after redirects to prevent
+        redirect chains from returning True (e.g., example.com → linkedin.com).
         """
         try:
             client = await self._get_http_client()
             response = await client.head(url)
-            if response.status_code < 400:
-                return True
-            # Some sites block HEAD, try GET
-            response = await client.get(url)
-            return response.status_code < 400
+            if response.status_code >= 400:
+                # Some sites block HEAD, try GET
+                response = await client.get(url)
+                if response.status_code >= 400:
+                    return False
+
+            # FIX (2026-01): Check if final URL after redirects is still valid
+            # Reject if redirected to a known non-startup domain
+            final_url = str(response.url) if hasattr(response, 'url') else url
+            final_domain = urlparse(final_url).netloc.replace("www.", "").lower()
+
+            for skip_domain in SKIP_DOMAINS:
+                if skip_domain in final_domain:
+                    logger.debug(
+                        f"Website verification failed: {url} redirected to "
+                        f"invalid domain {final_domain}"
+                    )
+                    return False
+
+            # If company_name provided, verify final domain matches company
+            if company_name and not self._is_valid_startup_website(final_url, company_name):
+                logger.debug(
+                    f"Website verification failed: {url} redirected to "
+                    f"{final_url} which doesn't match company {company_name}"
+                )
+                return False
+
+            return True
         except Exception as e:
             logger.debug(f"Website verification failed for {url}: {e}")
             return False
@@ -647,8 +672,8 @@ class BraveEnrichmentClient:
             if self._is_valid_startup_website(url, company_name):
                 parsed = urlparse(url)
                 website_url = f"https://{parsed.netloc}"
-                # Verify website actually exists
-                if await self._verify_website_exists(website_url):
+                # Verify website actually exists (with redirect domain check)
+                if await self._verify_website_exists(website_url, company_name):
                     logger.info(f"Website verified for {company_name}: {website_url}")
                     return website_url
                 else:
@@ -663,8 +688,8 @@ class BraveEnrichmentClient:
                 if self._is_valid_startup_website(url, company_name):
                     parsed = urlparse(url)
                     website_url = f"https://{parsed.netloc}"
-                    # Verify website actually exists
-                    if await self._verify_website_exists(website_url):
+                    # Verify website actually exists (with redirect domain check)
+                    if await self._verify_website_exists(website_url, company_name):
                         logger.info(f"Website verified for {company_name}: {website_url}")
                         return website_url
 

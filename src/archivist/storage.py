@@ -16,25 +16,44 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 
+# CONSOLIDATED (2026-01): Single source of truth for company name suffixes
+# Previously duplicated in _normalize_company_name_for_dedup() and normalize_company_name()
+# Different suffix lists could cause dedup misses
+COMPANY_NAME_SUFFIXES = [
+    # Legal entity types (longer first to avoid partial matches)
+    ", incorporated", " incorporated",
+    ", technologies", " technologies",
+    ", corporation", " corporation",
+    ", limited", " limited",
+    ", company", " company",
+    ", inc.", " inc.",
+    ", inc", " inc",
+    ", llc", " llc",
+    ", ltd.", " ltd.",
+    ", ltd", " ltd",
+    ", corp.", " corp.",
+    ", corp", " corp",
+    ", co.", " co.",
+    ", co", " co",
+    # Common tech company suffixes
+    " labs", " lab",
+    " tech",
+    " ai",
+    # Additional suffixes for dedup (from CLAUDE.md)
+    " health", " cloud", " ml", " ops", " dev", " hq", " app", " io",
+]
+
+
 def _normalize_company_name_for_dedup(name: str) -> str:
     """
     Normalize company name for dedup key generation.
 
-    Inline version to avoid forward reference issues.
-    Mirrors normalize_company_name() logic.
+    Uses shared COMPANY_NAME_SUFFIXES constant (consolidated to prevent discrepancies).
     """
     name = name.lower().strip()
     if name.startswith("the "):
         name = name[4:]
-    suffixes = [
-        ", incorporated", " incorporated", ", technologies", " technologies",
-        ", corporation", " corporation", ", limited", " limited",
-        ", company", " company", ", inc.", " inc.", ", inc", " inc",
-        ", llc", " llc", ", ltd.", " ltd.", ", ltd", " ltd",
-        ", corp.", " corp.", ", corp", " corp", ", co.", " co.",
-        ", co", " co", " labs", " lab", " tech", " ai",
-    ]
-    for suffix in suffixes:
+    for suffix in COMPANY_NAME_SUFFIXES:
         if name.endswith(suffix):
             name = name[:-len(suffix)]
             break
@@ -282,21 +301,35 @@ def normalize_amount(amount_str: Optional[str]) -> Optional[int]:
         return int(num * 1_205)
     else:
         # No multiplier detected - need to infer based on context
-        # FIX: In funding context, numbers without multipliers are almost always in millions
-        # e.g., "raised 30", "$30", "30 round" → $30M
-        # Only raw numbers >= 100,000 are likely already in dollars (legacy data)
+        # FIX (2026-01): Improved heuristics for common funding amount patterns
+        # In funding context, numbers without multipliers follow patterns:
+        #   - < 1000: almost always means millions (e.g., "raised 30" = $30M)
+        #   - 1000-9999: likely thousands in early-stage (e.g., $5000 = $5K angel check)
+        #   - 10000-999999: ambiguous - could be dollars or malformed millions
+        #   - >= 1,000,000: already in dollars (e.g., "raised 5000000" for $5M)
         if num < 1000:
             # Small number without multiplier in funding context = millions
             # e.g., "raised 30" = $30M, "$50" = $50M
             logger.debug(f"Assuming {num} is in millions (no multiplier, funding context)")
             return int(num * 1_000_000)
-        elif num >= 100_000_000:
-            # Already looks like a dollar amount (e.g., 50000000 for $50M)
+        elif num >= 1_000_000:
+            # Already looks like a dollar amount (e.g., 5000000 for $5M)
+            return int(num)
+        elif num < 10000:
+            # 1000-9999: Likely early-stage in thousands (e.g., $5000 angel check)
+            # Return as-is since it's a valid small dollar amount
+            logger.debug(f"Amount {num} in 1K-10K range - treating as dollars")
             return int(num)
         else:
-            # Ambiguous range (1000-99,999,999) - log warning and return as-is
-            # Could be $5000 or could be malformed $5M
-            logger.warning(f"Ambiguous amount {num} without multiplier - storing as-is")
+            # 10000-999999: Ambiguous range - could be dollars or malformed millions
+            # IMPROVED: Check if it looks like a round number that should be millions
+            # e.g., 50000 might be $50M, but 12345 is likely dollars
+            if num % 10000 == 0:  # Round multiples of 10K (50000, 100000, etc.)
+                # Likely intended as millions (e.g., 50000 = $50M typo)
+                logger.warning(
+                    f"Ambiguous round amount {num} without multiplier - "
+                    f"might be ${num // 1000}K or ${num // 1000000}M"
+                )
             return int(num)
 
 
@@ -328,6 +361,9 @@ def normalize_company_name(name: str) -> str:
     """
     Normalize company name for fuzzy matching.
 
+    Uses shared COMPANY_NAME_SUFFIXES constant (consolidated to prevent discrepancies
+    with _normalize_company_name_for_dedup).
+
     Examples:
         "Valerie Health" → "valeriehealth"
         "Valerie" → "valerie"
@@ -342,28 +378,8 @@ def normalize_company_name(name: str) -> str:
     if name.startswith("the "):
         name = name[4:]
 
-    # Remove common suffixes (order matters - longer first)
-    suffixes = [
-        ", incorporated", " incorporated",
-        ", technologies", " technologies",
-        ", corporation", " corporation",
-        ", limited", " limited",
-        ", company", " company",
-        ", inc.", " inc.",
-        ", inc", " inc",
-        ", llc", " llc",
-        ", ltd.", " ltd.",
-        ", ltd", " ltd",
-        ", corp.", " corp.",
-        ", corp", " corp",
-        ", co.", " co.",
-        ", co", " co",
-        " labs", " lab",
-        " tech",
-        " ai",  # Be careful: only remove if it's a suffix
-    ]
-
-    for suffix in suffixes:
+    # Remove common suffixes (uses shared constant)
+    for suffix in COMPANY_NAME_SUFFIXES:
         if name.endswith(suffix):
             name = name[:-len(suffix)]
             break  # Only remove one suffix

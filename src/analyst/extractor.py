@@ -868,10 +868,21 @@ def _is_crypto_deal(deal: DealExtraction, article_text: str) -> bool:
             logger.debug(f"Crypto detected by strict company pattern: {deal.startup_name}")
             return True
 
-    # Check 2: Article is dominated by crypto keywords (3+ = likely crypto)
+    # Check 2: Article is dominated by crypto keywords
+    # IMPROVED (2026-01): Increased threshold from 3 to 4 keywords, and added
+    # protection for legitimate AI companies that work with blockchain
+    # (e.g., "blockchain AI infrastructure" should NOT be flagged)
     crypto_count = sum(1 for kw in CRYPTO_KEYWORDS if kw in text_lower)
-    if crypto_count >= 3:
-        logger.debug(f"Crypto detected by keyword density ({crypto_count}): {deal.startup_name}")
+
+    # Check for AI signals that protect against false crypto classification
+    ai_signals = ["ai infrastructure", "machine learning", "llm", "large language model",
+                  "ai platform", "enterprise ai", "mlops", "ai agent", "ai model"]
+    has_ai_signals = any(sig in text_lower for sig in ai_signals)
+
+    # Higher threshold (4+) if no AI signals, or very high threshold (6+) if AI signals present
+    threshold = 6 if has_ai_signals else 4
+    if crypto_count >= threshold:
+        logger.debug(f"Crypto detected by keyword density ({crypto_count}/{threshold}): {deal.startup_name}")
         return True
 
     # Check 3: Lead investor has "crypto" in name (e.g., "a16z crypto")
@@ -1558,6 +1569,9 @@ async def extract_deal(
 
             # Post-process: validate round type is valid enum value (prevents dedup bypass)
             response = _validate_round_type(response)
+
+            # Post-process: validate confidence score is in [0, 1] range
+            response = _validate_confidence_score(response)
 
             # Post-process: validate investors are mentioned in article (prevents hallucination)
             response = _validate_investors_in_text(response, article_text)
@@ -2262,6 +2276,39 @@ def _validate_round_type(deal: DealExtraction) -> DealExtraction:
         )
         increment_extraction_stat("round_type_corrected")
         deal.round_label = RoundType.UNKNOWN
+
+    return deal
+
+
+def _validate_confidence_score(deal: DealExtraction) -> DealExtraction:
+    """
+    Validate and clamp confidence score to valid range [0, 1].
+
+    SAFEGUARD (2026-01): LLM might return confidence scores outside the valid range.
+    This prevents invalid scores from causing issues downstream (e.g., negative
+    probabilities in filtering logic, or scores > 1 skewing statistics).
+
+    Args:
+        deal: The extracted deal
+
+    Returns:
+        Modified deal with confidence_score clamped to [0, 1]
+    """
+    original_score = deal.confidence_score
+
+    # Clamp to valid range
+    if deal.confidence_score < 0:
+        deal.confidence_score = 0.0
+        logger.warning(
+            f"CLAMPING negative confidence score for {deal.startup_name}: "
+            f"{original_score:.3f} -> 0.0"
+        )
+    elif deal.confidence_score > 1:
+        deal.confidence_score = 1.0
+        logger.warning(
+            f"CLAMPING confidence score > 1 for {deal.startup_name}: "
+            f"{original_score:.3f} -> 1.0"
+        )
 
     return deal
 

@@ -234,13 +234,19 @@ class TechCrunchScraper:
                     tag.decompose()
 
                 # TechCrunch article selectors
-                for selector in ['.article-content', '.entry-content', 'article', '.post-content', 'main']:
+                selectors_tried = ['.article-content', '.entry-content', 'article', '.post-content', 'main']
+                for selector in selectors_tried:
                     content = soup.select_one(selector)
                     if content:
                         text = content.get_text(separator='\n', strip=True)
                         if len(text) > 200:
                             return text[:8000]
 
+                # FIX (2026-01): Log when all selectors fail (helps debug site changes)
+                logger.debug(
+                    f"No content found for TechCrunch article {url} - "
+                    f"all selectors failed: {selectors_tried}"
+                )
                 return None
 
             except httpx.TimeoutException:
