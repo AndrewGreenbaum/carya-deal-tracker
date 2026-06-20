@@ -89,10 +89,12 @@ def make_amount_dedup_key(company_name: str, amount_usd: Optional[int], announce
     - Amount bucket (rounded to capture similar amounts)
     - Date bucket (rounded to 3-day windows)
 
-    Only generated when amount is known (>= $1M). Returns None otherwise.
+    IMPROVED (2026-01): Lowered threshold from $1M to $250K to support early-stage deals.
+    Many legitimate pre-seed rounds are in the $500K-$1M range.
 
     Amount buckets (logarithmic to handle wide range):
-    - <$1M: no key (too small, too many potential false positives)
+    - <$250K: no key (too small, too many potential false positives)
+    - $250K-$1M: bucket by $250K increments (for pre-seed/angel rounds)
     - $1M-$10M: bucket by $2M increments
     - $10M-$100M: bucket by $20M increments
     - $100M-$1B: bucket by $100M increments
@@ -102,20 +104,23 @@ def make_amount_dedup_key(company_name: str, amount_usd: Optional[int], announce
         A 32-character hex string (MD5 hash) or None if amount is unknown/too small
     """
     # Only generate if we have a meaningful amount
-    if not amount_usd or amount_usd < 1_000_000:
+    # IMPROVED (2026-01): Lowered threshold from $1M to $250K for early-stage dedup
+    if not amount_usd or amount_usd < 250_000:
         return None
 
     normalized_name = _normalize_company_name_for_dedup(company_name)
 
     # Calculate amount bucket (logarithmic buckets)
-    if amount_usd < 10_000_000:  # $1M-$10M
-        amount_bucket = amount_usd // 2_000_000  # $2M increments
+    if amount_usd < 1_000_000:  # $250K-$1M (early-stage)
+        amount_bucket = amount_usd // 250_000  # $250K increments
+    elif amount_usd < 10_000_000:  # $1M-$10M
+        amount_bucket = 4 + (amount_usd // 2_000_000)  # $2M increments, offset by 4
     elif amount_usd < 100_000_000:  # $10M-$100M
-        amount_bucket = 5 + (amount_usd // 20_000_000)  # $20M increments, offset by 5
+        amount_bucket = 9 + (amount_usd // 20_000_000)  # $20M increments, offset by 9
     elif amount_usd < 1_000_000_000:  # $100M-$1B
-        amount_bucket = 10 + (amount_usd // 100_000_000)  # $100M increments, offset by 10
+        amount_bucket = 14 + (amount_usd // 100_000_000)  # $100M increments, offset by 14
     else:  # >$1B
-        amount_bucket = 20 + (amount_usd // 500_000_000)  # $500M increments, offset by 20
+        amount_bucket = 24 + (amount_usd // 500_000_000)  # $500M increments, offset by 24
 
     # Date bucket (same as dedup_key)
     if announced_date:

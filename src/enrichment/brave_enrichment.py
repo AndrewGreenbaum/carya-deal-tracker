@@ -161,15 +161,32 @@ def _extract_name_from_linkedin_title(title: str) -> Optional[str]:
             len(words[0]) >= 2 and len(words[1]) >= 2 and
             len(potential_name) < 40):
             # Reject if either word looks like a role/generic term, not a name
+            # EXPANDED (2026-01): Added more generic words to prevent false matches
             generic_words = {
-                'ceo', 'cto', 'cfo', 'coo', 'founder', 'founders', 'cofounder', 'president',
+                # Job titles
+                'ceo', 'cto', 'cfo', 'coo', 'cmo', 'cpo', 'ciso', 'cro',
+                'founder', 'founders', 'cofounder', 'president', 'chairman',
                 'director', 'manager', 'engineer', 'developer', 'designer',
+                'analyst', 'consultant', 'specialist', 'coordinator', 'associate',
+                'head', 'chief', 'senior', 'junior', 'lead', 'principal', 'staff',
+                'vice', 'executive', 'officer', 'partner', 'member',
+                # Generic page/content words
                 'profile', 'page', 'company', 'linkedin', 'view', 'about',
-                'head', 'chief', 'senior', 'junior', 'lead', 'principal',
+                'contact', 'support', 'admin', 'team', 'portal', 'official',
+                'careers', 'jobs', 'hiring', 'recruiting', 'talent', 'hr',
+                'sales', 'marketing', 'product', 'business', 'corporate',
+                # Locations/regions
+                'global', 'international', 'regional', 'local', 'national',
+                'north', 'south', 'east', 'west', 'central', 'americas', 'emea', 'apac',
+                # Departments
+                'operations', 'finance', 'legal', 'technology', 'research',
+                'customer', 'client', 'service', 'services', 'solutions',
             }
             if (words[0].lower() not in generic_words and
                 words[1].lower() not in generic_words):
-                return potential_name
+                # Additional check: name parts should be 2-15 chars (real names)
+                if 2 <= len(words[0]) <= 15 and 2 <= len(words[1]) <= 15:
+                    return potential_name
 
     return None
 
@@ -240,8 +257,11 @@ def _names_match(name1: Optional[str], name2: Optional[str]) -> bool:
     """
     Check if two names likely refer to the same person.
 
-    Uses fuzzy matching: at least first OR last name must match.
-    This catches variations like "Jason Lynch" vs "Jason M. Lynch".
+    TIGHTENED (2026-01): Requires BOTH first AND last name to match.
+    Previous logic allowed "James Smith" to match "James Johnson" because both had "James".
+
+    This catches variations like "Jason Lynch" vs "Jason M. Lynch" but rejects
+    "Jason Lynch" vs "Jason Smith".
 
     Returns True if names match, False otherwise.
     """
@@ -254,14 +274,29 @@ def _names_match(name1: Optional[str], name2: Optional[str]) -> bool:
     if not parts1 or not parts2:
         return False
 
-    # Check if any significant name part matches
-    # (first name OR last name should match)
-    for p1 in parts1:
-        for p2 in parts2:
-            if p1 == p2 and len(p1) >= 3:
-                return True
+    # Need at least 2 parts (first + last name) for proper matching
+    if len(parts1) < 2 or len(parts2) < 2:
+        # Single name part - require exact match
+        if len(parts1) == 1 and len(parts2) == 1:
+            return parts1[0] == parts2[0]
+        # One has full name, other has single - check if single appears in full
+        single = parts1 if len(parts1) == 1 else parts2
+        full = parts2 if len(parts1) == 1 else parts1
+        return single[0] in full
 
-    return False
+    # TIGHTENED: Require BOTH first AND last name to match
+    # First name is parts[0], last name is parts[-1] (handles middle names)
+    first1, last1 = parts1[0], parts1[-1]
+    first2, last2 = parts2[0], parts2[-1]
+
+    # Both first and last must match (allow for minor variations)
+    first_matches = (
+        first1 == first2 or
+        first1.startswith(first2) or first2.startswith(first1)  # Nick vs Nicholas
+    )
+    last_matches = last1 == last2
+
+    return first_matches and last_matches
 
 
 # Skip these domains (not startup company sites)

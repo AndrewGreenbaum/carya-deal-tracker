@@ -109,6 +109,8 @@ class PRWireRSSScraper:
 
     def _parse_date(self, entry: Dict[str, Any]) -> Optional[datetime]:
         """Parse publication date from feed entry."""
+        entry_title = entry.get('title', 'unknown')[:50]  # For logging
+
         # Try different date fields
         for field in ["published_parsed", "updated_parsed", "created_parsed"]:
             if hasattr(entry, field) and getattr(entry, field):
@@ -116,7 +118,9 @@ class PRWireRSSScraper:
                     import time
                     ts = time.mktime(getattr(entry, field))
                     return datetime.fromtimestamp(ts, tz=timezone.utc)
-                except (TypeError, ValueError):
+                except (TypeError, ValueError) as e:
+                    # FIX (2026-01): Log failed date parsing attempts
+                    logger.debug(f"Failed to parse {field} for '{entry_title}': {e}")
                     continue
 
         # Try string date fields
@@ -125,9 +129,13 @@ class PRWireRSSScraper:
                 try:
                     from dateutil import parser
                     return parser.parse(entry[field])
-                except Exception:
+                except Exception as e:
+                    # FIX (2026-01): Log failed date parsing attempts
+                    logger.debug(f"Failed to parse date string '{entry.get(field)}' for '{entry_title}': {e}")
                     continue
 
+        # FIX (2026-01): Log when no date could be parsed
+        logger.debug(f"No parseable date found for article: '{entry_title}'")
         return None
 
     def _is_funding_related(self, title: str, description: str) -> bool:
@@ -140,12 +148,22 @@ class PRWireRSSScraper:
 
         FIX: Uses word boundary matching for short keywords to avoid false positives
         like "gv" matching "given" or "guv".
+        FIX (2026-01): Also checks word-order variations for two-word fund names
+        (e.g., "Ventures Index" as well as "Index Ventures").
         """
         text = f"{title} {description}".lower()
 
         # Check long keywords with simple substring match (safe)
-        if any(kw in text for kw in TRACKED_FUND_KEYWORDS_LONG):
-            return True
+        for kw in TRACKED_FUND_KEYWORDS_LONG:
+            if kw in text:
+                return True
+            # FIX (2026-01): For two-word fund names, also check reversed word order
+            # e.g., "Index Ventures" also matches "Ventures Index"
+            words = kw.split()
+            if len(words) == 2:
+                reversed_kw = f"{words[1]} {words[0]}"
+                if reversed_kw in text:
+                    return True
 
         # Check short keywords with word boundary (prevents false positives)
         for kw in TRACKED_FUND_KEYWORDS_SHORT:
@@ -287,10 +305,15 @@ class PRWireRSSScraper:
                 articles = []
 
                 for entry in feed.entries:
-                    title = entry.get("title", "")
+                    title = entry.get("title", "").strip()
                     link = entry.get("link", "")
                     description = entry.get("summary", entry.get("description", ""))
                     pub_date = self._parse_date(entry)
+
+                    # FIX (2026-01): Skip articles with empty/whitespace titles
+                    if not title:
+                        logger.debug(f"Skipping article with empty title from {source}: {link}")
+                        continue
 
                     # Skip old articles
                     if pub_date and pub_date < cutoff:

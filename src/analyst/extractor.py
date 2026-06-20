@@ -614,7 +614,7 @@ async def _reextract_with_sonnet(
         # This ensures fair comparison between Haiku and Sonnet results
         response = _validate_company_in_text(response, article_text)
         response = _validate_investors_in_text(response, article_text)
-        response = _verify_tracked_fund(response)
+        response = _verify_tracked_fund(response, article_text)
 
         # Decide which result is better
         # Prefer Sonnet if: higher confidence OR more founders OR stronger lead evidence
@@ -963,13 +963,14 @@ def _is_consumer_fintech_deal(deal: DealExtraction, article_text: str) -> bool:
 # =============================================================================
 
 # Typical check sizes by round (upper bounds for flagging)
-# Based on 2024-2025 market data for AI deals
+# UPDATED (2026-01): Increased thresholds to reflect 2025-2026 AI market conditions
+# AI deals are running larger than historical averages due to infrastructure costs
 ROUND_AMOUNT_THRESHOLDS = {
-    RoundType.PRE_SEED: 5_000_000,      # $5M max typical for pre-seed
-    RoundType.SEED: 25_000_000,          # $25M max typical for seed
-    RoundType.SERIES_A: 100_000_000,     # $100M max typical for Series A
-    RoundType.SERIES_B: 250_000_000,     # $250M max typical for Series B
-    RoundType.SERIES_C: 500_000_000,     # $500M max typical for Series C
+    RoundType.PRE_SEED: 10_000_000,      # $10M max for AI pre-seed (was $5M)
+    RoundType.SEED: 50_000_000,          # $50M max for AI seed (was $25M)
+    RoundType.SERIES_A: 200_000_000,     # $200M max for AI Series A (was $100M)
+    RoundType.SERIES_B: 500_000_000,     # $500M max for AI Series B (was $250M)
+    RoundType.SERIES_C: 1_000_000_000,   # $1B max for AI Series C (was $500M)
 }
 
 # Patterns that indicate market size / TAM (not funding amount)
@@ -1158,17 +1159,27 @@ def _is_consumer_ai_deal(deal: DealExtraction, article_text: str) -> bool:
 # Patterns that indicate text is an article title, not a company name
 # FIX #34: Made patterns more specific to avoid rejecting valid company names
 ARTICLE_TITLE_PATTERNS = [
-    r"'s\s+(problem|challenge|crisis|issue|opportunity|dilemma|future|guide)",
+    # Possessive patterns - "'s Challenge", "'s Next Act", "'s Biggest Problem"
+    r"'s\s+(problem|challenge|crisis|issue|opportunity|dilemma|future|guide|next|biggest|latest|new|great)",
     # FIX #34: Only reject question words, not "the"/"a" which appear in valid names
     # Valid: "The Trade Desk", "A Cloud Guru" - these should NOT be rejected
-    r"^(how|why|what|when)\s+",
+    r"^(how|why|what|when|where|who|which|can|will|should|is|are|does|do)\s+",
     # "the" + article-specific words only (not generic "the company")
-    r"^the\s+(problem|future|guide|art|science|rise|fall|state|end|best|worst|top|only|real|truth|power|secret|key|way)\b",
+    r"^the\s+(problem|future|guide|art|science|rise|fall|state|end|best|worst|top|only|real|truth|power|secret|key|way|case|death|birth|age|era|dawn|race|battle|fight|war|promise|perils|myth|reality|answer|question)\b",
     # "a" + article-specific words only (not generic "a startup")
-    r"^a\s+(guide|look|deep|new|better|simple|complete|brief|quick|closer|comprehensive)\b",
-    r"(problem|challenge|crisis|issue|opportunity|future|guide|revolution)$",
-    r"^\d+\s+(ways?|tips|secrets|lessons|habits|mistakes)",
-    r"^(building|creating|scaling|growing|launching)\s+",
+    r"^a\s+(guide|look|deep|new|better|simple|complete|brief|quick|closer|comprehensive|radical|bold|different|revolutionary)\b",
+    # Ending patterns
+    r"(problem|challenge|crisis|issue|opportunity|future|guide|revolution|transformation|disruption|solution|solved)$",
+    # Listicle patterns
+    r"^\d+\s+(ways?|tips|secrets|lessons|habits|mistakes|things|reasons|steps|strategies|trends|predictions|companies|startups)",
+    # Action verb patterns (suggesting article themes)
+    r"^(building|creating|scaling|growing|launching|transforming|disrupting|revolutionizing|rethinking|reimagining|solving|tackling|fixing|navigating)\s+",
+    # Compound title patterns - "Problem-Solving AI", "Next-Gen Platform"
+    r"(problem-solving|next-gen|cutting-edge|state-of-the-art|ground-breaking|game-changing)",
+    # Editorial/opinion patterns
+    r"^(why|how)\s+.*\s+(is|are|will|can|should|must|might)\b",
+    # Colon/dash patterns suggesting subtitles
+    r":\s+.{10,}$",  # Colon followed by substantial subtitle
 ]
 
 
@@ -1189,13 +1200,27 @@ def _looks_like_article_title(text: str) -> bool:
         if re.search(pattern, text_lower):
             return True
 
-    # Company names are usually 1-4 words, titles are often longer
+    # Company names are usually 1-3 words, titles are often longer
+    # TIGHTENED (2026-01): Reduced from >5 to >4 words
     word_count = len(text.split())
-    if word_count > 5:
+    if word_count > 4:
         return True
 
-    # Check for known invalid patterns
-    invalid_substrings = ["problem", "challenge", "crisis", "issue", "'s construction", "'s future"]
+    # Check for known invalid patterns - expanded list
+    invalid_substrings = [
+        # Core article words
+        "problem", "challenge", "crisis", "issue", "opportunity", "dilemma",
+        # Possessive article patterns
+        "'s construction", "'s future", "'s challenge", "'s problem", "'s biggest",
+        "'s latest", "'s next act", "'s new", "'s great",
+        # Editorial phrases
+        "the rise of", "the fall of", "the future of", "the state of",
+        "the end of", "the death of", "the birth of", "the age of",
+        # Transformation language
+        "revolution", "transformation", "disruption", "reinvention",
+        # How-to patterns
+        "how to", "why you", "what you", "when to",
+    ]
     if any(sub in text_lower for sub in invalid_substrings):
         return True
 
@@ -1236,19 +1261,29 @@ def _is_background_mention(
         logger.debug(f"Skipping background check for external source: {company_name}")
         return False, ""
 
-    # FIX (2026-01): Increase short article threshold to 1500 chars
-    # Many legitimate funding articles are 800-1500 chars
-    if len(article_text) < 1500:
+    # TIGHTENED (2026-01): Use proportional headline check instead of fixed threshold
+    # For short articles (<1000 chars), check first 40% of article
+    # For medium articles (1000-2000), check first 500 chars
+    # For long articles (>2000), check first 500 chars
+    article_length = len(article_text)
+
+    # Very short articles (<500 chars) - company should be obvious, skip check
+    if article_length < 500:
         return False, ""
 
-    # Get the headline/lede (at least 500 chars to account for wire headers/bylines)
-    # Previous 150 char limit was too aggressive - rejected 92% of valid extractions
-    first_line_end = article_text.find('\n')
-    if first_line_end == -1:
-        first_line_end = 500
+    # Determine headline area size based on article length
+    if article_length < 1000:
+        # Short articles: check first 40% (at least 200 chars)
+        headline_size = max(200, int(article_length * 0.4))
     else:
-        first_line_end = max(first_line_end, 500)  # At least 500 chars
-    headline_area = article_text[:first_line_end].lower()
+        # Medium/long articles: check first 500 chars or first line
+        first_line_end = article_text.find('\n')
+        if first_line_end == -1:
+            headline_size = 500
+        else:
+            headline_size = max(first_line_end, 500)
+
+    headline_area = article_text[:headline_size].lower()
 
     company_lower = company_name.lower().strip()
 
@@ -1521,11 +1556,17 @@ async def extract_deal(
             # Post-process: validate company name is in article (prevents hallucinated companies)
             response = _validate_company_in_text(response, article_text)
 
+            # Post-process: validate round type is valid enum value (prevents dedup bypass)
+            response = _validate_round_type(response)
+
             # Post-process: validate investors are mentioned in article (prevents hallucination)
             response = _validate_investors_in_text(response, article_text)
 
+            # Post-process: validate founders are mentioned in article (prevents hallucination)
+            response = _validate_founders_in_text(response, article_text)
+
             # Post-process: verify tracked fund identification
-            response = _verify_tracked_fund(response)
+            response = _verify_tracked_fund(response, article_text)
 
             # Post-process: detect and reclassify crypto deals
             if response and response.is_ai_deal and _is_crypto_deal(response, article_text):
@@ -1651,13 +1692,19 @@ async def extract_deal(
                     # 1. Validate company name is in article (prevents hallucinated companies)
                     response = _validate_company_in_text(response, article_text)
 
-                    # 2. Validate investors are mentioned in article (prevents hallucination)
+                    # 2. Validate round type is valid enum value (prevents dedup bypass)
+                    response = _validate_round_type(response)
+
+                    # 3. Validate investors are mentioned in article (prevents hallucination)
                     response = _validate_investors_in_text(response, article_text)
 
-                    # 3. Verify tracked fund identification
-                    response = _verify_tracked_fund(response)
+                    # 4. Validate founders are mentioned in article (prevents hallucination)
+                    response = _validate_founders_in_text(response, article_text)
 
-                    # 4. Crypto reclassification
+                    # 5. Verify tracked fund identification
+                    response = _verify_tracked_fund(response, article_text)
+
+                    # 6. Crypto reclassification
                     if response.is_ai_deal and _is_crypto_deal(response, article_text):
                         logger.info(f"HYBRID: Reclassifying {response.startup_name} as NOT_AI (crypto)")
                         increment_extraction_stat("crypto_filtered")
@@ -1665,7 +1712,7 @@ async def extract_deal(
                         response.is_ai_deal = False
                         response.enterprise_category = EnterpriseCategory.NOT_AI
 
-                    # 5. Consumer AI reclassification
+                    # 7. Consumer AI reclassification
                     if response.is_enterprise_ai and _is_consumer_ai_deal(response, article_text):
                         logger.info(f"HYBRID: Reclassifying {response.startup_name} as Consumer AI")
                         increment_extraction_stat("consumer_ai_filtered")
@@ -1677,7 +1724,7 @@ async def extract_deal(
                         ):
                             response.enterprise_category = EnterpriseCategory.CONSUMER_AI
 
-                    # 6. Consumer fintech reclassification
+                    # 8. Consumer fintech reclassification
                     if (response.is_ai_deal or response.is_enterprise_ai) and _is_consumer_fintech_deal(response, article_text):
                         logger.info(f"HYBRID: Reclassifying {response.startup_name} as NOT_AI (consumer fintech)")
                         increment_extraction_stat("consumer_fintech_filtered")
@@ -1685,14 +1732,14 @@ async def extract_deal(
                         response.is_ai_deal = False
                         response.enterprise_category = EnterpriseCategory.NOT_AI
 
-                    # 7. Article title validation
+                    # 9. Article title validation
                     if _looks_like_article_title(response.startup_name):
                         logger.warning(f"HYBRID: Rejecting article title as company name: '{response.startup_name}'")
                         increment_extraction_stat("article_title_rejected")
                         response.is_new_announcement = False
                         response.announcement_rejection_reason = f"Company name looks like article title: {response.startup_name}"
 
-                    # 8. Background mention check
+                    # 10. Background mention check
                     if response.is_new_announcement:
                         is_background, reason = _is_background_mention(response.startup_name, article_text, is_external_source)
                         if is_background:
@@ -1701,7 +1748,7 @@ async def extract_deal(
                             response.is_new_announcement = False
                             response.announcement_rejection_reason = reason
 
-                    # 9. Amount validation
+                    # 11. Amount validation
                     if response.amount:
                         old_needs_review = getattr(response, 'amount_needs_review', False)
                         response = _validate_deal_amount(response, article_text)
@@ -1937,18 +1984,33 @@ async def extract_article(
     return None
 
 
-def _has_lead_language(snippet: str) -> bool:
+def _has_lead_language(snippet: str, article_text: str = "") -> bool:
     """
-    Check if a verification snippet contains lead investor language.
+    Check if text contains lead investor language.
 
-    Returns True if snippet proves lead status, False otherwise.
+    IMPROVED (2026-01): Now checks BOTH verification snippet AND full article text.
+    Previously only checked snippet, which missed cases where article said "led by"
+    but LLM put different text in snippet.
+
+    Args:
+        snippet: The verification snippet extracted by LLM
+        article_text: Full article text (optional, for additional validation)
+
+    Returns:
+        True if lead status is proven, False otherwise.
     """
     import re
 
-    if not snippet:
-        return False
+    # Combine snippet and article text for checking
+    # Check snippet first (higher weight), then article as fallback
+    texts_to_check = []
+    if snippet:
+        texts_to_check.append(snippet.lower())
+    if article_text:
+        texts_to_check.append(article_text.lower())
 
-    snippet_lower = snippet.lower()
+    if not texts_to_check:
+        return False
 
     # Strong lead phrases (require word boundaries to avoid false positives)
     lead_patterns = [
@@ -1963,9 +2025,10 @@ def _has_lead_language(snippet: str) -> bool:
         r'\bspearheaded\b',        # 'spearheaded'
     ]
 
-    for pattern in lead_patterns:
-        if re.search(pattern, snippet_lower):
-            return True
+    for text in texts_to_check:
+        for pattern in lead_patterns:
+            if re.search(pattern, text):
+                return True
 
     return False
 
@@ -1973,6 +2036,9 @@ def _has_lead_language(snippet: str) -> bool:
 def _investor_in_text(investor_name: str, text_lower: str) -> bool:
     """
     Check if an investor name (or any known alias) appears in article text.
+
+    IMPROVED (2026-01): Uses word boundary matching for short investor names
+    to prevent false positives (e.g., "Benchmark" matching "mark", "Index" matching "index.html").
 
     Handles:
     - Full name match (e.g., "Index Ventures")
@@ -1986,20 +2052,36 @@ def _investor_in_text(investor_name: str, text_lower: str) -> bool:
     Returns:
         True if investor appears in text (directly or via alias)
     """
+    import re
     # Lazy import to avoid circular dependency
     from ..harvester.fund_matcher import FUND_NAME_VARIANTS
 
     inv_lower = investor_name.lower()
 
-    # Direct match
-    if inv_lower in text_lower:
+    def _check_with_boundary(name: str, text: str) -> bool:
+        """Check if name appears in text with appropriate matching.
+
+        Uses word boundary for short names (<8 chars) to prevent false positives.
+        Uses substring for longer names which are more distinctive.
+        """
+        if len(name) < 8:
+            # Short names (GV, USV, Index, Accel) need word boundary
+            pattern = rf'\b{re.escape(name)}\b'
+            return bool(re.search(pattern, text))
+        else:
+            # Longer names are distinctive enough for substring
+            return name in text
+
+    # Direct match (with word boundary for short names)
+    if _check_with_boundary(inv_lower, text_lower):
         return True
 
     # Partial match for multi-word names (e.g., "Sequoia" for "Sequoia Capital")
     name_parts = inv_lower.split()
     if len(name_parts) > 1:
-        if any(part in text_lower for part in name_parts if len(part) >= 4):
-            return True
+        for part in name_parts:
+            if len(part) >= 4 and _check_with_boundary(part, text_lower):
+                return True
 
     # Check known fund aliases (e.g., "a16z" ↔ "Andreessen Horowitz")
     for fund_slug, aliases in FUND_NAME_VARIANTS.items():
@@ -2007,7 +2089,7 @@ def _investor_in_text(investor_name: str, text_lower: str) -> bool:
         if inv_lower in [a.lower() for a in aliases]:
             # ...check if ANY alias for this fund appears in text
             for alias in aliases:
-                if alias.lower() in text_lower:
+                if _check_with_boundary(alias.lower(), text_lower):
                     return True
 
     return False
@@ -2023,10 +2105,13 @@ def _validate_company_in_text(deal: DealExtraction, article_text: str) -> DealEx
     (e.g., combining investment thesis keywords like "Industrial AI" with real people
     to fabricate companies like "Modern Industrials").
 
-    The check is intentionally lenient to avoid false rejections:
-    - Checks for the main company word (first word, 4+ chars) anywhere in text
-    - Strips common suffixes (AI, Labs, Tech, etc.) before matching
-    - Only rejects if NO recognizable part of the company name appears
+    TIGHTENED (2026-01): Previous validation was too lenient - stripping "ai", "labs",
+    "intelligence" etc. could leave common words that match too easily.
+
+    Now requires:
+    - For multi-word names: at least 2 significant words must appear
+    - For single-word names: exact word boundary match (not substring)
+    - Rejects common standalone words after stripping suffixes
 
     Args:
         deal: The extracted deal
@@ -2047,13 +2132,24 @@ def _validate_company_in_text(deal: DealExtraction, article_text: str) -> DealEx
 
     # Extract main word(s) by removing common suffixes
     # These are often added by LLM based on context but may not be in article
-    suffixes_to_strip = [
+    suffixes_to_strip = {
         'inc', 'llc', 'ltd', 'corp', 'corporation', 'company',
         'ai', 'labs', 'tech', 'technologies', 'software', 'systems',
         'health', 'healthcare', 'bio', 'therapeutics', 'sciences',
         'cloud', 'data', 'analytics', 'intelligence',
         'ml', 'ops', 'dev', 'hq', 'app', 'io', 'platform',
-    ]
+    }
+
+    # Words that are too common to use as standalone validation
+    # These can appear in many AI/tech articles without being the company name
+    too_common_words = {
+        'intelligence', 'analytics', 'platform', 'systems', 'solutions',
+        'technologies', 'software', 'digital', 'global', 'modern', 'industrial',
+        'capital', 'ventures', 'partners', 'group', 'labs', 'studio', 'works',
+        'network', 'networks', 'media', 'services', 'consulting', 'research',
+        'enterprise', 'automation', 'robotics', 'autonomous', 'machine', 'learning',
+        'neural', 'cognitive', 'smart', 'advanced', 'next', 'future', 'first',
+    }
 
     company_words = company_lower.split()
 
@@ -2070,10 +2166,54 @@ def _validate_company_in_text(deal: DealExtraction, article_text: str) -> DealEx
         else:
             return deal  # Can't validate, allow it through
 
-    # Check if ANY core word appears in the text
-    for word in core_words:
-        if len(word) >= 4 and word in text_lower:
+    # TIGHTENED: Filter out words that are too common to validate on their own
+    significant_words = [w for w in core_words if w not in too_common_words]
+
+    # If all core words are too common, require exact phrase match or consecutive words
+    if not significant_words:
+        # Try joining core words to find a more specific match
+        phrase = ' '.join(core_words[:2]) if len(core_words) >= 2 else core_words[0]
+        if phrase in text_lower:
             return deal
+        # Single common word - require word boundary match (not just substring)
+        for word in core_words:
+            # Use word boundary check: word must be surrounded by non-alphanumeric
+            pattern = rf'(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])'
+            if re.search(pattern, text_lower):
+                return deal
+        # No specific match found for common-word company
+        logger.warning(
+            f"REJECTING company with only common words: '{deal.startup_name}' - "
+            f"core words {core_words} are too generic"
+        )
+        increment_extraction_stat("company_name_rejected")
+        deal.is_new_announcement = False
+        deal.announcement_rejection_reason = (
+            f"Company name '{deal.startup_name}' contains only generic words - likely hallucinated"
+        )
+        return deal
+
+    # TIGHTENED: For multi-word names, require at least 2 words to match
+    # This prevents "Intelligence Labs" from matching just because "labs" is in text
+    if len(significant_words) >= 2:
+        words_found = sum(1 for w in significant_words if len(w) >= 4 and w in text_lower)
+        if words_found >= 2:
+            return deal
+        # Fallback: check if first significant word (likely the unique name) appears
+        if len(significant_words[0]) >= 5 and significant_words[0] in text_lower:
+            return deal
+    else:
+        # Single significant word - require word boundary match for short words
+        word = significant_words[0]
+        if len(word) >= 6:
+            # Longer words are distinctive enough for substring match
+            if word in text_lower:
+                return deal
+        elif len(word) >= 4:
+            # Shorter words need word boundary check
+            pattern = rf'(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])'
+            if re.search(pattern, text_lower):
+                return deal
 
     # Company name not found - likely hallucinated
     logger.warning(
@@ -2252,7 +2392,7 @@ def _validate_investors_in_text(deal: DealExtraction, article_text: str) -> Deal
     return deal
 
 
-def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
+def _verify_tracked_fund(deal: DealExtraction, article_text: str = "") -> DealExtraction:
     """
     Post-process to verify tracked fund identification.
 
@@ -2261,6 +2401,14 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
       1. A tracked fund is in lead_investors with CONFIRMED_LEAD role
       2. The verification_snippet contains actual lead language
     - Downgrades to participant if snippet is missing or invalid
+
+    IMPROVED (2026-01): Now also checks full article text for lead language,
+    not just the verification snippet. This catches cases where the article
+    says "led by" but LLM puts different text in the snippet.
+
+    Args:
+        deal: The extracted deal
+        article_text: Full article text (for additional lead language validation)
 
     This prevents false positives where the LLM claims lead status
     without proper evidence.
@@ -2275,7 +2423,8 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
     # Validate verification snippet - DOWNGRADE if missing or lacks lead language
     # FIX (2026-01): Previously just flagged weak evidence, now actually downgrades to LIKELY_LEAD
     # This reduces false positives where Claude claims lead status without proof
-    has_valid_snippet = _has_lead_language(deal.verification_snippet)
+    # IMPROVED (2026-01): Now also checks full article text for lead language
+    has_valid_snippet = _has_lead_language(deal.verification_snippet, article_text)
 
     if deal.tracked_fund_is_lead and deal.verification_snippet and not has_valid_snippet:
         logger.warning(

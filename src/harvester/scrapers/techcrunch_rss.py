@@ -120,8 +120,15 @@ class TechCrunchScraper:
                     if hasattr(entry, 'author'):
                         author = entry.author
 
+                    # FIX (2026-01): Validate title is not empty/whitespace
+                    # Articles without titles lose context for fund matching
+                    title = entry.get('title', '').strip()
+                    if not title:
+                        logger.debug(f"Skipping article with empty title: {entry.get('link', 'unknown')}")
+                        continue
+
                     items.append(TechCrunchArticle(
-                        title=entry.get('title', ''),
+                        title=title,
                         url=entry.get('link', ''),
                         description=description[:1000],
                         published=pub_date,

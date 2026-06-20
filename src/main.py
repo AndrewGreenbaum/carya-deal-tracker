@@ -86,7 +86,9 @@ from src.common.url_utils import (
     is_valid_url,
     is_valid_website_url,
     is_valid_linkedin_profile,
+    is_valid_linkedin_company,
     sanitize_url,
+    sanitize_linkedin_url,
 )
 
 
@@ -3992,44 +3994,72 @@ async def enrich_deals(
 
             # Update company in database
             if deal.company:
+                # Validate and sanitize website URL before persistence
                 if enrichment.website and (not deal.company.website or force_update):
-                    deal.company.website = enrichment.website
-                    updated_count += 1
+                    sanitized_website = sanitize_url(enrichment.website)
+                    if sanitized_website and is_valid_website_url(sanitized_website):
+                        deal.company.website = sanitized_website
+                        updated_count += 1
+                    else:
+                        logger.warning(
+                            f"Rejecting invalid website URL for {company_name}: {enrichment.website}"
+                        )
 
-                # Update company LinkedIn
+                # Validate and sanitize company LinkedIn URL before persistence
                 if enrichment.company_linkedin and (not deal.company.linkedin_url or force_update):
-                    deal.company.linkedin_url = enrichment.company_linkedin
+                    sanitized_linkedin = sanitize_linkedin_url(enrichment.company_linkedin)
+                    if sanitized_linkedin and is_valid_linkedin_company(sanitized_linkedin):
+                        deal.company.linkedin_url = sanitized_linkedin
+                    else:
+                        logger.warning(
+                            f"Rejecting invalid company LinkedIn URL for {company_name}: {enrichment.company_linkedin}"
+                        )
 
-                # Update founders_json with LinkedIn URLs
+                # Update founders_json with LinkedIn URLs (with validation)
                 if enrichment.founder_linkedins or enrichment.ceo_linkedin:
                     # Update existing founders with LinkedIn URLs
                     for f in founders:
                         founder_name = f.get("name", "")
                         if enrichment.founder_linkedins and founder_name in enrichment.founder_linkedins:
                             if not f.get("linkedin_url") or force_update:
-                                f["linkedin_url"] = enrichment.founder_linkedins[founder_name]
+                                # Validate founder LinkedIn URL before persisting
+                                raw_url = enrichment.founder_linkedins[founder_name]
+                                sanitized = sanitize_linkedin_url(raw_url)
+                                if sanitized and is_valid_linkedin_profile(sanitized):
+                                    f["linkedin_url"] = sanitized
+                                else:
+                                    logger.warning(
+                                        f"Rejecting invalid founder LinkedIn for {founder_name}: {raw_url}"
+                                    )
 
                     # Fallback: if no founder matched, add CEO
                     if enrichment.ceo_linkedin:
-                        ceo_found = any(f.get("linkedin_url") for f in founders)
-                        if not ceo_found:
-                            # FIX: If founders list is empty, CREATE a new founder entry
-                            if not founders and enrichment.ceo_name:
-                                founders.append({
-                                    "name": enrichment.ceo_name,
-                                    "title": "CEO",
-                                    "linkedin_url": enrichment.ceo_linkedin,
-                                })
-                                logger.info(f"Added CEO as founder for {company_name}: {enrichment.ceo_name}")
-                            else:
-                                # Try to find existing CEO/founder entry to update
-                                # Use substring matching for compound titles like "Founder & CEO"
-                                for f in founders:
-                                    title_lower = f.get("title", "").lower()
-                                    if any(role in title_lower for role in ("ceo", "founder")):
-                                        if not f.get("linkedin_url") or force_update:
-                                            f["linkedin_url"] = enrichment.ceo_linkedin
-                                        break
+                        # Validate CEO LinkedIn URL first
+                        sanitized_ceo_linkedin = sanitize_linkedin_url(enrichment.ceo_linkedin)
+                        if sanitized_ceo_linkedin and is_valid_linkedin_profile(sanitized_ceo_linkedin):
+                            ceo_found = any(f.get("linkedin_url") for f in founders)
+                            if not ceo_found:
+                                # FIX: If founders list is empty, CREATE a new founder entry
+                                if not founders and enrichment.ceo_name:
+                                    founders.append({
+                                        "name": enrichment.ceo_name,
+                                        "title": "CEO",
+                                        "linkedin_url": sanitized_ceo_linkedin,
+                                    })
+                                    logger.info(f"Added CEO as founder for {company_name}: {enrichment.ceo_name}")
+                                else:
+                                    # Try to find existing CEO/founder entry to update
+                                    # Use substring matching for compound titles like "Founder & CEO"
+                                    for f in founders:
+                                        title_lower = f.get("title", "").lower()
+                                        if any(role in title_lower for role in ("ceo", "founder")):
+                                            if not f.get("linkedin_url") or force_update:
+                                                f["linkedin_url"] = sanitized_ceo_linkedin
+                                            break
+                        else:
+                            logger.warning(
+                                f"Rejecting invalid CEO LinkedIn for {company_name}: {enrichment.ceo_linkedin}"
+                            )
 
                     deal.founders_json = json_module.dumps(founders)
 
