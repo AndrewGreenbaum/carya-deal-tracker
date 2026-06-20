@@ -21,7 +21,12 @@ logger = logging.getLogger(__name__)
 # Key: "founder_name|company_name" -> timestamp of failed lookup
 # Skip re-searching if failed within LINKEDIN_CACHE_TTL_SECONDS
 _failed_linkedin_cache: dict[str, float] = {}
-LINKEDIN_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60  # 7 days
+# FIX: asyncio.Lock for thread-safe cache access in concurrent enrichment
+_failed_linkedin_cache_lock = asyncio.Lock()
+# COST OPTIMIZATION (Jan 2026): Extended from 7 days to 30 days
+# Founder LinkedIn profiles don't change frequently - safe to cache failures longer
+# Estimated savings: $8-12/month in Brave API costs
+LINKEDIN_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
 
 def _get_linkedin_cache_key(founder_name: str, company_name: str) -> str:
@@ -29,23 +34,33 @@ def _get_linkedin_cache_key(founder_name: str, company_name: str) -> str:
     return f"{founder_name.lower().strip()}|{company_name.lower().strip()}"
 
 
-def _is_linkedin_cached_failure(founder_name: str, company_name: str) -> bool:
-    """Check if this founder+company combo recently failed."""
+async def _is_linkedin_cached_failure(founder_name: str, company_name: str) -> bool:
+    """Check if this founder+company combo recently failed.
+
+    Thread-safe with asyncio.Lock to prevent race conditions during
+    concurrent enrichment tasks.
+    """
     key = _get_linkedin_cache_key(founder_name, company_name)
-    if key not in _failed_linkedin_cache:
-        return False
-    # Check if TTL expired
-    cached_time = _failed_linkedin_cache[key]
-    if time() - cached_time > LINKEDIN_CACHE_TTL_SECONDS:
-        del _failed_linkedin_cache[key]
-        return False
-    return True
+    async with _failed_linkedin_cache_lock:
+        if key not in _failed_linkedin_cache:
+            return False
+        # Check if TTL expired
+        cached_time = _failed_linkedin_cache[key]
+        if time() - cached_time > LINKEDIN_CACHE_TTL_SECONDS:
+            del _failed_linkedin_cache[key]
+            return False
+        return True
 
 
-def _mark_linkedin_failure(founder_name: str, company_name: str):
-    """Mark this founder+company combo as failed."""
+async def _mark_linkedin_failure(founder_name: str, company_name: str):
+    """Mark this founder+company combo as failed.
+
+    Thread-safe with asyncio.Lock to prevent race conditions during
+    concurrent enrichment tasks.
+    """
     key = _get_linkedin_cache_key(founder_name, company_name)
-    _failed_linkedin_cache[key] = time()
+    async with _failed_linkedin_cache_lock:
+        _failed_linkedin_cache[key] = time()
 
 
 def clear_linkedin_cache():
@@ -92,6 +107,15 @@ LINKEDIN_PROFILE_PATTERN = r"https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]{3
 
 # LinkedIn company page URL pattern (FIX #9: require 2+ char slug)
 LINKEDIN_COMPANY_PATTERN = r"https?://(?:www\.)?linkedin\.com/company/[a-zA-Z0-9_-]{2,}"
+
+# Slugs that look like company/product names, not person names
+# These are often /in/ URLs that are actually company pages or job postings
+# Only match if the slug EQUALS or ENDS WITH these patterns (avoid false positives)
+NON_PERSON_SLUG_SUFFIXES = {
+    'postings', 'jobs', 'careers', 'hiring', 'official',
+    'team', 'admin', 'support', 'contact', 'sales',
+    'recruiting', 'talent', 'openings',
+}
 
 
 def _extract_name_from_linkedin_title(title: str) -> Optional[str]:
@@ -167,7 +191,9 @@ def _extract_name_from_linkedin_slug(linkedin_url: str) -> Optional[str]:
 
     # Extract the slug from URL
     # FIX: Anchor to domain boundary to prevent matching "notlinkedin.com"
-    match = re.search(r'(?:^|://(?:www\.)?)linkedin\.com/in/([a-zA-Z0-9_-]+)', linkedin_url.lower())
+    # Pattern allows: start, whitespace, :, or / before (optional www.) linkedin.com
+    # This handles: linkedin.com, www.linkedin.com, https://linkedin.com, etc.
+    match = re.search(r'(?:^|[\s/:])(?:www\.)?linkedin\.com/in/([a-zA-Z0-9_-]+)', linkedin_url.lower())
     if not match:
         return None
 
@@ -208,6 +234,35 @@ def _extract_name_from_linkedin_slug(linkedin_url: str) -> Optional[str]:
         return None
 
     return f"{first_name} {last_name}"
+
+
+def _names_match(name1: Optional[str], name2: Optional[str]) -> bool:
+    """
+    Check if two names likely refer to the same person.
+
+    Uses fuzzy matching: at least first OR last name must match.
+    This catches variations like "Jason Lynch" vs "Jason M. Lynch".
+
+    Returns True if names match, False otherwise.
+    """
+    if not name1 or not name2:
+        return False
+
+    parts1 = [p.lower().strip() for p in name1.split() if len(p) >= 2]
+    parts2 = [p.lower().strip() for p in name2.split() if len(p) >= 2]
+
+    if not parts1 or not parts2:
+        return False
+
+    # Check if any significant name part matches
+    # (first name OR last name should match)
+    for p1 in parts1:
+        for p2 in parts2:
+            if p1 == p2 and len(p1) >= 3:
+                return True
+
+    return False
+
 
 # Skip these domains (not startup company sites)
 SKIP_DOMAINS = {
@@ -392,6 +447,7 @@ class BraveEnrichmentClient:
 
         FIX #35: Validates URL is a profile page, not /jobs/, /posts/, etc.
         FIX #3: Full sanitization - checks placeholders + normalizes https://.
+        FIX (Jan 2026): Reject slugs that look like company/product names.
         """
         # FIX #3: Check for placeholder text first
         text_lower = text.lower()
@@ -404,6 +460,17 @@ class BraveEnrichmentClient:
             # FIX #35: Reject non-profile LinkedIn URLs
             invalid_paths = ["/search", "/company/", "/jobs", "/posts", "/activity", "/pulse", "/learning"]
             if not any(path in url for path in invalid_paths):
+                # FIX (Jan 2026): Reject slugs that look like company/product names
+                # e.g., "linkedin.com/in/malpostings" is not a person
+                slug_match = re.search(r'/in/([a-zA-Z0-9_-]+)', url.lower())
+                if slug_match:
+                    slug = slug_match.group(1)
+                    # Check if slug equals or ends with non-person patterns
+                    # Using suffix match to avoid false positives (e.g., "shresthakukreja" contains "hr")
+                    for pattern in NON_PERSON_SLUG_SUFFIXES:
+                        if slug == pattern or slug.endswith(pattern):
+                            logger.debug(f"Rejecting non-person LinkedIn slug: {slug} (matches '{pattern}')")
+                            return None
                 # FIX #3: Normalize URL to https://
                 if url.startswith("http://"):
                     url = "https://" + url[7:]
@@ -582,7 +649,7 @@ class BraveEnrichmentClient:
             return None
 
         # FIX #7: Check cache for recent failures
-        if _is_linkedin_cached_failure(founder_name, company_name):
+        if await _is_linkedin_cached_failure(founder_name, company_name):
             logger.debug(f"Skipping LinkedIn search for {founder_name} (cached failure)")
             return None
 
@@ -602,13 +669,38 @@ class BraveEnrichmentClient:
             linkedin_url = self._extract_linkedin_url(url)
             if linkedin_url:
                 found_any_linkedin = True
-                # FIX #3 & #5: Check both first AND last name in title OR description
-                name_parts = founder_name.lower().split()
+
+                # FIX (Jan 2026): Extract name from profile and use proper name matching
+                # This prevents returning wrong person's LinkedIn
+                profile_name = _extract_name_from_linkedin_title(title)
+                if not profile_name:
+                    profile_name = _extract_name_from_linkedin_slug(linkedin_url)
+
+                # If we extracted a name from profile, verify it matches the founder
+                if profile_name:
+                    if _names_match(founder_name, profile_name):
+                        logger.debug(f"LinkedIn name match: '{founder_name}' ~ '{profile_name}'")
+                        return linkedin_url
+                    else:
+                        logger.debug(f"LinkedIn name mismatch: looking for '{founder_name}', found '{profile_name}'")
+                        continue  # Skip this result, try next one
+
+                # Fallback: Check if name parts appear in title/description
+                # (only if we couldn't extract a name from the profile)
+                # FIX (Jan 2026): Require BOTH first AND last name to match
+                # Single name matching caused mismatches (e.g., "Alfia Ilicheva" matching
+                # description mentioning "Alfia" but URL for different person "dniewczas")
+                name_parts = [p for p in founder_name.lower().split() if len(p) >= 3]
                 text_to_check = f"{title} {description}".lower()
 
-                # Require at least one name part to match
-                if any(part in text_to_check for part in name_parts if len(part) >= 2):
+                # Require BOTH first AND last name to appear (stricter matching)
+                if len(name_parts) >= 2 and all(part in text_to_check for part in name_parts[:2]):
+                    logger.debug(f"LinkedIn fallback match: both '{name_parts[0]}' and '{name_parts[1]}' found in text")
                     return linkedin_url
+                else:
+                    # Can't verify this is the right person - skip
+                    logger.debug(f"LinkedIn skipped: couldn't verify '{founder_name}' from profile or text")
+                    continue
 
         # FIX #8: Only do fallback if first search returned NO LinkedIn URLs at all
         # This avoids wasting API calls when we found LinkedIn profiles but just
@@ -625,7 +717,7 @@ class BraveEnrichmentClient:
                     return linkedin_url
 
         # FIX #7: Mark this as a failed search to avoid redundant future calls
-        _mark_linkedin_failure(founder_name, company_name)
+        await _mark_linkedin_failure(founder_name, company_name)
         return None
 
     async def find_ceo_linkedin(self, company_name: str) -> tuple[Optional[str], Optional[str]]:
@@ -744,11 +836,9 @@ class BraveEnrichmentClient:
         )
         await asyncio.sleep(self.rate_limit_delay)
 
-        # Find company LinkedIn page
-        result.company_linkedin = await self.find_company_linkedin(context.company_name)
-        if result.company_linkedin:
-            logger.info(f"Found company LinkedIn for {context.company_name}: {result.company_linkedin}")
-        await asyncio.sleep(self.rate_limit_delay)
+        # SKIP company LinkedIn - only founder LinkedIn matters for this use case
+        # Company LinkedIn pages don't provide actionable contact info
+        # result.company_linkedin = await self.find_company_linkedin(context.company_name)
 
         # Find LinkedIn for each known founder
         if context.founders:
@@ -818,6 +908,25 @@ class BraveEnrichmentClient:
                     ceo_name, linkedin_url = ceo_name_web, linkedin_url_web
 
             if linkedin_url and ceo_name:
+                # FIX (Jan 2026): Cross-validate found CEO name against existing founders
+                # to prevent name/LinkedIn mismatches in the output
+                matching_founder = None
+                if context.founders:
+                    for founder in context.founders:
+                        existing_name = founder.get("name", "")
+                        if _names_match(ceo_name, existing_name):
+                            matching_founder = existing_name
+                            logger.info(f"CEO fallback '{ceo_name}' matches existing founder '{existing_name}'")
+                            break
+
+                    # If found CEO doesn't match any existing founder, log warning
+                    if not matching_founder:
+                        existing_names = [f.get("name", "") for f in context.founders if f.get("name")]
+                        logger.warning(
+                            f"CEO fallback found '{ceo_name}' but doesn't match existing founders {existing_names} "
+                            f"for {context.company_name} - adding as new founder"
+                        )
+
                 # Validate CEO LinkedIn
                 validation = await validate_founder_linkedin(
                     founder_name=ceo_name,
@@ -825,10 +934,12 @@ class BraveEnrichmentClient:
                     linkedin_url=linkedin_url,
                 )
                 if validation.is_valid or validation.profile_current_company is None:
-                    result.ceo_name = ceo_name
+                    # Use matching founder name if found, otherwise use the found name
+                    final_name = matching_founder if matching_founder else ceo_name
+                    result.ceo_name = final_name
                     result.ceo_linkedin = linkedin_url
-                    result.founder_linkedins[ceo_name] = linkedin_url
-                    logger.info(f"Found CEO for {context.company_name} via fallback: {ceo_name}")
+                    result.founder_linkedins[final_name] = linkedin_url
+                    logger.info(f"Found CEO for {context.company_name} via fallback: {final_name}")
                 else:
                     logger.warning(f"CEO LinkedIn rejected for {context.company_name}: wrong company")
             await asyncio.sleep(self.rate_limit_delay)
@@ -845,6 +956,15 @@ class BraveEnrichmentClient:
                     ceo_name, linkedin_url = ceo_name_web, linkedin_url_web
 
             if linkedin_url and ceo_name:
+                # FIX (Jan 2026): Cross-validate found CEO name against existing founders
+                matching_founder = None
+                if context.founders:
+                    for founder in context.founders:
+                        existing_name = founder.get("name", "")
+                        if _names_match(ceo_name, existing_name):
+                            matching_founder = existing_name
+                            break
+
                 # Validate CEO LinkedIn
                 validation = await validate_founder_linkedin(
                     founder_name=ceo_name,
@@ -852,7 +972,9 @@ class BraveEnrichmentClient:
                     linkedin_url=linkedin_url,
                 )
                 if validation.is_valid or validation.profile_current_company is None:
-                    result.ceo_name = ceo_name
+                    # Use matching founder name if found, otherwise use the found name
+                    final_name = matching_founder if matching_founder else ceo_name
+                    result.ceo_name = final_name
                     result.ceo_linkedin = linkedin_url
 
         return result
@@ -872,9 +994,8 @@ class BraveEnrichmentClient:
         result.website = await self.find_website_with_context(company_name)
         await asyncio.sleep(self.rate_limit_delay)
 
-        # Find company LinkedIn page
-        result.company_linkedin = await self.find_company_linkedin(company_name)
-        await asyncio.sleep(self.rate_limit_delay)
+        # SKIP company LinkedIn - only founder LinkedIn matters
+        # result.company_linkedin = await self.find_company_linkedin(company_name)
 
         # Find CEO LinkedIn
         ceo_name, linkedin_url = await self.find_ceo_linkedin(company_name)

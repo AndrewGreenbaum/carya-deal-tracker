@@ -26,6 +26,7 @@ import base64
 import feedparser
 import httpx
 import logging
+import random
 import re
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
@@ -35,6 +36,7 @@ from bs4 import BeautifulSoup
 
 from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
+from ...common.http_client import USER_AGENT_BROWSER
 
 # Optional Playwright resolver for JS redirect following
 try:
@@ -45,10 +47,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Article fetching settings
-MAX_CONCURRENT_ARTICLES = 5
-ARTICLE_FETCH_TIMEOUT = 15.0
-ARTICLE_RATE_LIMIT_DELAY = 0.3
+# Article fetching settings - use centralized config
+MAX_CONCURRENT_ARTICLES = settings.max_concurrent_articles
+ARTICLE_FETCH_TIMEOUT = settings.article_fetch_timeout
+ARTICLE_RATE_LIMIT_DELAY = settings.article_rate_limit_delay
 
 # Article content selectors (ordered by specificity)
 ARTICLE_SELECTORS = [
@@ -413,8 +415,8 @@ class GoogleNewsRSSScraper:
         self.fetch_full_articles = fetch_full_articles
         self.use_playwright = use_playwright and PLAYWRIGHT_AVAILABLE
         self.client = httpx.AsyncClient(
-            timeout=30,
-            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
+            timeout=settings.request_timeout,
+            headers={"User-Agent": USER_AGENT_BROWSER},
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             follow_redirects=True,
         )
@@ -426,7 +428,7 @@ class GoogleNewsRSSScraper:
     async def __aenter__(self):
         self._article_client = httpx.AsyncClient(
             timeout=ARTICLE_FETCH_TIMEOUT,
-            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
+            headers={"User-Agent": USER_AGENT_BROWSER},
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             follow_redirects=True,
         )
@@ -591,83 +593,120 @@ class GoogleNewsRSSScraper:
                 return True
         return False
 
-    async def fetch_feed(self, query: str, fund_slug: str) -> List[GoogleNewsArticle]:
-        """Fetch and parse a Google News RSS feed."""
+    async def fetch_feed(self, query: str, fund_slug: str, max_retries: int = 3) -> List[GoogleNewsArticle]:
+        """Fetch and parse a Google News RSS feed with retry logic.
+
+        Feed fetching is critical - 0 feeds = 0 articles for that fund.
+        Implements exponential backoff for 5xx errors and timeouts.
+        """
         feed_url = self._build_feed_url(query)
 
-        try:
-            response = await self.client.get(feed_url)
-            response.raise_for_status()
+        for attempt in range(max_retries):
+            try:
+                response = await self.client.get(feed_url)
 
-            feed = feedparser.parse(response.text)
+                # 5xx errors - retry with backoff + jitter
+                if response.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        # Add jitter (0.9-1.1x) to avoid thundering herd
+                        delay = (2 ** attempt) * random.uniform(0.9, 1.1)
+                        logger.warning(
+                            f"HTTP {response.status_code} fetching feed for '{query}', "
+                            f"retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"HTTP {response.status_code} fetching feed for '{query}' after {max_retries} attempts")
+                        return []
 
-            if feed.bozo:
-                logger.warning(f"Malformed Google News feed for '{query}': {feed.bozo_exception}")
+                response.raise_for_status()
+
+                feed = feedparser.parse(response.text)
+
+                if feed.bozo:
+                    logger.warning(f"Malformed Google News feed for '{query}': {feed.bozo_exception}")
+                    return []
+
+                items = []
+                for entry in feed.entries:
+                    # Skip entries without URLs
+                    link = entry.get('link', '')
+                    if not link:
+                        continue
+
+                    title = entry.get('title', '')
+                    description = entry.get('summary', '')
+
+                    # Clean HTML from description
+                    if description:
+                        soup = BeautifulSoup(description, 'lxml')
+                        description = soup.get_text(strip=True)
+
+                    # Check exclusions
+                    combined_text = f"{title} {description}"
+                    if self._should_exclude(combined_text, fund_slug):
+                        logger.debug(f"Excluded article for {fund_slug}: {title[:50]}...")
+                        continue
+
+                    # Parse publication date
+                    pub_date = None
+                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                        if len(entry.published_parsed) >= 6:
+                            pub_date = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+
+                    # Extract source from title (Google News format: "Title - Source")
+                    source = ""
+                    if " - " in title:
+                        parts = title.rsplit(" - ", 1)
+                        if len(parts) == 2:
+                            title = parts[0]
+                            source = parts[1]
+
+                    # Get source URL from RSS entry (e.g., https://www.bisnow.com)
+                    source_entry = entry.get('source', {})
+                    source_url = ""
+                    if isinstance(source_entry, dict):
+                        source_url = source_entry.get('href', '')
+
+                    # Extract real URL from Google News redirect URL
+                    real_url = extract_real_url_from_google_news(link)
+
+                    items.append(GoogleNewsArticle(
+                        title=title,
+                        url=link,
+                        real_url=real_url,
+                        source_url=source_url,
+                        description=description[:1000],
+                        published=pub_date,
+                        source=source,
+                        fund_slug=fund_slug,
+                    ))
+
+                return items
+
+            except httpx.TimeoutException:
+                if attempt < max_retries - 1:
+                    # Add jitter (0.9-1.1x) to avoid thundering herd
+                    delay = (2 ** attempt) * random.uniform(0.9, 1.1)
+                    logger.warning(
+                        f"Timeout fetching feed for '{query}', "
+                        f"retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Timeout fetching feed for '{query}' after {max_retries} attempts")
+                    return []
+
+            except httpx.HTTPError as e:
+                logger.warning(f"HTTP error fetching Google News for '{query}': {e}")
                 return []
 
-            items = []
-            for entry in feed.entries:
-                # Skip entries without URLs
-                link = entry.get('link', '')
-                if not link:
-                    continue
+            except Exception as e:
+                logger.error(f"Error fetching Google News for '{query}': {e}", exc_info=True)
+                return []
 
-                title = entry.get('title', '')
-                description = entry.get('summary', '')
-
-                # Clean HTML from description
-                if description:
-                    soup = BeautifulSoup(description, 'lxml')
-                    description = soup.get_text(strip=True)
-
-                # Check exclusions
-                combined_text = f"{title} {description}"
-                if self._should_exclude(combined_text, fund_slug):
-                    logger.debug(f"Excluded article for {fund_slug}: {title[:50]}...")
-                    continue
-
-                # Parse publication date
-                pub_date = None
-                if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    if len(entry.published_parsed) >= 6:
-                        pub_date = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
-
-                # Extract source from title (Google News format: "Title - Source")
-                source = ""
-                if " - " in title:
-                    parts = title.rsplit(" - ", 1)
-                    if len(parts) == 2:
-                        title = parts[0]
-                        source = parts[1]
-
-                # Get source URL from RSS entry (e.g., https://www.bisnow.com)
-                source_entry = entry.get('source', {})
-                source_url = ""
-                if isinstance(source_entry, dict):
-                    source_url = source_entry.get('href', '')
-
-                # Extract real URL from Google News redirect URL
-                real_url = extract_real_url_from_google_news(link)
-
-                items.append(GoogleNewsArticle(
-                    title=title,
-                    url=link,
-                    real_url=real_url,
-                    source_url=source_url,
-                    description=description[:1000],
-                    published=pub_date,
-                    source=source,
-                    fund_slug=fund_slug,
-                ))
-
-            return items
-
-        except httpx.HTTPError as e:
-            logger.warning(f"HTTP error fetching Google News for '{query}': {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Error fetching Google News for '{query}': {e}", exc_info=True)
-            return []
+        return []  # Should not reach here, but safety return
 
     async def fetch_all_funds(self, days_back: int = 30) -> List[GoogleNewsArticle]:
         """Fetch Google News for all configured funds with rate limiting."""
@@ -685,8 +724,7 @@ class GoogleNewsRSSScraper:
                 queries_with_context.append((query, fund_slug))
 
         # Rate-limited parallel fetching using semaphore
-        MAX_CONCURRENT = 5  # Limit concurrent requests to avoid rate limiting
-        semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+        semaphore = asyncio.Semaphore(settings.max_concurrent_feeds)
 
         async def fetch_with_limit(query: str, fund_slug: str) -> List[GoogleNewsArticle]:
             async with semaphore:
@@ -739,7 +777,12 @@ class GoogleNewsRSSScraper:
         """
         articles = await self.fetch_all_funds(days_back=days_back)
 
+        # SCRAPER_HEALTH_ALERT: Log warning when scraper returns 0 articles
         if not articles:
+            logger.warning(
+                "SCRAPER_HEALTH_ALERT: google_news_rss returned 0 articles - "
+                "RSS feeds may be unavailable or queries may need adjustment"
+            )
             return []
 
         # Fetch full article content if enabled

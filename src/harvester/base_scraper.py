@@ -7,6 +7,9 @@ Implements the PolymorphicScraper pattern with:
 - normalize(): Standardize to common format
 """
 
+import asyncio
+import logging
+import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, date, timezone
@@ -16,6 +19,9 @@ from bs4 import BeautifulSoup, Comment
 
 from ..config.funds import FundConfig
 from ..config.settings import settings
+from ..common.http_client import USER_AGENT_BOT
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -62,7 +68,7 @@ class BaseScraper(ABC):
             timeout=settings.request_timeout,
             follow_redirects=True,
             headers={
-                "User-Agent": "BudTracker/1.0 (Investment Research Bot)"
+                "User-Agent": USER_AGENT_BOT
             }
         )
 
@@ -121,6 +127,14 @@ class BaseScraper(ABC):
         html = await self.fetch()
         articles = await self.parse(html)
 
+        # SCRAPER_HEALTH_ALERT: Log warning when scraper returns 0 articles
+        # This helps detect when website HTML structure changes break scraping
+        if not articles:
+            logger.warning(
+                f"SCRAPER_HEALTH_ALERT: {self.fund.slug} returned 0 articles - "
+                "selectors may have changed or website structure updated"
+            )
+
         for raw in articles:
             # Apply negative keyword filter
             if self._should_filter(raw):
@@ -129,6 +143,74 @@ class BaseScraper(ABC):
             normalized = await self.normalize(raw)
             normalized.fund_slug = self.fund.slug
             yield normalized
+
+    async def _fetch_with_retry(
+        self,
+        url: str,
+        max_retries: int = 3,
+        timeout: Optional[float] = None,
+    ) -> str:
+        """
+        Fetch URL with retry logic for transient errors.
+
+        Implements exponential backoff for 5xx errors and timeouts.
+        4xx errors fail fast (no retry) since the resource likely doesn't exist.
+
+        Args:
+            url: URL to fetch
+            max_retries: Number of retry attempts (default 3)
+            timeout: Optional custom timeout in seconds
+
+        Returns:
+            Response text
+
+        Raises:
+            httpx.HTTPStatusError: On 4xx errors or after all retries exhausted
+            httpx.TimeoutException: After all timeout retries exhausted
+        """
+        for attempt in range(max_retries):
+            try:
+                if timeout:
+                    response = await self.client.get(url, timeout=timeout)
+                else:
+                    response = await self.client.get(url)
+
+                # 4xx errors - fail fast (resource doesn't exist/paywall)
+                if 400 <= response.status_code < 500:
+                    response.raise_for_status()
+
+                # 5xx errors - retry with exponential backoff + jitter
+                if response.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        # Add jitter (0.9-1.1x) to avoid thundering herd
+                        delay = (2 ** attempt) * random.uniform(0.9, 1.1)
+                        logger.warning(
+                            f"HTTP {response.status_code} fetching {url}, "
+                            f"retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        response.raise_for_status()
+
+                response.raise_for_status()
+                return response.text
+
+            except httpx.TimeoutException:
+                if attempt < max_retries - 1:
+                    # Add jitter (0.9-1.1x) to avoid thundering herd
+                    delay = (2 ** attempt) * random.uniform(0.9, 1.1)
+                    logger.warning(
+                        f"Timeout fetching {url}, "
+                        f"retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Timeout fetching {url} after {max_retries} attempts")
+                    raise
+
+        # Should not reach here, but just in case
+        raise httpx.HTTPError(f"Failed to fetch {url} after {max_retries} attempts")
 
     def _should_filter(self, article: RawArticle) -> bool:
         """Check if article should be filtered based on fund's negative keywords."""
@@ -183,10 +265,9 @@ class SimpleHTMLScraper(BaseScraper):
     content_selector: str = ".content, .body, article"
 
     async def fetch(self, url: Optional[str] = None) -> str:
+        """Fetch HTML with retry logic for transient errors."""
         target_url = url or self.fund.ingestion_url
-        response = await self.client.get(target_url)
-        response.raise_for_status()
-        return response.text
+        return await self._fetch_with_retry(target_url)
 
     async def parse(self, html: str) -> List[RawArticle]:
         soup = BeautifulSoup(html, "lxml")
@@ -229,7 +310,11 @@ class SimpleHTMLScraper(BaseScraper):
             try:
                 full_html = await self.fetch(raw.url)
                 text = self._extract_text(full_html)
-            except Exception:
+            except Exception as e:
+                logger.error(
+                    f"Error fetching full article {raw.url}: {e}",
+                    exc_info=True
+                )
                 text = self._extract_text(raw.html)
         else:
             text = self._extract_text(raw.html)

@@ -13,6 +13,7 @@ The Brave News API often misses these - RSS feeds provide direct access.
 
 import asyncio
 import logging
+import random
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 
@@ -25,6 +26,7 @@ from bs4 import BeautifulSoup
 from ..base_scraper import NormalizedArticle
 from ..fund_matcher import match_fund_name
 from ...config.settings import settings
+from ...common.http_client import USER_AGENT_BOT
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +87,8 @@ class PRWireRSSScraper:
 
     def __init__(self):
         self.client = httpx.AsyncClient(
-            timeout=30,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; BudTracker/1.0)"},
+            timeout=settings.request_timeout,
+            headers={"User-Agent": USER_AGENT_BOT},
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
@@ -129,48 +131,88 @@ class PRWireRSSScraper:
         text = f"{title} {description}".lower()
         return any(kw in text for kw in TRACKED_FUND_KEYWORDS)
 
-    async def fetch_full_article(self, url: str) -> Optional[str]:
-        """Fetch full article content from PR wire URL."""
-        try:
-            response = await self.client.get(
-                url,
-                follow_redirects=True,
-                timeout=15,
-            )
-            response.raise_for_status()
+    async def fetch_full_article(self, url: str, max_retries: int = 3) -> Optional[str]:
+        """Fetch full article content from PR wire URL with retry logic.
 
-            soup = BeautifulSoup(response.text, 'lxml')
+        Implements exponential backoff with jitter for 5xx errors and timeouts.
+        4xx errors fail fast since the article likely doesn't exist.
+        """
+        for attempt in range(max_retries):
+            try:
+                response = await self.client.get(
+                    url,
+                    follow_redirects=True,
+                    timeout=settings.article_fetch_timeout,
+                )
 
-            # Remove unwanted elements
-            for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'ads']):
-                tag.decompose()
+                # 4xx errors - fail fast (article doesn't exist/paywall)
+                if 400 <= response.status_code < 500:
+                    logger.debug(f"HTTP {response.status_code} for PR wire article {url}")
+                    return None
 
-            # PR wire article selectors (PRNewswire, GlobeNewswire, BusinessWire)
-            for selector in [
-                '.release-body',  # PRNewswire
-                '.main-body',  # PRNewswire alt
-                '#content-body',  # GlobeNewswire
-                '.article-body',  # GlobeNewswire alt
-                '.bw-release-story',  # BusinessWire
-                '.entry-content',
-                'article',
-                '.post-content',
-                'main',
-            ]:
-                content = soup.select_one(selector)
-                if content:
-                    text = content.get_text(separator='\n', strip=True)
-                    if len(text) > 200:
-                        return text[:8000]
+                # 5xx errors - retry with backoff + jitter
+                if response.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        delay = (2 ** attempt) * random.uniform(0.9, 1.1)
+                        logger.warning(
+                            f"HTTP {response.status_code} fetching PR wire article {url}, "
+                            f"retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"HTTP {response.status_code} fetching PR wire article {url} after {max_retries} attempts")
+                        return None
 
-            return None
+                response.raise_for_status()
 
-        except httpx.HTTPError as e:
-            logger.debug(f"HTTP error fetching PR wire article {url}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error fetching PR wire article {url}: {e}", exc_info=True)
-            return None
+                soup = BeautifulSoup(response.text, 'lxml')
+
+                # Remove unwanted elements
+                for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'ads']):
+                    tag.decompose()
+
+                # PR wire article selectors (PRNewswire, GlobeNewswire, BusinessWire)
+                for selector in [
+                    '.release-body',  # PRNewswire
+                    '.main-body',  # PRNewswire alt
+                    '#content-body',  # GlobeNewswire
+                    '.article-body',  # GlobeNewswire alt
+                    '.bw-release-story',  # BusinessWire
+                    '.entry-content',
+                    'article',
+                    '.post-content',
+                    'main',
+                ]:
+                    content = soup.select_one(selector)
+                    if content:
+                        text = content.get_text(separator='\n', strip=True)
+                        if len(text) > 200:
+                            return text[:8000]
+
+                return None
+
+            except httpx.TimeoutException:
+                if attempt < max_retries - 1:
+                    delay = (2 ** attempt) * random.uniform(0.9, 1.1)
+                    logger.warning(
+                        f"Timeout fetching PR wire article {url}, "
+                        f"retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Timeout fetching PR wire article {url} after {max_retries} attempts")
+                    return None
+
+            except httpx.HTTPError as e:
+                logger.debug(f"HTTP error fetching PR wire article {url}: {e}")
+                return None
+
+            except Exception as e:
+                logger.error(f"Unexpected error fetching PR wire article {url}: {e}", exc_info=True)
+                return None
+
+        return None
 
     def _get_source_name(self, feed_url: str) -> str:
         """Get source name from feed URL."""
@@ -186,48 +228,82 @@ class PRWireRSSScraper:
         self,
         feed_url: str,
         hours_back: int = 168,  # 7 days
+        max_retries: int = 3,
     ) -> List[PRWireArticle]:
-        """Fetch and parse a single RSS feed."""
-        try:
-            response = await self.client.get(feed_url)
-            response.raise_for_status()
-            feed = feedparser.parse(response.text)
+        """Fetch and parse a single RSS feed with retry logic.
 
-            if feed.bozo:
-                logger.warning(f"Malformed RSS feed: {feed_url} - {feed.bozo_exception}")
+        Feed fetching is critical - implements exponential backoff with jitter.
+        """
+        for attempt in range(max_retries):
+            try:
+                response = await self.client.get(feed_url)
 
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
-            source = self._get_source_name(feed_url)
-            articles = []
+                # 5xx errors - retry with backoff + jitter
+                if response.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        delay = (2 ** attempt) * random.uniform(0.9, 1.1)
+                        logger.warning(
+                            f"HTTP {response.status_code} fetching feed {feed_url}, "
+                            f"retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"HTTP {response.status_code} fetching feed {feed_url} after {max_retries} attempts")
+                        return []
 
-            for entry in feed.entries:
-                title = entry.get("title", "")
-                link = entry.get("link", "")
-                description = entry.get("summary", entry.get("description", ""))
-                pub_date = self._parse_date(entry)
+                response.raise_for_status()
+                feed = feedparser.parse(response.text)
 
-                # Skip old articles
-                if pub_date and pub_date < cutoff:
-                    continue
+                if feed.bozo:
+                    logger.warning(f"Malformed RSS feed: {feed_url} - {feed.bozo_exception}")
 
-                # Skip non-funding articles
-                if not self._is_funding_related(title, description):
-                    continue
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+                source = self._get_source_name(feed_url)
+                articles = []
 
-                articles.append(PRWireArticle(
-                    title=title,
-                    url=link,
-                    description=description,
-                    published_date=pub_date,
-                    source=source,
-                ))
+                for entry in feed.entries:
+                    title = entry.get("title", "")
+                    link = entry.get("link", "")
+                    description = entry.get("summary", entry.get("description", ""))
+                    pub_date = self._parse_date(entry)
 
-            logger.info(f"Found {len(articles)} funding articles from {source}")
-            return articles
+                    # Skip old articles
+                    if pub_date and pub_date < cutoff:
+                        continue
 
-        except Exception as e:
-            logger.error(f"Error fetching PR wire feed {feed_url}: {e}")
-            return []
+                    # Skip non-funding articles
+                    if not self._is_funding_related(title, description):
+                        continue
+
+                    articles.append(PRWireArticle(
+                        title=title,
+                        url=link,
+                        description=description,
+                        published_date=pub_date,
+                        source=source,
+                    ))
+
+                logger.info(f"Found {len(articles)} funding articles from {source}")
+                return articles
+
+            except httpx.TimeoutException:
+                if attempt < max_retries - 1:
+                    delay = (2 ** attempt) * random.uniform(0.9, 1.1)
+                    logger.warning(
+                        f"Timeout fetching feed {feed_url}, "
+                        f"retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Timeout fetching feed {feed_url} after {max_retries} attempts")
+                    return []
+
+            except Exception as e:
+                logger.error(f"Error fetching PR wire feed {feed_url}: {e}", exc_info=True)
+                return []
+
+        return []
 
     async def scrape_all_feeds(
         self,
@@ -301,7 +377,14 @@ class PRWireRSSScraper:
             ))
 
             # Rate limit between article fetches
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(settings.article_rate_limit_delay)
+
+        # SCRAPER_HEALTH_ALERT: Log warning when scraper returns 0 articles
+        if not normalized:
+            logger.warning(
+                "SCRAPER_HEALTH_ALERT: prwire_rss returned 0 articles - "
+                "RSS feeds may be unavailable or selectors may have changed"
+            )
 
         logger.info(f"Scraped {len(normalized)} funding articles from PR wires")
         return normalized

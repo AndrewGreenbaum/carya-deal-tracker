@@ -27,6 +27,7 @@ from bs4 import BeautifulSoup
 
 from ..base_scraper import NormalizedArticle
 from ...common.brave_client import get_brave_client, get_query_cache
+from ...common.http_client import USER_AGENT_BOT, USER_AGENT_BROWSER
 from ...config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -34,10 +35,10 @@ logger = logging.getLogger(__name__)
 # Memory safety limit (Brave API max is 100 per request)
 MAX_RESULTS_PER_QUERY = 100
 
-# Article fetching settings
-MAX_CONCURRENT_ARTICLES = 5
-ARTICLE_FETCH_TIMEOUT = 10.0
-ARTICLE_RATE_LIMIT_DELAY = 0.3
+# Article fetching settings - use centralized config
+MAX_CONCURRENT_ARTICLES = settings.max_concurrent_articles
+ARTICLE_FETCH_TIMEOUT = settings.article_fetch_timeout
+ARTICLE_RATE_LIMIT_DELAY = settings.article_rate_limit_delay
 
 # Article content selectors (ordered by specificity)
 ARTICLE_SELECTORS = [
@@ -194,7 +195,7 @@ PARTNER_QUERIES = {
     # Founders Fund partners: https://foundersfund.com/team
     # Current: Peter Thiel, Napoleon Ta, Trae Stephens, Lauren Gross, Scott Nolan, John Luttig,
     #          Matias Van Thienen, Delian Asparouhov, Amin Mirzadegan, Joey Krug, Sean Liu
-    # Former: Keith Rabois, Brian Singerman (still newsworthy)
+    # Former (removed from queries): Keith Rabois, Brian Singerman
     "founders_fund": [
         # Fund-level queries (BROAD - catch any funding mention)
         '"Founders Fund" AND (funding OR raises OR raised OR investment)',
@@ -211,9 +212,8 @@ PARTNER_QUERIES = {
         '"John Luttig" AND (startup OR investment OR funding OR "Founders Fund")',
         '"Lauren Gross" AND "Founders Fund" AND (investment OR funding)',
         '"Joey Krug" AND (startup OR investment OR funding OR crypto OR "Founders Fund")',
-        # Former partners (still referenced in deals)
-        '"Keith Rabois" AND (startup OR investment OR funding OR venture)',
-        '"Brian Singerman" AND (startup OR investment OR funding OR venture)',
+        # NOTE: Former partners removed (Jan 2026) - their deals attribute to new funds
+        # Keith Rabois now at Khosla/independent, Brian Singerman left FF
     ],
     # LOW COVERAGE - needs partner queries
     # FIXED 2026-01: Expanded GV queries - was getting 0 leads due to over-filtering
@@ -221,17 +221,11 @@ PARTNER_QUERIES = {
     # Key GPs: David Krane, Krishna Yeshwant, M.G. Siegler, Crystal Huang, Terri Burns,
     #          Frédérique Dame, Sangeen Zeb, Michael McBride (AI focus), Tyson Clark
     "gv": [
-        # Fund-level queries - prefer "Google Ventures" (unambiguous) over "GV" (noisy)
+        # Fund-level queries - consolidated Jan 2026 (was 9 queries, now 3)
+        # Removed: Series A/B/seed (covered by partner queries), participation (disabled)
         '"Google Ventures" AND (funding OR raises OR raised OR investment)',
         '"Google Ventures" AND (leads OR led) AND (funding OR round OR million)',
-        '"Google Ventures" AND "Series A" AND (startup OR million)',
-        '"Google Ventures" AND "Series B" AND (startup OR million)',
-        '"Google Ventures" AND "seed" AND (startup OR million)',
-        '"Google Ventures" AND (backs OR backed OR invests) AND startup',
-        # GV-specific queries (more restrictive to avoid NYSE noise)
         '"led by GV" AND (funding OR million OR startup)',
-        'GV AND "venture capital" AND (leads OR led) AND startup',
-        'GV AND Alphabet AND (funding OR investment OR startup)',
         # Key GP partner queries - David Krane is most prominent
         '"David Krane" AND (startup OR investment OR funding OR venture OR GV)',
         '"David Krane" AND (leads OR led) AND (funding OR investment)',
@@ -257,17 +251,13 @@ PARTNER_QUERIES = {
     # Partners: Asheem Chandna, Jerry Chen, Mor Chen, Mike Duboe, Reid Hoffman, Christine Kim,
     #           Sophia Luo, Saam Motamedi, Corinne Riley, Jason Risch, Seth Rosenberg, Shreya Shekhar
     # Venture Partners: Josh Elman, John Lilly, Josh McFarland, James Slavet, Mustafa Suleyman, David Thacker
-    # Advisory: Bill Helman, David Sze
-    # High-profile EIRs: DJ Patil, Jeff Weiner
+    # Advisory (removed from queries): Bill Helman, David Sze
+    # High-profile EIRs (removed from queries): DJ Patil, Jeff Weiner
     "greylock": [
-        # Fund-level queries (expanded)
+        # Fund-level queries - consolidated Jan 2026 (was 8 queries, now 3)
+        # Removed: Series A/B/seed (covered by partner queries), participation (disabled)
         '"Greylock Partners" AND (funding OR raises OR raised OR investment)',
         '"Greylock Partners" AND (leads OR led) AND (funding OR round OR million)',
-        '"Greylock" AND "Series A" AND (startup OR funding OR million)',
-        '"Greylock" AND "Series B" AND (startup OR funding OR million)',
-        '"Greylock" AND "seed" AND (startup OR funding OR million)',
-        '"Greylock" AND (leads OR led) AND funding',
-        '"Greylock" AND (backs OR backed OR invests) AND startup',
         '"led by Greylock" AND (funding OR million OR startup)',
         # Reid Hoffman - most prominent partner
         '"Reid Hoffman" AND (startup OR investment OR funding OR venture)',
@@ -290,11 +280,8 @@ PARTNER_QUERIES = {
         '"John Lilly" AND (startup OR investment OR funding OR Greylock)',
         '"David Thacker" AND (startup OR investment OR funding OR Greylock)',
         '"Josh McFarland" AND (startup OR investment OR funding OR Greylock)',
-        # Advisory Partners
-        '"David Sze" AND (startup OR investment OR funding OR Greylock)',
-        # High-profile EIRs (often announce investments)
-        '"DJ Patil" AND (startup OR investment OR funding OR venture)',
-        '"Jeff Weiner" AND Greylock AND (investment OR funding OR startup)',
+        # NOTE: Advisory/EIRs removed (Jan 2026) - they don't lead investment rounds
+        # Removed: David Sze (advisory), DJ Patil (EIR), Jeff Weiner (EIR)
     ],
 }
 
@@ -414,18 +401,37 @@ class BraveSearchScraper:
         if hasattr(self, '_http_client'):
             await self._http_client.aclose()
 
-    async def fetch_full_article(self, url: str, max_retries: int = 2) -> Optional[str]:
-        """Fetch full article content from URL.
+    async def fetch_full_article(self, url: str, max_retries: int = 3) -> Optional[str]:
+        """Fetch full article content from URL with retry logic.
 
         This is critical for proper deal extraction - search snippets are too
         short for the LLM to accurately determine lead investor status.
+
+        FIX: Added retry logic for 5xx errors and improved timeout handling.
         """
         for attempt in range(max_retries):
             try:
                 resp = await self._http_client.get(url, headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; BudTracker/1.0)",
+                    "User-Agent": USER_AGENT_BOT,
                     "Accept": "text/html,application/xhtml+xml",
                 })
+
+                # 4xx errors - don't retry (article doesn't exist/paywall)
+                if 400 <= resp.status_code < 500:
+                    logger.debug(f"HTTP {resp.status_code} for {url} - not retrying")
+                    return None
+
+                # 5xx errors - retry with backoff
+                if resp.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        delay = 2 ** attempt
+                        logger.warning(f"HTTP {resp.status_code} fetching {url}, retrying in {delay}s")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.debug(f"HTTP {resp.status_code} for {url} after {max_retries} attempts")
+                        return None
+
                 if resp.status_code != 200:
                     logger.debug(f"HTTP {resp.status_code} for {url}")
                     return None
@@ -458,9 +464,13 @@ class BraveSearchScraper:
                 return None
 
             except httpx.TimeoutException:
-                logger.debug(f"Timeout fetching {url} (attempt {attempt + 1})")
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(1)
+                    delay = 2 ** attempt
+                    logger.debug(f"Timeout fetching {url} (attempt {attempt + 1}/{max_retries}), retrying in {delay}s")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.debug(f"Timeout fetching {url} after {max_retries} attempts")
+                    return None
             except Exception as e:
                 logger.debug(f"Error fetching {url}: {e}")
                 return None
@@ -578,22 +588,29 @@ class BraveSearchScraper:
         return results
 
     def _parse_relative_date(self, age_str: str) -> Optional[date]:
-        """Parse relative date string like '2 days ago'."""
+        """Parse relative date string like '2 days ago'.
+
+        FIX: Uses UTC timezone instead of local timezone to ensure consistent
+        date handling across different server locations.
+        """
         try:
             age_lower = age_str.lower()
+            # Use UTC date to avoid timezone-related off-by-one errors
+            today = datetime.now(timezone.utc).date()
+
             if "hour" in age_lower or "minute" in age_lower:
-                return date.today()
+                return today
             elif "day" in age_lower:
                 days = int("".join(filter(str.isdigit, age_str)) or "1")
-                return date.today() - timedelta(days=days)
+                return today - timedelta(days=days)
             elif "week" in age_lower:
                 weeks = int("".join(filter(str.isdigit, age_str)) or "1")
-                return date.today() - timedelta(weeks=weeks)
+                return today - timedelta(weeks=weeks)
             elif "month" in age_lower:
                 months = int("".join(filter(str.isdigit, age_str)) or "1")
-                return date.today() - timedelta(days=months * 30)
+                return today - timedelta(days=months * 30)
             else:
-                return date.today()
+                return today
         except Exception:
             return None
 
@@ -829,13 +846,17 @@ class BraveSearchScraper:
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_ARTICLES)
 
         async def fetch_one(result: BraveSearchResult, fund_slug: str) -> NormalizedArticle:
+            """Fetch article with semaphore-based concurrency control.
+
+            FIX: Moved delay outside semaphore to avoid blocking other concurrent tasks.
+            """
             async with semaphore:
                 article = await self.to_normalized_article(result, fund_slug)
                 if extra_tags:
                     article.tags.extend(extra_tags)
-                # Small delay to avoid overwhelming target servers
-                await asyncio.sleep(ARTICLE_RATE_LIMIT_DELAY)
-                return article
+            # Small delay AFTER releasing semaphore for politeness
+            await asyncio.sleep(ARTICLE_RATE_LIMIT_DELAY)
+            return article
 
         tasks = [fetch_one(result, fund_slug) for result, fund_slug in results]
         articles = await asyncio.gather(*tasks, return_exceptions=True)
@@ -940,6 +961,13 @@ class BraveSearchScraper:
             extra_tags = tag_key.split(",") if tag_key != "default" else None
             articles = await self.to_normalized_articles_batch(batch, extra_tags)
             all_articles.extend(articles)
+
+        # SCRAPER_HEALTH_ALERT: Log warning when scraper returns 0 articles
+        if not all_articles:
+            logger.warning(
+                "SCRAPER_HEALTH_ALERT: brave_search returned 0 articles - "
+                "API may be rate-limited or search queries may need adjustment"
+            )
 
         return all_articles
 

@@ -29,10 +29,9 @@ class GVScraper(SimpleHTMLScraper):
         self.base_url = "https://gv.com"
 
     async def fetch(self, url: Optional[str] = None) -> str:
+        """Fetch HTML with retry logic for transient errors."""
         target_url = url or f"{self.base_url}/news/"
-        response = await self.client.get(target_url)
-        response.raise_for_status()
-        return response.text
+        return await self._fetch_with_retry(target_url)
 
     async def parse(self, html: str) -> List[RawArticle]:
         soup = BeautifulSoup(html, "lxml")
@@ -109,7 +108,7 @@ class GVScraper(SimpleHTMLScraper):
                 text = ""  # Will be filtered as empty
 
         except Exception as e:
-            logger.warning(f"Error fetching {raw.url}: {e}")
+            logger.error(f"Error fetching {raw.url}: {e}", exc_info=True)
             text = self._extract_text(raw.html)
 
         return NormalizedArticle(

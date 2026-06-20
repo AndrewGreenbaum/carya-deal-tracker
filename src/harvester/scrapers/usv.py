@@ -45,10 +45,9 @@ class USVScraper(SimpleHTMLScraper):
         )
 
     async def fetch(self, url: Optional[str] = None) -> str:
+        """Fetch HTML with retry logic for transient errors."""
         target_url = url or f"{self.base_url}/blog"
-        response = await self.client.get(target_url)
-        response.raise_for_status()
-        return response.text
+        return await self._fetch_with_retry(target_url)
 
     async def parse(self, html: str) -> List[RawArticle]:
         soup = BeautifulSoup(html, "lxml")
@@ -129,7 +128,7 @@ class USVScraper(SimpleHTMLScraper):
                 text = f"[USV IS LEADING]\n{text}"
 
         except Exception as e:
-            logger.warning(f"Error fetching {raw.url}: {e}")
+            logger.error(f"Error fetching {raw.url}: {e}", exc_info=True)
             text = self._extract_text(raw.html)
 
         return NormalizedArticle(

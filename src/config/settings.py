@@ -57,17 +57,31 @@ class Settings(BaseSettings):
 
     # Hybrid extraction: re-extract with Sonnet for low-confidence results
     hybrid_extraction_enabled: bool = True  # Enable Sonnet re-extraction
-    hybrid_confidence_min: float = 0.35  # Min confidence to consider for re-extraction
+    # COST OPTIMIZATION (Jan 2026): Raised from 0.35 to 0.45
+    # Sonnet costs 3.75x more than Haiku - only re-extract truly uncertain cases
+    # Estimated savings: $10-12/month (fewer Sonnet calls)
+    hybrid_confidence_min: float = 0.45  # Min confidence to consider for re-extraction
     hybrid_confidence_max: float = 0.65  # Max confidence to consider for re-extraction
 
     # Embedding Settings
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 
-    # Scraping Settings
-    request_timeout: int = 30
-    rate_limit_delay: float = 1.0
-    max_retries: int = 3
+    # Scraping Settings - Main HTTP client
+    request_timeout: int = 30  # Main scraper timeout (seconds)
+    article_fetch_timeout: int = 15  # Individual article fetch timeout (seconds)
+    rate_limit_delay: float = 1.0  # Default delay between requests
+    max_retries: int = 3  # Default retry attempts
+
+    # Scraping Settings - Rate Limits (seconds)
+    article_rate_limit_delay: float = 0.3  # Delay between article fetches
+    feed_rate_limit_delay: float = 0.2  # Delay between feed fetches
+    api_rate_limit_delay: float = 0.5  # Delay for API-heavy operations
+
+    # Scraping Settings - Concurrency Limits
+    max_concurrent_articles: int = 5  # Parallel article fetches
+    max_concurrent_feeds: int = 5  # Parallel feed fetches
+    max_concurrent_searches: int = 3  # Parallel search queries
 
     # Twitter Settings
     twitter_requests_per_run: int = 100  # Max API calls per scrape run (free tier: 1500/month)

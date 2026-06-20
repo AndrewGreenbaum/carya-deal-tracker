@@ -25,6 +25,7 @@ from ..base_scraper import NormalizedArticle
 from ..fund_matcher import match_fund_name
 from ...config.settings import settings
 from ...config.funds import FUND_REGISTRY
+from ...common.http_client import USER_AGENT_BOT
 
 
 # TechCrunch RSS feeds
@@ -64,8 +65,8 @@ class TechCrunchScraper:
         """
         self.feeds = feeds or list(TECHCRUNCH_FEEDS.values())
         self.client = httpx.AsyncClient(
-            timeout=30,
-            headers={"User-Agent": "BudTracker/1.0 (Investment Research)"},
+            timeout=settings.request_timeout,
+            headers={"User-Agent": USER_AGENT_BOT},
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
@@ -188,39 +189,69 @@ class TechCrunchScraper:
         text = f"{article.title} {article.description}".lower()
         return any(kw in text for kw in funding_keywords)
 
-    async def fetch_full_article(self, url: str) -> Optional[str]:
-        """Fetch full article content from URL."""
-        try:
-            response = await self.client.get(
-                url,
-                follow_redirects=True,
-                timeout=15,
-            )
-            response.raise_for_status()
+    async def fetch_full_article(self, url: str, max_retries: int = 3) -> Optional[str]:
+        """Fetch full article content from URL with retry logic.
 
-            soup = BeautifulSoup(response.text, 'lxml')
+        FIX: Added retry logic for transient HTTP errors (5xx, timeouts).
+        """
+        for attempt in range(max_retries):
+            try:
+                response = await self.client.get(
+                    url,
+                    follow_redirects=True,
+                    timeout=settings.request_timeout,
+                )
 
-            # Remove unwanted elements
-            for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside']):
-                tag.decompose()
+                # 4xx errors - don't retry (article doesn't exist/paywall)
+                if 400 <= response.status_code < 500:
+                    logger.debug(f"HTTP {response.status_code} for {url} - not retrying")
+                    return None
 
-            # TechCrunch article selectors
-            for selector in ['.article-content', '.entry-content', 'article', '.post-content', 'main']:
-                content = soup.select_one(selector)
-                if content:
-                    text = content.get_text(separator='\n', strip=True)
-                    if len(text) > 200:
-                        return text[:8000]
+                # 5xx errors - retry with backoff
+                if response.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        delay = 2 ** attempt
+                        logger.warning(f"HTTP {response.status_code} fetching {url}, retrying in {delay}s")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"HTTP {response.status_code} fetching {url} after {max_retries} attempts")
+                        return None
 
-            return None
+                response.raise_for_status()
 
-        except httpx.HTTPError as e:
-            # FIX: Specific exception + logger instead of print()
-            logger.error(f"HTTP error fetching TechCrunch article {url}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error fetching TechCrunch article {url}: {e}", exc_info=True)
-            return None
+                soup = BeautifulSoup(response.text, 'lxml')
+
+                # Remove unwanted elements
+                for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside']):
+                    tag.decompose()
+
+                # TechCrunch article selectors
+                for selector in ['.article-content', '.entry-content', 'article', '.post-content', 'main']:
+                    content = soup.select_one(selector)
+                    if content:
+                        text = content.get_text(separator='\n', strip=True)
+                        if len(text) > 200:
+                            return text[:8000]
+
+                return None
+
+            except httpx.TimeoutException:
+                if attempt < max_retries - 1:
+                    delay = 2 ** attempt
+                    logger.warning(f"Timeout fetching {url} (attempt {attempt + 1}/{max_retries}), retrying in {delay}s")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Timeout fetching {url} after {max_retries} attempts")
+                    return None
+            except httpx.HTTPError as e:
+                logger.debug(f"HTTP error fetching TechCrunch article {url}: {e}")
+                return None
+            except Exception as e:
+                logger.error(f"Unexpected error fetching TechCrunch article {url}: {e}", exc_info=True)
+                return None
+
+        return None
 
     async def scrape_all(self, hours_back: int = 168) -> List[NormalizedArticle]:
         """
@@ -243,16 +274,19 @@ class TechCrunchScraper:
             return []
 
         # OPTIMIZATION: Parallel article fetching with rate limiting
-        MAX_CONCURRENT_ARTICLES = 10
-        semaphore = asyncio.Semaphore(MAX_CONCURRENT_ARTICLES)
+        # Use 2x the default for TechCrunch as it handles high concurrency well
+        semaphore = asyncio.Semaphore(settings.max_concurrent_articles * 2)
 
         async def fetch_article_with_limit(article: TechCrunchArticle) -> tuple:
-            """Fetch article content with semaphore-based rate limiting."""
+            """Fetch article content with semaphore-based rate limiting.
+
+            FIX: Moved delay outside semaphore to avoid blocking other concurrent tasks.
+            """
             async with semaphore:
                 full_text = await self.fetch_full_article(article.url)
-                # Small delay between request completions for politeness
-                await asyncio.sleep(0.1)
-                return (article, full_text)
+            # Small delay AFTER releasing semaphore for politeness
+            await asyncio.sleep(0.1)
+            return (article, full_text)
 
         # Fetch all articles in parallel
         tasks = [fetch_article_with_limit(article) for article in funding_articles]

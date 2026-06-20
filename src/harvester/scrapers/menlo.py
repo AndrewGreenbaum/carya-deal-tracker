@@ -7,11 +7,14 @@ Format: HTML
 Perspective/blog page; focus on AI investments.
 """
 
+import logging
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from ..base_scraper import SimpleHTMLScraper, RawArticle, NormalizedArticle
 from ...config.funds import FUND_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 
 class MenloScraper(SimpleHTMLScraper):
@@ -43,10 +46,9 @@ class MenloScraper(SimpleHTMLScraper):
         self.base_url = "https://menlovc.com"
 
     async def fetch(self, url: Optional[str] = None) -> str:
+        """Fetch HTML with retry logic for transient errors."""
         target_url = url or f"{self.base_url}/perspective/"
-        response = await self.client.get(target_url)
-        response.raise_for_status()
-        return response.text
+        return await self._fetch_with_retry(target_url)
 
     async def parse(self, html: str) -> List[RawArticle]:
         soup = BeautifulSoup(html, "lxml")
@@ -118,7 +120,8 @@ class MenloScraper(SimpleHTMLScraper):
             if self._is_ai_focused(raw.title, text):
                 text = f"[AI INVESTMENT]\n{text}"
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error fetching {raw.url}: {e}", exc_info=True)
             text = self._extract_text(raw.html)
 
         return NormalizedArticle(
