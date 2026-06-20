@@ -43,6 +43,59 @@ _content_hash_lock = asyncio.Lock()  # FIX: Async-safe cache access
 # If new content is 2x longer, it's worth re-processing
 MIN_LENGTH_IMPROVEMENT_RATIO = 2.0
 
+# =============================================================================
+# EXTRACTION STATS (for monitoring post-processing filter activity)
+# =============================================================================
+
+import threading
+
+# Module-level stats for tracking post-processing filter activity
+# Cleared at start of each scan via clear_extraction_stats()
+_extraction_stats = {
+    "crypto_filtered": 0,          # Deals reclassified as NOT_AI (crypto)
+    "consumer_ai_filtered": 0,     # Deals reclassified as consumer AI
+    "consumer_fintech_filtered": 0,  # Deals reclassified as consumer fintech
+    "company_name_rejected": 0,    # Deals rejected for hallucinated company name
+    "investors_removed": 0,        # Investors removed for not being in text
+    "background_mention_rejected": 0,  # Deals rejected as background mentions
+    "article_title_rejected": 0,   # Deals rejected for company name looking like title
+    "lead_evidence_downgraded": 0, # Lead claims downgraded to LIKELY_LEAD
+    "amount_flagged_for_review": 0,  # Amounts flagged for market size confusion
+}
+_extraction_stats_thread_lock = threading.Lock()
+
+
+def increment_extraction_stat(stat_name: str, count: int = 1) -> None:
+    """Thread-safe increment of extraction stat (synchronous for use in sync functions)."""
+    with _extraction_stats_thread_lock:
+        if stat_name in _extraction_stats:
+            _extraction_stats[stat_name] += count
+
+
+def get_extraction_stats() -> dict:
+    """Get current extraction stats (for monitoring)."""
+    with _extraction_stats_thread_lock:
+        return _extraction_stats.copy()
+
+
+def clear_extraction_stats() -> None:
+    """Clear extraction stats. Call at start of each scan."""
+    global _extraction_stats
+    with _extraction_stats_thread_lock:
+        stats_copy = _extraction_stats.copy()
+        _extraction_stats = {k: 0 for k in _extraction_stats}
+    total = sum(stats_copy.values())
+    if total > 0:
+        logger.info(
+            f"Extraction stats cleared (previous run: "
+            f"crypto={stats_copy['crypto_filtered']}, "
+            f"consumer_ai={stats_copy['consumer_ai_filtered']}, "
+            f"company_rejected={stats_copy['company_name_rejected']}, "
+            f"background={stats_copy['background_mention_rejected']}, "
+            f"lead_downgraded={stats_copy['lead_evidence_downgraded']})"
+        )
+
+
 from .schemas import DealExtraction, ArticleAnalysis, LeadStatus, RoundType, EnterpriseCategory
 from ..config.settings import settings
 from ..config.funds import FUND_REGISTRY, FundConfig, ScraperType, EXTERNAL_ONLY_FUNDS
@@ -144,35 +197,43 @@ BAD snippets (too short, missing context):
 - "Sequoia invested" (no lead language)
 - "the round" (meaningless)
 
-FOUNDER/CEO (EXTRACT ONLY THE TOP PERSON - ONE ENTRY MAX)
-Look for the CEO or lead founder. Priority order:
+FOUNDER/CEO EXTRACTION (CRITICAL - extract at least ONE person when mentioned)
+ALWAYS extract the CEO or lead founder. This is HIGH PRIORITY data.
+
+Priority order:
 1. CEO (highest priority)
 2. CEO & Founder / CEO & Co-founder
 3. Founder / Co-founder (if no CEO mentioned)
+4. CTO, President, or other C-level IF they are also a founder
+5. Any person described as "founder" or who "founded" the company
 
-Extract ONLY ONE person:
+Extract ONE person with:
 - name: Full name (first + last). "John Smith", not "John" or "Smith"
-- title: CEO, CEO & Founder, Founder, Co-founder, etc.
-- linkedin_url: ONLY if explicitly in article text (e.g., "linkedin.com/in/johnsmith")
+- title: Their actual title (CEO, Founder, CEO & Co-founder, CTO & Co-founder, etc.)
+- linkedin_url: ONLY if explicitly in article text (rare)
 
 FOUNDER EXAMPLES:
 Article: "Acme, founded by Jane Doe and John Smith, raised $10M. Jane is CEO."
-→ founders: [{name: "Jane Doe", title: "CEO"}]  (ONLY the CEO)
+→ founders: [{name: "Jane Doe", title: "CEO"}]
 
 Article: "CEO Sarah Johnson announced the funding"
 → founders: [{name: "Sarah Johnson", title: "CEO"}]
 
 Article: "The startup, co-founded by Mike Chen, raised $5M"
-→ founders: [{name: "Mike Chen", title: "Co-founder"}]  (only 1 person)
+→ founders: [{name: "Mike Chen", title: "Co-founder"}]
 
-Article: "The startup raised $5M" (no founders mentioned)
-→ founders: [] (empty list)
+Article: "Alex Rivera founded Acme in 2023"
+→ founders: [{name: "Alex Rivera", title: "Founder"}]
+
+Article: "The startup raised $5M" (NO person mentioned anywhere)
+→ founders: [] (empty ONLY if no founder/CEO name appears)
 
 DO NOT extract:
-- Multiple founders (pick the CEO or first-mentioned founder ONLY)
-- Investor partners (e.g., "Bill Gurley of Benchmark")
+- Investor partners (e.g., "Bill Gurley of Benchmark" - he's an investor, not a founder)
 - Board members who aren't founders
-- Employees mentioned in quotes
+- Random employees mentioned in quotes
+
+IMPORTANT: Empty founders list should be RARE. Most funding articles mention the CEO or founder. Look carefully for any person associated with the startup being funded.
 
 TRACKED FUNDS: Founders Fund, Benchmark, Sequoia, Khosla, Index, a16z, Insight Partners, Bessemer, Redpoint, Greylock, GV, Menlo, USV, Thrive, Accel, Felicis, General Catalyst, First Round
 
@@ -547,8 +608,9 @@ async def _reextract_with_sonnet(
                 cache_write_tokens=cache_write
             )
 
-        # Apply same post-processing as Haiku (investor validation BEFORE fund verification)
+        # Apply same post-processing as Haiku (company + investor validation BEFORE fund verification)
         # This ensures fair comparison between Haiku and Sonnet results
+        response = _validate_company_in_text(response, article_text)
         response = _validate_investors_in_text(response, article_text)
         response = _verify_tracked_fund(response)
 
@@ -1424,6 +1486,9 @@ async def extract_deal(
                     f"has_usage={hasattr(completion, 'usage') if completion else 'N/A'}"
                 )
 
+            # Post-process: validate company name is in article (prevents hallucinated companies)
+            response = _validate_company_in_text(response, article_text)
+
             # Post-process: validate investors are mentioned in article (prevents hallucination)
             response = _validate_investors_in_text(response, article_text)
 
@@ -1436,6 +1501,7 @@ async def extract_deal(
                     f"Reclassifying {response.startup_name} as NOT_AI: "
                     f"crypto/blockchain detected"
                 )
+                increment_extraction_stat("crypto_filtered")
                 response.is_enterprise_ai = False
                 response.is_ai_deal = False
                 response.enterprise_category = EnterpriseCategory.NOT_AI
@@ -1447,6 +1513,7 @@ async def extract_deal(
                     f"Reclassifying {response.startup_name} as Consumer AI: "
                     f"consumer/gaming/social AI detected"
                 )
+                increment_extraction_stat("consumer_ai_filtered")
                 response.is_enterprise_ai = False
                 # Keep is_ai_deal=True (it's still AI, just not enterprise)
                 if response.enterprise_category not in (
@@ -1464,6 +1531,7 @@ async def extract_deal(
                     f"Reclassifying {response.startup_name} as NOT_AI: "
                     f"consumer fintech (neobroker/neobank) detected"
                 )
+                increment_extraction_stat("consumer_fintech_filtered")
                 response.is_enterprise_ai = False
                 response.is_ai_deal = False
                 response.enterprise_category = EnterpriseCategory.NOT_AI
@@ -1474,6 +1542,7 @@ async def extract_deal(
                     f"Rejecting article title as company name: '{response.startup_name}' "
                     f"from {source_url}"
                 )
+                increment_extraction_stat("article_title_rejected")
                 response.is_new_announcement = False
                 response.announcement_rejection_reason = (
                     f"Company name looks like article title: {response.startup_name}"
@@ -1492,13 +1561,17 @@ async def extract_deal(
                         f"Rejecting background mention: '{response.startup_name}' "
                         f"from {source_url} - {reason}"
                     )
+                    increment_extraction_stat("background_mention_rejected")
                     response.is_new_announcement = False
                     response.announcement_rejection_reason = reason
 
             # Post-process: validate deal amount (detect market size confusion)
             # FIX (2026-01): Catches cases like $150B market size → $150M funding
             if response and response.amount:
+                old_needs_review = getattr(response, 'amount_needs_review', False)
                 response = _validate_deal_amount(response, article_text)
+                if response.amount_needs_review and not old_needs_review:
+                    increment_extraction_stat("amount_flagged_for_review")
 
             # HYBRID EXTRACTION: Re-extract with Sonnet for low-confidence results
             # Only if: enabled, confidence in range, valid deal, has quality issues
@@ -1522,27 +1595,48 @@ async def extract_deal(
                     original_response=response,
                 )
                 if sonnet_response:
+                    # COST TRACKING (Jan 2026): Log Sonnet hit rate to measure ROI
+                    # Track: did Sonnet upgrade weak evidence to confirmed lead?
+                    # If <30% hit rate, consider disabling hybrid extraction
+                    sonnet_improved = (
+                        not sonnet_response.lead_evidence_weak
+                        or len(sonnet_response.founders) > len(response.founders)
+                        or sonnet_response.confidence_score > response.confidence_score + 0.1
+                    )
+                    logger.info(
+                        f"HYBRID_RESULT: {sonnet_response.startup_name} | "
+                        f"lead_confirmed={not sonnet_response.lead_evidence_weak} | "
+                        f"founders={len(sonnet_response.founders)} | "
+                        f"confidence={sonnet_response.confidence_score:.2f} | "
+                        f"improved={sonnet_improved}"
+                    )
+
                     response = sonnet_response
 
                     # CRITICAL: Apply same post-processing to Sonnet response
                     # Must include ALL post-processing steps in the same order as Haiku
 
-                    # 1. Validate investors are mentioned in article (prevents hallucination)
+                    # 1. Validate company name is in article (prevents hallucinated companies)
+                    response = _validate_company_in_text(response, article_text)
+
+                    # 2. Validate investors are mentioned in article (prevents hallucination)
                     response = _validate_investors_in_text(response, article_text)
 
-                    # 2. Verify tracked fund identification
+                    # 3. Verify tracked fund identification
                     response = _verify_tracked_fund(response)
 
-                    # 3. Crypto reclassification
+                    # 4. Crypto reclassification
                     if response.is_ai_deal and _is_crypto_deal(response, article_text):
                         logger.info(f"HYBRID: Reclassifying {response.startup_name} as NOT_AI (crypto)")
+                        increment_extraction_stat("crypto_filtered")
                         response.is_enterprise_ai = False
                         response.is_ai_deal = False
                         response.enterprise_category = EnterpriseCategory.NOT_AI
 
-                    # 4. Consumer AI reclassification
+                    # 5. Consumer AI reclassification
                     if response.is_enterprise_ai and _is_consumer_ai_deal(response, article_text):
                         logger.info(f"HYBRID: Reclassifying {response.startup_name} as Consumer AI")
+                        increment_extraction_stat("consumer_ai_filtered")
                         response.is_enterprise_ai = False
                         if response.enterprise_category not in (
                             EnterpriseCategory.CONSUMER_AI,
@@ -1551,30 +1645,42 @@ async def extract_deal(
                         ):
                             response.enterprise_category = EnterpriseCategory.CONSUMER_AI
 
-                    # 5. Consumer fintech reclassification
+                    # 6. Consumer fintech reclassification
                     if (response.is_ai_deal or response.is_enterprise_ai) and _is_consumer_fintech_deal(response, article_text):
                         logger.info(f"HYBRID: Reclassifying {response.startup_name} as NOT_AI (consumer fintech)")
+                        increment_extraction_stat("consumer_fintech_filtered")
                         response.is_enterprise_ai = False
                         response.is_ai_deal = False
                         response.enterprise_category = EnterpriseCategory.NOT_AI
 
-                    # 6. Article title validation
+                    # 7. Article title validation
                     if _looks_like_article_title(response.startup_name):
                         logger.warning(f"HYBRID: Rejecting article title as company name: '{response.startup_name}'")
+                        increment_extraction_stat("article_title_rejected")
                         response.is_new_announcement = False
                         response.announcement_rejection_reason = f"Company name looks like article title: {response.startup_name}"
 
-                    # 7. Background mention check
+                    # 8. Background mention check
                     if response.is_new_announcement:
                         is_background, reason = _is_background_mention(response.startup_name, article_text, is_external_source)
                         if is_background:
                             logger.warning(f"HYBRID: Rejecting background mention: '{response.startup_name}' - {reason}")
+                            increment_extraction_stat("background_mention_rejected")
                             response.is_new_announcement = False
                             response.announcement_rejection_reason = reason
 
-                    # 8. Amount validation
+                    # 9. Amount validation
                     if response.amount:
+                        old_needs_review = getattr(response, 'amount_needs_review', False)
                         response = _validate_deal_amount(response, article_text)
+                        if response.amount_needs_review and not old_needs_review:
+                            increment_extraction_stat("amount_flagged_for_review")
+                else:
+                    # COST TRACKING: Sonnet re-extraction failed
+                    logger.warning(
+                        f"HYBRID_FAILED: {response.startup_name} | "
+                        f"Sonnet returned None - keeping Haiku result"
+                    )
 
             return response
 
@@ -1875,6 +1981,82 @@ def _investor_in_text(investor_name: str, text_lower: str) -> bool:
     return False
 
 
+def _validate_company_in_text(deal: DealExtraction, article_text: str) -> DealExtraction:
+    """
+    Validate that the extracted company name actually appears in the article text.
+
+    SAFEGUARD: Prevents hallucinated company names from being saved.
+
+    This catches cases where Claude invents a company name based on context clues
+    (e.g., combining investment thesis keywords like "Industrial AI" with real people
+    to fabricate companies like "Modern Industrials").
+
+    The check is intentionally lenient to avoid false rejections:
+    - Checks for the main company word (first word, 4+ chars) anywhere in text
+    - Strips common suffixes (AI, Labs, Tech, etc.) before matching
+    - Only rejects if NO recognizable part of the company name appears
+
+    Args:
+        deal: The extracted deal
+        article_text: Original article text
+
+    Returns:
+        Modified deal with is_new_announcement=False if company not found
+    """
+    if not article_text or not deal.startup_name:
+        return deal
+
+    text_lower = article_text.lower()
+    company_lower = deal.startup_name.lower().strip()
+
+    # Direct match - company name appears in text
+    if company_lower in text_lower:
+        return deal
+
+    # Extract main word(s) by removing common suffixes
+    # These are often added by LLM based on context but may not be in article
+    suffixes_to_strip = [
+        'inc', 'llc', 'ltd', 'corp', 'corporation', 'company',
+        'ai', 'labs', 'tech', 'technologies', 'software', 'systems',
+        'health', 'healthcare', 'bio', 'therapeutics', 'sciences',
+        'cloud', 'data', 'analytics', 'intelligence',
+        'ml', 'ops', 'dev', 'hq', 'app', 'io', 'platform',
+    ]
+
+    company_words = company_lower.split()
+
+    # Filter out suffix words to get core name
+    core_words = [
+        w for w in company_words
+        if w not in suffixes_to_strip and len(w) >= 3
+    ]
+
+    if not core_words:
+        # All words are suffixes - use original first word if long enough
+        if company_words and len(company_words[0]) >= 4:
+            core_words = [company_words[0]]
+        else:
+            return deal  # Can't validate, allow it through
+
+    # Check if ANY core word appears in the text
+    for word in core_words:
+        if len(word) >= 4 and word in text_lower:
+            return deal
+
+    # Company name not found - likely hallucinated
+    logger.warning(
+        f"REJECTING hallucinated company name: '{deal.startup_name}' - "
+        f"core words {core_words} not found in article text"
+    )
+    increment_extraction_stat("company_name_rejected")
+    deal.is_new_announcement = False
+    deal.announcement_rejection_reason = (
+        f"Company name '{deal.startup_name}' not found in article text - likely hallucinated"
+    )
+
+    return deal
+
+
 def _validate_investors_in_text(deal: DealExtraction, article_text: str) -> DealExtraction:
     """
     Validate that claimed investors are actually mentioned in the article text.
@@ -1912,6 +2094,7 @@ def _validate_investors_in_text(deal: DealExtraction, article_text: str) -> Deal
             f"REMOVING hallucinated lead investors for {deal.startup_name}: "
             f"{removed_leads} - not found in article text"
         )
+        increment_extraction_stat("investors_removed", len(removed_leads))
         deal.lead_investors = validated_leads
 
         # If all lead investors removed, update tracked fund status
@@ -1934,6 +2117,7 @@ def _validate_investors_in_text(deal: DealExtraction, article_text: str) -> Deal
             f"REMOVING hallucinated participating investors for {deal.startup_name}: "
             f"{removed_participants} - not found in article text"
         )
+        increment_extraction_stat("investors_removed", len(removed_participants))
         deal.participating_investors = validated_participants
 
     return deal
@@ -1969,6 +2153,7 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
             f"DOWNGRADING lead claim for {deal.startup_name}: "
             f"snippet '{deal.verification_snippet[:80]}...' lacks explicit lead language"
         )
+        increment_extraction_stat("lead_evidence_downgraded")
         deal.lead_evidence_weak = True  # Flag for frontend display
         # Set to LIKELY_LEAD since Claude claimed lead but snippet lacks proof
         deal.tracked_fund_role = LeadStatus.LIKELY_LEAD
@@ -1978,6 +2163,7 @@ def _verify_tracked_fund(deal: DealExtraction) -> DealExtraction:
             f"DOWNGRADING lead claim for {deal.startup_name}: "
             f"no verification_snippet provided"
         )
+        increment_extraction_stat("lead_evidence_downgraded")
         deal.lead_evidence_weak = True  # Flag for frontend display
         # Set to LIKELY_LEAD since Claude claimed lead but no snippet provided
         deal.tracked_fund_role = LeadStatus.LIKELY_LEAD

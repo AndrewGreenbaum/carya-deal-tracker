@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 _global_seen_urls: Set[str] = set()
 _global_urls_lock = asyncio.Lock()
 
+# Global set to track content hashes seen this run (catches syndicated articles with different URLs)
+# Cleared at the start of each scheduled job
+_global_content_hashes: Set[str] = set()
+_global_content_lock = asyncio.Lock()
+
 # Tracking parameters to strip from URLs for normalization
 TRACKING_PARAMS = {
     'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
@@ -115,6 +120,56 @@ async def clear_global_seen_urls() -> None:
         _global_seen_urls.clear()
     if size > 0:
         logger.info(f"Global URL dedup cache cleared ({size} entries)")
+
+
+def get_content_fingerprint(text: str) -> str:
+    """
+    Generate a fingerprint for article content.
+
+    Uses first 500 + last 200 chars for fast fingerprinting.
+    Catches syndicated articles that appear on different sites with different URLs.
+
+    Added Jan 2026 to save ~40 Claude requests/scan.
+    """
+    from hashlib import md5
+    if not text:
+        return ""
+    # Normalize whitespace for consistent hashing
+    normalized = " ".join(text.split())
+    if len(normalized) < 700:
+        return md5(normalized.encode()).hexdigest()
+    # Use start + end to catch both headline matches and body matches
+    fingerprint_text = normalized[:500] + normalized[-200:]
+    return md5(fingerprint_text.encode()).hexdigest()
+
+
+async def check_global_content_seen(text: str) -> bool:
+    """
+    Check if content has been seen in this run (syndicated article dedup).
+
+    Returns True if content was already seen (should skip).
+    Adds fingerprint to global set if not seen.
+    """
+    fingerprint = get_content_fingerprint(text)
+    if not fingerprint:
+        return False  # Empty content, don't skip
+
+    async with _global_content_lock:
+        if fingerprint in _global_content_hashes:
+            return True
+        _global_content_hashes.add(fingerprint)
+        return False
+
+
+async def clear_global_content_hashes() -> None:
+    """Clear global content hash set. Called at start of each scheduled run."""
+    global _global_content_hashes
+    async with _global_content_lock:
+        size = len(_global_content_hashes)
+        _global_content_hashes.clear()
+    if size > 0:
+        logger.info(f"Global content hash cache cleared ({size} entries)")
+
 
 # =============================================================================
 # TOKEN OPTIMIZATION CONSTANTS
@@ -629,7 +684,7 @@ async def process_external_articles(
     Returns:
         Dict with processing stats
     """
-    from ..analyst.extractor import extract_deal, set_extraction_context, clear_extraction_context, EXTERNAL_SOURCE_NAMES, EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD
+    from ..analyst.extractor import extract_deal, set_extraction_context, clear_extraction_context, EXTERNAL_SOURCE_NAMES, EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD, get_extraction_stats
     from ..archivist.storage import save_deal
     from ..archivist.database import get_session
     from ..archivist.models import Article
@@ -643,10 +698,27 @@ async def process_external_articles(
         "articles_received": len(articles),
         "articles_skipped_duplicate": 0,
         "articles_skipped_cross_source": 0,  # Phase 5: Cross-source dedup
+        "articles_skipped_content_hash": 0,  # Syndicated article dedup (Jan 2026)
         "articles_skipped_title": 0,  # Title pre-filter
         "deals_extracted": 0,
         "deals_saved": 0,
+        "leads_saved": 0,  # NEW: Track lead deals specifically
+        "enterprise_ai_saved": 0,  # NEW: Track enterprise AI deals
         "errors": 0,
+        # NEW: Confidence band distribution (for monitoring extraction quality)
+        "confidence_bands": {
+            "below_threshold": 0,  # 0.00-0.35: Below external threshold
+            "borderline": 0,       # 0.35-0.50: Between thresholds
+            "medium": 0,           # 0.50-0.65: Solid confidence
+            "high": 0,             # 0.65-1.00: High confidence
+        },
+        # NEW: Rejection tracking (why deals weren't saved)
+        "rejections": {
+            "confidence_too_low": 0,
+            "not_new_announcement": 0,
+            "invalid_company_name": 0,
+            "extraction_returned_none": 0,
+        },
     }
 
     if not articles:
@@ -731,7 +803,24 @@ async def process_external_articles(
             logger.info(f"[{source_name}] No articles passed title filter")
             return stats
 
-    logger.info(f"[{source_name}] {len(new_articles)} articles to process (skipped {stats['articles_skipped_duplicate']} duplicates, {stats['articles_skipped_title']} by title)")
+    # OPTIMIZATION: Content hash dedup (Jan 2026) - catches syndicated articles with different URLs
+    # Same article on TechCrunch + VentureBeat + Crunchbase = 3 Claude calls → now just 1
+    content_dedup_articles = []
+    for article in new_articles:
+        if await check_global_content_seen(article.text):
+            stats["articles_skipped_content_hash"] += 1
+        else:
+            content_dedup_articles.append(article)
+
+    if stats["articles_skipped_content_hash"] > 0:
+        logger.info(f"[{source_name}] Skipped {stats['articles_skipped_content_hash']} syndicated duplicates (same content, different URL)")
+
+    new_articles = content_dedup_articles
+    if not new_articles:
+        logger.info(f"[{source_name}] All articles were content duplicates")
+        return stats
+
+    logger.info(f"[{source_name}] {len(new_articles)} articles to process (skipped {stats['articles_skipped_duplicate']} URL dupes, {stats['articles_skipped_content_hash']} content dupes, {stats['articles_skipped_title']} by title)")
 
     # OPTIMIZATION: Concurrent processing with semaphore (vs serial 0.5s per article)
     MAX_CONCURRENT = 5
@@ -758,11 +847,27 @@ async def process_external_articles(
                 # Handle None returns
                 if extraction is None:
                     logger.debug(f"[{source_name}] Extraction returned None for {article.url}")
+                    async with results_lock:
+                        stats["rejections"]["extraction_returned_none"] += 1
                     return None
+
+                # Track confidence band distribution (for monitoring)
+                async with results_lock:
+                    conf = extraction.confidence_score
+                    if conf < 0.35:
+                        stats["confidence_bands"]["below_threshold"] += 1
+                    elif conf < 0.50:
+                        stats["confidence_bands"]["borderline"] += 1
+                    elif conf < 0.65:
+                        stats["confidence_bands"]["medium"] += 1
+                    else:
+                        stats["confidence_bands"]["high"] += 1
 
                 # Skip non-announcement extractions (background mentions)
                 if not extraction.is_new_announcement:
                     logger.debug(f"[{source_name}] Skipping non-announcement: {extraction.startup_name}")
+                    async with results_lock:
+                        stats["rejections"]["not_new_announcement"] += 1
                     return None
 
                 # FIX: Reject invalid company names like <UNKNOWN>, etc.
@@ -776,6 +881,8 @@ async def process_external_articles(
                         f"Amount: {extraction.amount}, Fund: {extraction.tracked_fund_name} - "
                         f"URL: {article.url}"
                     )
+                    async with results_lock:
+                        stats["rejections"]["invalid_company_name"] += 1
                     return None
 
                 # Skip low-confidence extractions
@@ -787,6 +894,8 @@ async def process_external_articles(
                 )
                 if extraction.confidence_score < confidence_threshold:
                     logger.debug(f"[{source_name}] Low confidence ({extraction.confidence_score:.2f} < {confidence_threshold:.2f}): {extraction.startup_name}")
+                    async with results_lock:
+                        stats["rejections"]["confidence_too_low"] += 1
                     return None
 
                 # Save to database
@@ -811,9 +920,16 @@ async def process_external_articles(
                     if deal:
                         stats["deals_saved"] += 1
                         stats["deals_extracted"] += 1
+                        # Track lead and enterprise AI deals
+                        if extraction.tracked_fund_is_lead:
+                            stats["leads_saved"] += 1
+                        if extraction.is_enterprise_ai:
+                            stats["enterprise_ai_saved"] += 1
                         logger.info(
                             f"[{source_name}] Saved deal: {extraction.startup_name} "
-                            f"(fund: {article.fund_slug or 'unknown'})"
+                            f"(fund: {article.fund_slug or 'unknown'}, "
+                            f"lead={extraction.tracked_fund_is_lead}, "
+                            f"enterprise_ai={extraction.is_enterprise_ai})"
                         )
                     else:
                         logger.warning(
@@ -867,14 +983,41 @@ async def process_external_articles(
                     exc_info=True
                 )
 
+    # Log confidence band distribution for monitoring
+    bands = stats["confidence_bands"]
+    total_extractions = sum(bands.values())
+    if total_extractions > 0:
+        logger.info(
+            f"[{source_name}] CONFIDENCE_BANDS: "
+            f"below_0.35={bands['below_threshold']} ({bands['below_threshold']*100/total_extractions:.0f}%), "
+            f"0.35-0.50={bands['borderline']} ({bands['borderline']*100/total_extractions:.0f}%), "
+            f"0.50-0.65={bands['medium']} ({bands['medium']*100/total_extractions:.0f}%), "
+            f"0.65+={bands['high']} ({bands['high']*100/total_extractions:.0f}%)"
+        )
+
+    # Log rejection stats for debugging extraction quality
+    rejections = stats["rejections"]
+    total_rejections = sum(rejections.values())
+    if total_rejections > 0:
+        logger.info(
+            f"[{source_name}] REJECTION_STATS: "
+            f"confidence_too_low={rejections['confidence_too_low']}, "
+            f"not_new_announcement={rejections['not_new_announcement']}, "
+            f"invalid_company={rejections['invalid_company_name']}, "
+            f"extraction_none={rejections['extraction_returned_none']}"
+        )
+
     logger.info(
         f"[{source_name}] Extraction complete: "
         f"received={stats['articles_received']}, "
         f"cross_source={stats['articles_skipped_cross_source']}, "
         f"db_duplicates={stats['articles_skipped_duplicate']}, "
+        f"content_hash={stats['articles_skipped_content_hash']}, "
         f"title_filtered={stats['articles_skipped_title']}, "
         f"extracted={stats['deals_extracted']}, "
         f"saved={stats['deals_saved']}, "
+        f"leads={stats['leads_saved']}, "
+        f"enterprise_ai={stats['enterprise_ai_saved']}, "
         f"errors={stats['errors']}"
     )
 
@@ -1041,7 +1184,7 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
                 articles = await scraper.scrape_all(
                     freshness=freshness,
                     include_enterprise=True,
-                    include_participation=True,
+                    include_participation=False,  # Lead-only focus (Jan 2026) - saves ~80 requests/scan
                     include_stealth=True,
                     include_partner_names=True,  # Critical for Benchmark, Khosla, First Round
                 )
@@ -1430,8 +1573,28 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
     total_sources = 0
     successful_sources = 0
     failed_sources = []
+    zero_result_sources = []  # FIX: Track scrapers returning 0 results (potential broken selectors)
     total_articles_received = 0
     total_cross_source_skipped = 0
+    total_leads_saved = 0
+    total_enterprise_ai_saved = 0
+
+    # NEW: Build per-source stats for detailed monitoring
+    per_source_stats = {}
+
+    # Aggregate confidence bands and rejections across all sources
+    aggregate_confidence_bands = {
+        "below_threshold": 0,
+        "borderline": 0,
+        "medium": 0,
+        "high": 0,
+    }
+    aggregate_rejections = {
+        "confidence_too_low": 0,
+        "not_new_announcement": 0,
+        "invalid_company_name": 0,
+        "extraction_returned_none": 0,
+    }
 
     for source_name, stats in results.items():
         if source_name == "total_deals_saved":
@@ -1442,20 +1605,67 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
         else:
             successful_sources += 1
             if isinstance(stats, dict):
-                total_articles_received += stats.get("articles_received", 0)
+                articles = stats.get("articles_received", 0)
+                deals = stats.get("deals_saved", 0)
+                leads = stats.get("leads_saved", 0)
+                enterprise_ai = stats.get("enterprise_ai_saved", 0)
+
+                total_articles_received += articles
                 total_cross_source_skipped += stats.get("articles_skipped_cross_source", 0)
+                total_leads_saved += leads
+                total_enterprise_ai_saved += enterprise_ai
+
+                # Build per-source stats
+                per_source_stats[source_name] = {
+                    "articles": articles,
+                    "deals": deals,
+                    "leads": leads,
+                    "enterprise_ai": enterprise_ai,
+                }
+
+                # Aggregate confidence bands
+                if "confidence_bands" in stats:
+                    for band, count in stats["confidence_bands"].items():
+                        if band in aggregate_confidence_bands:
+                            aggregate_confidence_bands[band] += count
+
+                # Aggregate rejections
+                if "rejections" in stats:
+                    for reason, count in stats["rejections"].items():
+                        if reason in aggregate_rejections:
+                            aggregate_rejections[reason] += count
+
+                # FIX: Flag zero-result sources (may indicate broken selectors)
+                # Skip sources that are expected to have 0 results sometimes
+                expected_zero_sources = {"twitter", "linkedin_jobs", "fortune"}
+                if articles == 0 and source_name not in expected_zero_sources:
+                    zero_result_sources.append(source_name)
 
     # Calculate health rate
     health_rate = (successful_sources / total_sources * 100) if total_sources > 0 else 0
+
+    # Get extraction filter stats (from extractor.py post-processing)
+    extraction_filter_stats = get_extraction_stats()
 
     # Add health metrics to results
     results["_health_metrics"] = {
         "total_sources": total_sources,
         "successful_sources": successful_sources,
         "failed_sources": failed_sources,
+        "zero_result_sources": zero_result_sources,  # FIX: Track potential broken scrapers
         "health_rate_pct": round(health_rate, 1),
         "total_articles_received": total_articles_received,
         "cross_source_duplicates_caught": total_cross_source_skipped,
+        # NEW: Detailed per-source stats for monitoring
+        "per_source_stats": per_source_stats,
+        "total_leads_saved": total_leads_saved,
+        "total_enterprise_ai_saved": total_enterprise_ai_saved,
+        # NEW: Aggregate confidence bands across all sources
+        "confidence_bands": aggregate_confidence_bands,
+        # NEW: Aggregate rejection stats across all sources
+        "rejection_stats": aggregate_rejections,
+        # NEW: Extraction filter stats (crypto, consumer AI, etc.)
+        "extraction_filter_stats": extraction_filter_stats,
     }
 
     # Log health summary
@@ -1464,10 +1674,33 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
             f"External sources health: {successful_sources}/{total_sources} sources succeeded "
             f"({health_rate:.0f}%), FAILED: {', '.join(failed_sources)}"
         )
-    else:
+
+    # FIX: Log warning for zero-result sources (potential broken scrapers)
+    if zero_result_sources:
+        logger.warning(
+            f"SCRAPER_HEALTH_ALERT: {len(zero_result_sources)} scrapers returned 0 results "
+            f"(may indicate broken selectors): {', '.join(zero_result_sources)}"
+        )
+
+    if not failed_sources and not zero_result_sources:
         logger.info(
             f"External sources health: {successful_sources}/{total_sources} sources succeeded (100%), "
             f"total_articles={total_articles_received}, cross_source_dedup={total_cross_source_skipped}"
+        )
+
+    # Log extraction filter stats (for monitoring post-processing activity)
+    if any(extraction_filter_stats.values()):
+        logger.info(
+            f"EXTRACTION_FILTER_STATS: "
+            f"crypto={extraction_filter_stats['crypto_filtered']}, "
+            f"consumer_ai={extraction_filter_stats['consumer_ai_filtered']}, "
+            f"consumer_fintech={extraction_filter_stats['consumer_fintech_filtered']}, "
+            f"company_rejected={extraction_filter_stats['company_name_rejected']}, "
+            f"investors_removed={extraction_filter_stats['investors_removed']}, "
+            f"background={extraction_filter_stats['background_mention_rejected']}, "
+            f"article_title={extraction_filter_stats['article_title_rejected']}, "
+            f"lead_downgraded={extraction_filter_stats['lead_evidence_downgraded']}, "
+            f"amount_flagged={extraction_filter_stats['amount_flagged_for_review']}"
         )
 
     logger.info(f"External sources complete: {total_deals_saved} total deals saved")
@@ -1524,13 +1757,15 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
     # ===== PHASE 0: Clear caches for fresh run =====
     # Without this, duplicate detection prevents processing the same article
     # across different runs (100% data loss after first run)
-    from ..analyst.extractor import clear_content_hash_cache
+    from ..analyst.extractor import clear_content_hash_cache, clear_extraction_stats, get_extraction_stats
     from ..enrichment.brave_enrichment import clear_linkedin_cache
 
     clear_content_hash_cache()
+    clear_extraction_stats()  # Clear extraction filter stats for fresh monitoring
     await clear_global_seen_urls()
+    await clear_global_content_hashes()
     clear_linkedin_cache()
-    logger.info(f"[{job_id}] Phase 0: Caches cleared (content hash, URL dedup, LinkedIn)")
+    logger.info(f"[{job_id}] Phase 0: Caches cleared (content hash, URL dedup, content dedup, LinkedIn)")
 
     start_time = datetime.now(timezone.utc)
 
