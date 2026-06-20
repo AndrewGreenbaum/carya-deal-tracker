@@ -465,9 +465,10 @@ async def scrape_fund(fund_slug: str, scan_job_id: Optional[int] = None) -> Scra
 
             async def process_with_limit(article: NormalizedArticle) -> tuple[bool, str]:
                 async with semaphore:
-                    # Small delay between extractions (rate limiting)
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
-                    return await process_article(article, fund_config, scan_job_id)
+                    result = await process_article(article, fund_config, scan_job_id)
+                # Rate limit delay AFTER releasing semaphore (avoids blocking other tasks)
+                await asyncio.sleep(RATE_LIMIT_DELAY)
+                return result
 
             # Run all extractions concurrently
             if unique_articles:

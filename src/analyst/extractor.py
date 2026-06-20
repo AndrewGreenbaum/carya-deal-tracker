@@ -153,19 +153,19 @@ SYSTEM_PROMPT = """You are a VC analyst extracting funding deals from articles. 
 AI CLASSIFICATION (set is_ai_deal=True for ALL AI companies)
 
 ENTERPRISE AI (is_enterprise_ai=True, is_ai_deal=True):
-- infrastructure: LLMOps, MLOps, vector DBs, AI chips
-- security: AI-powered cybersecurity, threat detection
-- vertical_saas: AI for Healthcare/Finance/Legal/HR (B2B)
-- agentic: Workflow automation, AI agents for business
-- data_intelligence: Enterprise search, analytics
+- infrastructure: LLMOps, MLOps, vector DBs, AI chips, GPU cloud, model serving, inference optimization, training infrastructure, embeddings, RAG, retrieval augmented generation, model fine-tuning, prompt engineering platforms, AI observability
+- security: AI-powered cybersecurity, threat detection, security copilot, AI SOC, vulnerability detection, AI red team, deepfake detection, AI fraud detection
+- vertical_saas: AI for Healthcare (clinical AI, medical imaging, drug discovery), Finance (AI underwriting, risk models, compliance AI), Legal (contract AI, legal research AI), HR (AI recruiting, talent AI), Manufacturing (predictive maintenance, quality AI), Supply chain AI, Logistics AI
+- agentic: Workflow automation, AI agents for business, autonomous agents, agent orchestration, AI copilots for enterprise, AI assistants for work, RPA with AI, process automation
+- data_intelligence: Enterprise search, AI analytics, knowledge management, document AI, data labeling, synthetic data, data quality, AI data pipelines, unstructured data processing, enterprise RAG
 
 CONSUMER AI (is_enterprise_ai=False, is_ai_deal=True):
-- consumer_ai: Consumer-facing AI apps, personal assistants, AI photo editors
+- consumer_ai: Consumer-facing AI apps, personal assistants, AI photo editors, AI art generators for consumers, AI tutors for individuals
 - gaming_ai: AI for games, game engines, AI-powered NPCs
 - social_ai: AI for social/dating apps, AI content creation for consumers
 
 NOT AI (is_enterprise_ai=False, is_ai_deal=False):
-- not_ai: Crypto/blockchain/Web3/DeFi/NFT, non-AI startups
+- not_ai: Crypto/blockchain/Web3/DeFi/NFT, non-AI startups, traditional SaaS without AI, fintech without AI
 
 LEAD VERIFICATION (STRICT)
 LEAD phrases: "led by", "led the", "leads", "co-led", "headed by", "spearheaded"
@@ -703,6 +703,36 @@ CRYPTO_URL_PATTERNS = [
     "crypto", "defi", "nft", "web3",  # In domain name (strong signal)
     "coindesk", "cointelegraph", "theblock.co", "decrypt.co",  # Crypto news sites
     "token",  # Usually crypto-specific
+]
+
+# Keywords that indicate Enterprise AI (B2B AI companies)
+# FIX 2026-01: Added for better Enterprise AI detection - LLM sometimes misses these
+ENTERPRISE_AI_KEYWORDS = [
+    # Infrastructure
+    "llmops", "mlops", "vector database", "vector db", "embeddings",
+    "rag", "retrieval augmented", "model serving", "inference",
+    "gpu cloud", "ai infrastructure", "ai platform", "model training",
+    "fine-tuning", "fine tuning", "prompt engineering", "ai observability",
+    "feature store", "ml platform", "ai deployment",
+    # Security
+    "ai security", "security ai", "cybersecurity ai", "ai soc",
+    "threat detection", "security copilot", "ai fraud", "deepfake detection",
+    # Vertical SaaS
+    "clinical ai", "medical ai", "healthcare ai", "drug discovery",
+    "ai underwriting", "compliance ai", "legal ai", "contract ai",
+    "ai recruiting", "talent ai", "hr ai", "manufacturing ai",
+    "supply chain ai", "logistics ai", "predictive maintenance",
+    # Agentic
+    "ai agent", "ai agents", "autonomous agent", "agent orchestration",
+    "ai copilot", "enterprise copilot", "workflow automation",
+    "process automation", "rpa", "business automation",
+    # Data Intelligence
+    "enterprise search", "ai analytics", "knowledge management",
+    "document ai", "data labeling", "synthetic data", "unstructured data",
+    "enterprise rag", "data quality", "ai data pipeline",
+    # General B2B signals
+    "b2b ai", "enterprise ai", "ai for enterprise", "ai-powered platform",
+    "ai saas", "vertical ai", "industry ai", "enterprise software",
 ]
 
 # Keywords that indicate consumer AI (NOT Enterprise AI)

@@ -26,14 +26,24 @@ class USVScraper(SimpleHTMLScraper):
     """
 
     # Patterns indicating USV is leading
+    # FIX: Made patterns more context-aware to avoid false positives
+    # - First-person patterns (we/our) are safe since this is USV's blog
+    # - Removed generic "leading a Series" which could match other funds
+    # - All patterns now require explicit USV context or first-person voice
     LEAD_PATTERNS = [
+        # First-person patterns (safe - this is USV's blog)
         r"we(?:'re| are) leading",
-        r"usv (?:is |)lead(?:s|ing)",
-        r"we led",
-        r"led by (?:usv|union square)",
-        r"union square ventures lead",
+        r"we led (?:the |a |)",
         r"we're excited to lead",
-        r"leading (?:a |the |)(?:seed|series|round)",
+        r"we are pleased to lead",
+        r"our investment leads",
+        r"our firm (?:is |)leading",
+        # Explicit USV patterns
+        r"usv (?:is |)lead(?:s|ing)",
+        r"led by (?:usv|union square)",
+        r"union square ventures (?:is |)leading",
+        r"union square ventures led",
+        r"usv led (?:the |a |)",
     ]
 
     def __init__(self):

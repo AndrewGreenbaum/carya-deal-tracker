@@ -138,22 +138,33 @@ class PlaywrightScraper:
         Release a page back to the pool.
 
         If pool is full, closes the page instead.
+
+        FIX: Handles race condition where page.goto('about:blank') can fail
+        silently, which would leak the page (not returned to pool OR closed).
+        Now explicitly handles goto failure before attempting pool return.
         """
+        # Step 1: Try to reset page state for reuse
         try:
-            # Clear page state for reuse
             await page.goto('about:blank')
+        except Exception:
+            # Page navigation failed - page is in bad state, close and remove
+            try:
+                await page.close()
+            except Exception:
+                pass
+            self._all_pages.discard(page)
+            return
+
+        # Step 2: Only put back in pool if goto succeeded
+        try:
             self._page_pool.put_nowait(page)
         except asyncio.QueueFull:
             # Pool full, close overflow page and remove from tracking
-            await page.close()
-            self._all_pages.discard(page)
-        except Exception:
-            # Page may be in bad state, close it and remove from tracking
             try:
                 await page.close()
-                self._all_pages.discard(page)
             except Exception:
                 pass
+            self._all_pages.discard(page)
 
     async def new_page(self) -> Page:
         """

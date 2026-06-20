@@ -20,7 +20,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
 
 import httpx
 from bs4 import BeautifulSoup
@@ -34,6 +34,26 @@ logger = logging.getLogger(__name__)
 
 # Memory safety limit (Brave API max is 100 per request)
 MAX_RESULTS_PER_QUERY = 100
+
+# Module-level shared HTTP client for article fetching (singleton pattern)
+# Avoids creating duplicate clients per BraveSearchScraper instance
+_article_fetch_client: Optional[httpx.AsyncClient] = None
+_article_fetch_lock = asyncio.Lock()
+
+
+async def _get_article_fetch_client() -> httpx.AsyncClient:
+    """Get or create the shared HTTP client for article fetching."""
+    global _article_fetch_client
+    if _article_fetch_client is None or _article_fetch_client.is_closed:
+        async with _article_fetch_lock:
+            # Double-check after acquiring lock
+            if _article_fetch_client is None or _article_fetch_client.is_closed:
+                _article_fetch_client = httpx.AsyncClient(
+                    timeout=ARTICLE_FETCH_TIMEOUT,
+                    follow_redirects=True,
+                    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+                )
+    return _article_fetch_client
 
 # Article fetching settings - use centralized config
 MAX_CONCURRENT_ARTICLES = settings.max_concurrent_articles
@@ -390,16 +410,12 @@ class BraveSearchScraper:
             logger.warning("BRAVE_SEARCH_KEY not configured - BraveSearchScraper will return empty results")
 
     async def __aenter__(self):
-        self._http_client = httpx.AsyncClient(
-            timeout=ARTICLE_FETCH_TIMEOUT,
-            follow_redirects=True,
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-        )
+        # Uses module-level shared HTTP client - no instance client needed
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if hasattr(self, '_http_client'):
-            await self._http_client.aclose()
+        # Shared client is managed at module level, not closed here
+        pass
 
     async def fetch_full_article(self, url: str, max_retries: int = 3) -> Optional[str]:
         """Fetch full article content from URL with retry logic.
@@ -408,10 +424,12 @@ class BraveSearchScraper:
         short for the LLM to accurately determine lead investor status.
 
         FIX: Added retry logic for 5xx errors and improved timeout handling.
+        FIX: Uses shared module-level HTTP client to avoid resource leaks.
         """
+        client = await _get_article_fetch_client()
         for attempt in range(max_retries):
             try:
-                resp = await self._http_client.get(url, headers={
+                resp = await client.get(url, headers={
                     "User-Agent": USER_AGENT_BOT,
                     "Accept": "text/html,application/xhtml+xml",
                 })

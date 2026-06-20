@@ -410,22 +410,41 @@ class GoogleNewsRSSScraper:
             fetch_full_articles: If True, fetch full article content from source URLs.
             use_playwright: If True, use Playwright to resolve undecodable Google News URLs.
                            Requires playwright to be installed.
+
+        FIX: HTTP clients are now lazily initialized in __aenter__ to prevent memory leaks
+        when scraper is instantiated but not used as context manager.
         """
         self.funds = funds or list(GOOGLE_NEWS_FUNDS.keys())
         self.fetch_full_articles = fetch_full_articles
         self.use_playwright = use_playwright and PLAYWRIGHT_AVAILABLE
-        self.client = httpx.AsyncClient(
-            timeout=settings.request_timeout,
-            headers={"User-Agent": USER_AGENT_BROWSER},
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-            follow_redirects=True,
-        )
-        # Separate client for article fetching with longer timeout
+        # FIX: Lazy initialization - clients created in __aenter__ to prevent memory leak
+        self._client: Optional[httpx.AsyncClient] = None
         self._article_client: Optional[httpx.AsyncClient] = None
         # Playwright resolver for JS redirects (initialized in __aenter__)
         self._playwright_resolver: Optional['PlaywrightResolver'] = None
+        self._entered = False  # Track if context manager was used
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """Get the HTTP client, creating it lazily if needed.
+
+        FIX: Lazy initialization prevents memory leak when scraper is created
+        but __aenter__ is never called.
+        """
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=settings.request_timeout,
+                headers={"User-Agent": USER_AGENT_BROWSER},
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+                follow_redirects=True,
+            )
+        return self._client
 
     async def __aenter__(self):
+        self._entered = True
+        # Ensure main client is created
+        _ = self.client
+        # Create article client
         self._article_client = httpx.AsyncClient(
             timeout=ARTICLE_FETCH_TIMEOUT,
             headers={"User-Agent": USER_AGENT_BROWSER},
@@ -440,11 +459,24 @@ class GoogleNewsRSSScraper:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.client.aclose()
-        if self._article_client:
+        await self.close()
+
+    async def close(self):
+        """Explicitly close all HTTP clients and resources.
+
+        FIX: Added explicit close method for cleanup when not using context manager.
+        This prevents memory leaks from unclosed HTTP clients.
+        """
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
+        if self._article_client and not self._article_client.is_closed:
             await self._article_client.aclose()
+            self._article_client = None
         if self._playwright_resolver:
-            await self._playwright_resolver.__aexit__(exc_type, exc_val, exc_tb)
+            await self._playwright_resolver.__aexit__(None, None, None)
+            self._playwright_resolver = None
+        self._entered = False
 
     async def fetch_article_content(self, url: str, max_retries: int = 2) -> Optional[str]:
         """

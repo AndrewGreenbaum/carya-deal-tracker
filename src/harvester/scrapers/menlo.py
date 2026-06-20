@@ -8,6 +8,7 @@ Perspective/blog page; focus on AI investments.
 """
 
 import logging
+import re
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
@@ -25,12 +26,13 @@ class MenloScraper(SimpleHTMLScraper):
     """
 
     # AI-related keywords for signal detection
+    # FIX: Use word boundary matching for short keywords to avoid false positives
+    # e.g., "ml" should not match "html"
     AI_KEYWORDS = [
         "artificial intelligence",
         "machine learning",
         "deep learning",
         "neural network",
-        "llm",
         "large language model",
         "generative ai",
         "ai-powered",
@@ -40,6 +42,10 @@ class MenloScraper(SimpleHTMLScraper):
         "ml ops",
         "mlops",
     ]
+
+    # Short keywords that need word boundary matching
+    # FIX: "ml" and "llm" are short enough to cause false positives (e.g., "html")
+    AI_KEYWORDS_WORD_BOUNDARY = ["ml", "llm", "ai"]
 
     def __init__(self):
         super().__init__(FUND_REGISTRY["menlo"])
@@ -133,9 +139,25 @@ class MenloScraper(SimpleHTMLScraper):
         )
 
     def _is_ai_focused(self, title: str, text: str) -> bool:
-        """Detect AI-focused investment signals."""
+        """Detect AI-focused investment signals.
+
+        FIX: Uses word boundary matching for short keywords like 'ml' and 'llm'
+        to avoid false positives (e.g., 'ml' matching 'html').
+        """
         combined = f"{title} {text}".lower()
-        return any(keyword in combined for keyword in self.AI_KEYWORDS)
+
+        # Check regular keywords (substring match is fine for longer terms)
+        if any(keyword in combined for keyword in self.AI_KEYWORDS):
+            return True
+
+        # Check short keywords with word boundaries
+        # FIX: Prevents "ml" from matching "html", "llm" from matching partial words
+        for keyword in self.AI_KEYWORDS_WORD_BOUNDARY:
+            pattern = rf'\b{re.escape(keyword)}\b'
+            if re.search(pattern, combined):
+                return True
+
+        return False
 
 
 def create_scraper() -> MenloScraper:

@@ -17,6 +17,24 @@ logger = logging.getLogger(__name__)
 from ...config.funds import FUND_REGISTRY
 
 
+# CRITICAL: Accel Entertainment is a gaming/gambling company (NYSE: ACEL)
+# that must be excluded to avoid false positives with Accel the VC firm.
+# See CLAUDE.md: "Accel | accel | Exclude 'Accel Entertainment'"
+ACCEL_ENTERTAINMENT_EXCLUSIONS = [
+    "accel entertainment",
+    "accel gaming",
+    "distributed gaming",
+    "video gaming terminal",
+    "vgt",  # Video Gaming Terminal
+    "acel",  # Stock ticker
+    "nyse: acel",
+    "nyse:acel",
+    "casino",
+    "slot machine",
+    "gaming terminal",
+]
+
+
 class AccelScraper(SimpleHTMLScraper):
     """
     Scraper for Accel news page.
@@ -131,6 +149,34 @@ class AccelScraper(SimpleHTMLScraper):
             published_date=raw.published_date,
             tags=raw.tags,
         )
+
+    def _should_filter(self, article: RawArticle) -> bool:
+        """
+        Check if article should be filtered.
+
+        Extends base class filter to exclude Accel Entertainment articles.
+        """
+        # First check base class filters (negative keywords from fund config)
+        if super()._should_filter(article):
+            return True
+
+        # CRITICAL: Filter out Accel Entertainment (gaming company) articles
+        # See CLAUDE.md: "Accel | accel | Exclude 'Accel Entertainment'"
+        if self._is_accel_entertainment(article.title, article.html):
+            logger.info(f"Filtered Accel Entertainment article: {article.title}")
+            return True
+
+        return False
+
+    def _is_accel_entertainment(self, title: str, text: str) -> bool:
+        """
+        Check if article is about Accel Entertainment (gaming company).
+
+        CRITICAL: Accel Entertainment (NYSE: ACEL) is a gaming/gambling company
+        that must be excluded to avoid false positives with Accel the VC firm.
+        """
+        combined = f"{title} {text}".lower()
+        return any(term in combined for term in ACCEL_ENTERTAINMENT_EXCLUSIONS)
 
     def _detect_region(self, title: str, text: str) -> Optional[str]:
         """Detect which Accel regional team is involved."""

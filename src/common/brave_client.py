@@ -102,9 +102,10 @@ class TTLCache:
         return len(self._cache)
 
 
-# Singleton cache instance (12 hour TTL - optimized for 4-hourly job runs)
-# FIX: Increased from 1hr to 12hr to cache partner queries across jobs
-_query_cache = TTLCache(ttl_seconds=43200)
+# Singleton cache instance (4 hour TTL - matches job run frequency)
+# FIX: Reduced from 12hr to 4hr - 12hr was too long for fresh news results
+# 4hr aligns with job frequency while still providing caching benefits within a run
+_query_cache = TTLCache(ttl_seconds=14400)
 
 
 def get_query_cache() -> TTLCache:

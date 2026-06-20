@@ -14,6 +14,7 @@ The Brave News API often misses these - RSS feeds provide direct access.
 import asyncio
 import logging
 import random
+import re
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 
@@ -55,16 +56,24 @@ FUNDING_KEYWORDS = [
 ]
 
 # Keywords to identify tracked VC involvement
-TRACKED_FUND_KEYWORDS = [
-    # Fund names
+# FIX: Split into regular keywords (substring match ok) and short keywords (need word boundary)
+# Short keywords like "gv" could match "given", "a16z" is distinctive enough but still benefits
+TRACKED_FUND_KEYWORDS_LONG = [
+    # Fund names (longer, safe for substring matching)
     "founders fund", "benchmark", "sequoia", "khosla", "index ventures",
-    "andreessen horowitz", "a16z", "insight partners", "bessemer",
-    "redpoint", "greylock", "google ventures", "gv", "menlo ventures",
+    "andreessen horowitz", "insight partners", "bessemer",
+    "redpoint", "greylock", "google ventures", "menlo ventures",
     "union square", "thrive capital", "accel", "felicis", "general catalyst",
     "first round",
-    # Notable partners
+    # Notable partners (longer names, safe for substring matching)
     "peter thiel", "bill gurley", "sarah tavel", "vinod khosla", "reid hoffman",
     "tomasz tunguz", "logan bartlett", "josh kopelman", "josh kushner",
+]
+
+# Short keywords that MUST use word boundary matching
+# FIX: "gv" could match "given", "usv" could match "gusvex", etc.
+TRACKED_FUND_KEYWORDS_SHORT = [
+    "a16z", "gv", "usv", "bvp",
 ]
 
 
@@ -127,9 +136,24 @@ class PRWireRSSScraper:
         return any(kw in text for kw in FUNDING_KEYWORDS)
 
     def _has_tracked_fund(self, title: str, description: str) -> bool:
-        """Check if article mentions a tracked VC fund or partner."""
+        """Check if article mentions a tracked VC fund or partner.
+
+        FIX: Uses word boundary matching for short keywords to avoid false positives
+        like "gv" matching "given" or "guv".
+        """
         text = f"{title} {description}".lower()
-        return any(kw in text for kw in TRACKED_FUND_KEYWORDS)
+
+        # Check long keywords with simple substring match (safe)
+        if any(kw in text for kw in TRACKED_FUND_KEYWORDS_LONG):
+            return True
+
+        # Check short keywords with word boundary (prevents false positives)
+        for kw in TRACKED_FUND_KEYWORDS_SHORT:
+            pattern = rf'\b{re.escape(kw)}\b'
+            if re.search(pattern, text):
+                return True
+
+        return False
 
     async def fetch_full_article(self, url: str, max_retries: int = 3) -> Optional[str]:
         """Fetch full article content from PR wire URL with retry logic.
@@ -347,37 +371,51 @@ class PRWireRSSScraper:
             logger.info(f"Articles mentioning tracked funds: {len(filtered)}")
             all_articles = filtered
 
-        # Convert to NormalizedArticle with full content fetch
+        # Convert to NormalizedArticle with PARALLEL content fetch
+        # FIX: Sequential fetching was O(N) with timeouts - now uses semaphore for parallelism
+        valid_articles = [
+            article for article in all_articles
+            if (article.url or '').strip().startswith(('http://', 'https://'))
+            and article.published_date
+        ]
+
+        # Log skipped articles
+        skipped_count = len(all_articles) - len(valid_articles)
+        if skipped_count > 0:
+            logger.debug(f"Skipped {skipped_count} articles without valid URL or date")
+
+        # Parallel fetch with semaphore (uses centralized settings)
+        semaphore = asyncio.Semaphore(settings.max_concurrent_articles)
+
+        async def fetch_and_normalize(article: PRWireArticle) -> Optional[NormalizedArticle]:
+            """Fetch article content and normalize with rate limiting."""
+            async with semaphore:
+                full_text = await self.fetch_full_article(article.url)
+                text = full_text or f"{article.title}\n\n{article.description}"
+
+                # Match fund using centralized matcher
+                fund_slug = match_fund_name(text)
+
+                return NormalizedArticle(
+                    title=article.title,
+                    url=article.url,
+                    text=text,
+                    published_date=article.published_date.date(),
+                    fund_slug=fund_slug or article.source,
+                    fetched_at=datetime.now(timezone.utc),
+                )
+
+        # Run all fetches in parallel
+        tasks = [fetch_and_normalize(article) for article in valid_articles]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Filter out exceptions and None results
         normalized: List[NormalizedArticle] = []
-        for article in all_articles:
-            # Skip articles without valid URLs
-            url = (article.url or '').strip()
-            if not url or not url.startswith(('http://', 'https://')):
-                continue
-
-            # Skip articles without publication dates
-            if not article.published_date:
-                logger.debug(f"Skipping article without date: {article.title}")
-                continue
-
-            # Fetch full article content
-            full_text = await self.fetch_full_article(article.url)
-            text = full_text or f"{article.title}\n\n{article.description}"
-
-            # Match fund using centralized matcher
-            fund_slug = match_fund_name(text)
-
-            normalized.append(NormalizedArticle(
-                title=article.title,
-                url=article.url,
-                text=text,
-                published_date=article.published_date.date(),
-                fund_slug=fund_slug or article.source,  # Use matched fund or source as fallback
-                fetched_at=datetime.now(timezone.utc),
-            ))
-
-            # Rate limit between article fetches
-            await asyncio.sleep(settings.article_rate_limit_delay)
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.warning(f"Error fetching PR wire article: {result}")
+            elif result is not None:
+                normalized.append(result)
 
         # SCRAPER_HEALTH_ALERT: Log warning when scraper returns 0 articles
         if not normalized:
