@@ -6,13 +6,16 @@ Tier order (executed sequentially):
 - TIER 4: Name prefix (3 chars) + amount ±5% + exact date + same round (name variations)
 - TIER 3: Amount ±10% + company match + date ±30 days, ANY round (cross-round dupes)
 - TIER 2: Same company + exact date, any round/amount (multi-source same-day)
-- TIER 2.5: Company + same round + date ±7 days, any amount (valuation/funding confusion)
+- TIER 2.5: Company + same round + date ±30 days, any amount (EXTENDED 2026-01 from ±7 days)
 - TIER 1: Company + round + amount ±15%, date ±365 days (standard dedup)
 
 Run with: pytest tests/test_deduplication_all_tiers.py -v
 
 Note: These tests require src.archivist imports which may need Python 3.10+.
 Tests will be skipped if imports fail.
+
+2026-01 FIX: Extended TIER 2.5 from ±7 to ±30 days to catch the Emergent/Khosla bug
+where two deals (Jan 1 and Jan 20, 19 days apart) weren't detected as duplicates.
 """
 
 import pytest
@@ -670,18 +673,19 @@ class TestTier2(BaseDeduplicationTest):
 
 
 # ============================================================================
-# TIER 2.5 TESTS: Company + same round + date ±7 days, any amount
+# TIER 2.5 TESTS: Company + same round + date ±30 days, any amount
 # ============================================================================
 
 class TestTier25(BaseDeduplicationTest):
     """
-    TIER 2.5: Valuation vs funding confusion detection
+    TIER 2.5: Valuation vs funding confusion detection + date gap handling
     - Company names match (fuzzy)
     - Same round type
-    - Date within ±7 days
+    - Date within ±30 days (EXTENDED from ±7 days in 2026-01 fix)
     - Amount NOT required to match
 
     Example: $6.6B valuation report vs $330M funding report for same deal
+    Example: Emergent Series B reported Jan 1 vs Jan 20 (19 days apart)
     """
 
     @pytest.mark.asyncio
@@ -719,8 +723,8 @@ class TestTier25(BaseDeduplicationTest):
         assert result.id == 450
 
     @pytest.mark.asyncio
-    async def test_tier25_date_within_7_days(self, mock_session):
-        """TIER 2.5 should match when date is within ±7 days."""
+    async def test_tier25_date_within_30_days(self, mock_session):
+        """TIER 2.5 should match when date is within ±30 days."""
         existing = self.create_mock_deal(
             deal_id=450,
             company_name="Valuation Corp",
@@ -744,10 +748,47 @@ class TestTier25(BaseDeduplicationTest):
             company_name="Valuation Corp",
             round_type="series_c",
             amount="$500M",
-            announced_date=date(2026, 1, 17)  # 7 days later - at boundary
+            announced_date=date(2026, 2, 8)  # 29 days later - within ±30 days
         )
 
         assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_tier25_emergent_scenario_19_days_apart(self, mock_session):
+        """
+        CRITICAL: Test for Emergent Series B bug fix.
+        Two articles about same deal reported 19 days apart should be caught.
+        - Deal #3110: Emergent Series B $70M, 2026-01-01
+        - Deal #3196: Emergent Series B $70M, 2026-01-20
+        """
+        existing = self.create_mock_deal(
+            deal_id=3110,
+            company_name="Emergent",
+            round_type="series_b",
+            amount="$70 million",
+            amount_usd=70_000_000,  # May be NULL in real scenario
+            announced_date=date(2026, 1, 1)
+        )
+
+        self.setup_sequential_results(mock_session, [
+            [],  # TIER 0 (dates 19 days apart > ±3 days)
+            [],  # TIER 4 (no exact date match)
+            [],  # TIER 3 (may fail if amount_usd is NULL)
+            [],  # TIER 2 exact (different dates)
+            [],  # TIER 2 fuzzy (different dates)
+            [existing],  # TIER 2.5 (same round + ±30 days = CAUGHT!)
+        ])
+
+        result = await find_duplicate_deal(
+            session=mock_session,
+            company_name="Emergent",
+            round_type="series_b",
+            amount="$70M",
+            announced_date=date(2026, 1, 20)  # 19 days later
+        )
+
+        assert result is not None, "Emergent duplicate should be caught by TIER 2.5 (±30 days)"
+        assert result.id == 3110
 
     @pytest.mark.asyncio
     async def test_tier25_no_match_different_round(self, mock_session):
@@ -765,8 +806,8 @@ class TestTier25(BaseDeduplicationTest):
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_tier25_no_match_date_over_7_days(self, mock_session):
-        """TIER 2.5 should NOT match when date is >7 days apart."""
+    async def test_tier25_no_match_date_over_30_days(self, mock_session):
+        """TIER 2.5 should NOT match when date is >30 days apart."""
         mock_session.execute.return_value = self.create_mock_result([])
 
         result = await find_duplicate_deal(
@@ -774,10 +815,41 @@ class TestTier25(BaseDeduplicationTest):
             company_name="Valuation Corp",
             round_type="series_c",
             amount="$6.6B",
-            announced_date=date(2026, 1, 18)  # 8 days - exceeds 7
+            announced_date=date(2026, 2, 15)  # 36 days from Jan 10 - exceeds 30
         )
 
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_tier25_boundary_exactly_30_days(self, mock_session):
+        """TIER 2.5 should match at exactly 30 days boundary."""
+        existing = self.create_mock_deal(
+            deal_id=450,
+            company_name="Boundary Corp",
+            round_type="series_a",
+            amount="$50M",
+            amount_usd=50_000_000,
+            announced_date=date(2026, 1, 1)
+        )
+
+        self.setup_sequential_results(mock_session, [
+            [],  # TIER 0
+            [],  # TIER 4
+            [],  # TIER 3
+            [],  # TIER 2 exact
+            [],  # TIER 2 fuzzy
+            [existing],  # TIER 2.5
+        ])
+
+        result = await find_duplicate_deal(
+            session=mock_session,
+            company_name="Boundary Corp",
+            round_type="series_a",
+            amount="$55M",
+            announced_date=date(2026, 1, 31)  # Exactly 30 days
+        )
+
+        assert result is not None
 
     @pytest.mark.asyncio
     async def test_tier25_null_date_skipped(self, mock_session):

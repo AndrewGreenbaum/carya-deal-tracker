@@ -671,8 +671,8 @@ async def find_duplicate_deal(
     TIER 2.5 - Round+Date Match (catches valuation vs funding confusion):
     - Company names match (fuzzy)
     - Same round type
-    - Date within 7 days
-    - Amount NOT required to match (catches $6.6B valuation vs $330M funding)
+    - Date within 30 days (extended from 7 days in 2026-01 to catch Emergent-style dupes)
+    - Amount NOT required to match (catches $6.6B valuation vs $330M funding, or NULL amounts)
 
     TIER 1 - Strict Match (LAST - same company + same round + similar amount):
     - Company names match (using smart fuzzy matching)
@@ -881,9 +881,14 @@ async def find_duplicate_deal(
                 return deal
 
     # =========================================================================
-    # TIER 2.5 (NEW): Same company + same round + date within 7 days
+    # TIER 2.5: Same company + same round + date within 30 days
     # Catches duplicates with wildly different amounts (e.g., valuation vs funding)
-    # This is a strong signal: same company raising the same round type in same week
+    # or when amount_usd is NULL on the existing deal (TIER 3 depends on amount_usd).
+    #
+    # EXTENDED (2026-01): Changed from ±7 days to ±30 days to catch deals like
+    # Emergent Series B where one source reported Jan 1 and another Jan 20.
+    # For the SAME round type, it's extremely rare to have two separate rounds
+    # within 30 days - this is almost always the same deal with different dates.
     # =========================================================================
     if announced_date:
         tier25_stmt = (
@@ -891,8 +896,8 @@ async def find_duplicate_deal(
             .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
             .where(Deal.round_type == round_type)
             .where(Deal.announced_date.between(
-                announced_date - timedelta(days=7),
-                announced_date + timedelta(days=7)
+                announced_date - timedelta(days=30),
+                announced_date + timedelta(days=30)
             ))
         )
         tier25_result = await session.execute(tier25_stmt)
@@ -901,11 +906,11 @@ async def find_duplicate_deal(
         for deal, company in tier25_candidates:
             if company_names_match(company_name, company.name):
                 logger.warning(
-                    f"Found duplicate (TIER 2.5 round+date): '{company_name}' {round_type} "
+                    f"Found duplicate (TIER 2.5 round+date ±30d): '{company_name}' {round_type} "
                     f"matches '{company.name}' {deal.round_type} (deal #{deal.id}, "
-                    f"amounts differ: incoming={amount}, existing={deal.amount}, "
+                    f"amounts: incoming={amount}, existing={deal.amount}, "
                     f"dates: incoming={announced_date}, existing={deal.announced_date}) "
-                    f"- likely valuation vs funding confusion"
+                    f"- same round type within 30 days"
                 )
                 return deal
 
