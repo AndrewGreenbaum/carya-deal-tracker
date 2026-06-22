@@ -113,7 +113,9 @@ EXTERNAL_SOURCE_NAMES = frozenset({
 
 # Lower confidence threshold for external sources
 # Standard is 0.5, but external sources often have less context
-EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD = 0.35
+# FIX (2026-01): Raised from 0.35 to 0.40 to match system prompt
+# (prompt says <0.35 = "Cannot verify as real funding" but threshold WAS 0.35)
+EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD = 0.40
 
 # FIX #42: Initialize module-level constants from settings (not hardcoded)
 API_TIMEOUT_SECONDS = settings.llm_timeout
@@ -1476,7 +1478,9 @@ async def extract_deal(
             is_enterprise_ai=False,
             is_ai_deal=False,
             verification_snippet=None,
-            confidence_score=0.1,
+            # FIX (2026-01): Differentiate early exit scores (was 0.1)
+            # No funding keywords = lowest confidence (0.05)
+            confidence_score=0.05,
             # NEW: Mark as not a new announcement
             is_new_announcement=False,
             announcement_evidence=None,
@@ -1507,7 +1511,9 @@ async def extract_deal(
             is_enterprise_ai=False,
             is_ai_deal=False,
             verification_snippet=None,
-            confidence_score=0.1,
+            # FIX (2026-01): Differentiate early exit scores (was 0.1)
+            # Crypto detection = higher than no-keywords (0.15) since article is funding-related
+            confidence_score=0.15,
             is_new_announcement=False,
             announcement_evidence=None,
             announcement_rejection_reason="Crypto/blockchain article - not an AI company",
@@ -1773,6 +1779,94 @@ async def extract_deal(
                     logger.warning(
                         f"HYBRID_FAILED: {response.startup_name} | "
                         f"Sonnet returned None - keeping Haiku result"
+                    )
+
+            # FIX (2026-01): Re-extract HIGH-confidence deals with weak lead evidence
+            # Problem: If confidence=0.75 but lead_evidence_weak=True, Sonnet won't re-extract
+            # because 0.75 > 0.65 (hybrid_confidence_max). This misses opportunities to
+            # confirm lead status with the more capable model.
+            elif (
+                response
+                and settings.hybrid_extraction_enabled
+                and response.is_new_announcement
+                and response.confidence_score > settings.hybrid_confidence_max
+                and response.lead_evidence_weak
+                and response.tracked_fund_is_lead
+            ):
+                logger.info(
+                    f"HYBRID: High confidence ({response.confidence_score:.2f}) but weak lead evidence "
+                    f"for {response.startup_name} - re-extracting with {settings.llm_model_fallback}"
+                )
+                sonnet_response = await _reextract_with_sonnet(
+                    article_text=article_text,
+                    source_url=source_url,
+                    source_name=source_name,
+                    prompt=prompt,
+                    original_response=response,
+                )
+                if sonnet_response:
+                    # Track: did Sonnet upgrade weak evidence to confirmed lead?
+                    sonnet_improved = not sonnet_response.lead_evidence_weak
+                    logger.info(
+                        f"HYBRID_RESULT_HIGH_CONF: {sonnet_response.startup_name} | "
+                        f"lead_confirmed={not sonnet_response.lead_evidence_weak} | "
+                        f"confidence={sonnet_response.confidence_score:.2f} | "
+                        f"improved={sonnet_improved}"
+                    )
+
+                    response = sonnet_response
+
+                    # Apply same post-processing to Sonnet response
+                    response = _validate_company_in_text(response, article_text)
+                    response = _validate_round_type(response)
+                    response = _validate_investors_in_text(response, article_text)
+                    response = _validate_founders_in_text(response, article_text)
+                    response = _verify_tracked_fund(response, article_text)
+
+                    # Crypto/Consumer reclassification
+                    if response.is_ai_deal and _is_crypto_deal(response, article_text):
+                        increment_extraction_stat("crypto_filtered")
+                        response.is_enterprise_ai = False
+                        response.is_ai_deal = False
+                        response.enterprise_category = EnterpriseCategory.NOT_AI
+
+                    if response.is_enterprise_ai and _is_consumer_ai_deal(response, article_text):
+                        increment_extraction_stat("consumer_ai_filtered")
+                        response.is_enterprise_ai = False
+                        if response.enterprise_category not in (
+                            EnterpriseCategory.CONSUMER_AI,
+                            EnterpriseCategory.GAMING_AI,
+                            EnterpriseCategory.SOCIAL_AI,
+                        ):
+                            response.enterprise_category = EnterpriseCategory.CONSUMER_AI
+
+                    if (response.is_ai_deal or response.is_enterprise_ai) and _is_consumer_fintech_deal(response, article_text):
+                        increment_extraction_stat("consumer_fintech_filtered")
+                        response.is_enterprise_ai = False
+                        response.is_ai_deal = False
+                        response.enterprise_category = EnterpriseCategory.NOT_AI
+
+                    if _looks_like_article_title(response.startup_name):
+                        increment_extraction_stat("article_title_rejected")
+                        response.is_new_announcement = False
+                        response.announcement_rejection_reason = f"Company name looks like article title: {response.startup_name}"
+
+                    if response.is_new_announcement:
+                        is_background, reason = _is_background_mention(response.startup_name, article_text, is_external_source)
+                        if is_background:
+                            increment_extraction_stat("background_mention_rejected")
+                            response.is_new_announcement = False
+                            response.announcement_rejection_reason = reason
+
+                    if response.amount:
+                        old_needs_review = getattr(response, 'amount_needs_review', False)
+                        response = _validate_deal_amount(response, article_text)
+                        if response.amount_needs_review and not old_needs_review:
+                            increment_extraction_stat("amount_flagged_for_review")
+                else:
+                    logger.warning(
+                        f"HYBRID_FAILED_HIGH_CONF: {response.startup_name} | "
+                        f"Sonnet returned None - keeping Haiku result with weak evidence"
                     )
 
             return response
@@ -2370,6 +2464,15 @@ def _validate_founders_in_text(deal: DealExtraction, article_text: str) -> DealE
         increment_extraction_stat("founders_removed", len(removed_founders))
         deal.founders = validated_founders
 
+        # FIX (2026-01): Reduce confidence when hallucinated founders are removed
+        # Smaller penalty than investors since founders are less critical for deal validity
+        penalty = min(0.10, len(removed_founders) * 0.03)
+        deal.confidence_score = max(0.0, deal.confidence_score - penalty)
+        logger.debug(
+            f"Reduced confidence by {penalty:.2f} for {deal.startup_name} "
+            f"(removed {len(removed_founders)} hallucinated founders)"
+        )
+
     return deal
 
 
@@ -2412,6 +2515,15 @@ def _validate_investors_in_text(deal: DealExtraction, article_text: str) -> Deal
         )
         increment_extraction_stat("investors_removed", len(removed_leads))
         deal.lead_investors = validated_leads
+
+        # FIX (2026-01): Reduce confidence when hallucinated investors are removed
+        # Lead investors are more critical for deal validity, so larger penalty
+        penalty = min(0.15, len(removed_leads) * 0.05)
+        deal.confidence_score = max(0.0, deal.confidence_score - penalty)
+        logger.debug(
+            f"Reduced confidence by {penalty:.2f} for {deal.startup_name} "
+            f"(removed {len(removed_leads)} hallucinated lead investors)"
+        )
 
         # If all lead investors removed, update tracked fund status
         if not validated_leads:
@@ -2482,6 +2594,8 @@ def _verify_tracked_fund(deal: DealExtraction, article_text: str = "") -> DealEx
         deal.lead_evidence_weak = True  # Flag for frontend display
         # Set to LIKELY_LEAD since Claude claimed lead but snippet lacks proof
         deal.tracked_fund_role = LeadStatus.LIKELY_LEAD
+        # FIX (2026-01): Reduce confidence when lead evidence is weak
+        deal.confidence_score = max(0.0, deal.confidence_score - 0.08)
 
     if deal.tracked_fund_is_lead and not deal.verification_snippet:
         logger.warning(
@@ -2492,6 +2606,8 @@ def _verify_tracked_fund(deal: DealExtraction, article_text: str = "") -> DealEx
         deal.lead_evidence_weak = True  # Flag for frontend display
         # Set to LIKELY_LEAD since Claude claimed lead but no snippet provided
         deal.tracked_fund_role = LeadStatus.LIKELY_LEAD
+        # FIX (2026-01): Reduce confidence when lead evidence is weak
+        deal.confidence_score = max(0.0, deal.confidence_score - 0.08)
 
     # FIX: Track ALL confirmed lead funds to record co-leads
     confirmed_lead_funds: list[tuple[str, str, str]] = []  # (slug, name, partner)
