@@ -204,6 +204,33 @@ def _is_valid_amount(amount: Optional[str]) -> bool:
     return True
 
 
+def _is_likely_placeholder_date(d: date) -> bool:
+    """
+    Check if a date looks like a placeholder or extraction error.
+
+    FIX (2026-01): Added to handle the Emergent bug where Jan 1 was extracted
+    as a placeholder date when the actual announcement was Jan 20.
+
+    Returns True for dates that are likely placeholders:
+    - Jan 1 of any year (very common default/placeholder)
+    - First day of any month (sometimes used as a default when day is unknown)
+
+    Returns False for dates that look like real announcements.
+    """
+    # Jan 1 is almost always a placeholder - real announcements rarely happen on Jan 1
+    # (most companies are closed for New Year's)
+    if d.month == 1 and d.day == 1:
+        return True
+
+    # First day of month is sometimes a default when the exact day is unknown
+    # But this is less certain, so only flag it if it's also a quarter start
+    # (Jan 1, Apr 1, Jul 1, Oct 1 are common fiscal quarter defaults)
+    if d.day == 1 and d.month in (1, 4, 7, 10):
+        return True
+
+    return False
+
+
 # FIX #20: Alert info returned from save_deal for post-commit sending
 @dataclass
 class LeadDealAlertInfo:
@@ -1085,36 +1112,67 @@ async def save_deal(
             f"{extraction.round_label.value} - matches deal #{existing_deal.id}"
         )
 
-        # Cross-reference: Update to earlier date if this article has one
-        # This ensures we use the earliest known announcement date
-        # FIX: Also increment date_source_count and update confidence when dates match
+        # Cross-reference: Update date based on confidence, not just "earlier is better"
+        # FIX (2026-01): Changed from preferring earlier dates to preferring higher-confidence dates.
+        # The Emergent bug showed that wrong dates (Jan 1) can come first, and correct dates (Jan 20)
+        # arrive later with higher confidence from authoritative sources like press releases.
         if announced_date and existing_deal.announced_date:
             date_diff = abs((announced_date - existing_deal.announced_date).days)
+            existing_confidence = existing_deal.date_confidence or 0.5
 
-            if announced_date < existing_deal.announced_date:
+            if date_diff <= 1:
+                # Dates match (within 1 day tolerance) - this is CONFIRMATION
+                # Increment source count and boost confidence (multi-source bonus)
+                existing_deal.date_source_count = (existing_deal.date_source_count or 1) + 1
+                # Multi-source bonus: +0.1 for each additional confirming source
+                new_confidence = min(0.95, existing_confidence + 0.1)
+                if new_confidence > existing_confidence:
+                    logger.info(
+                        f"Date confirmed for deal #{existing_deal.id}: "
+                        f"{existing_deal.announced_date} (sources: {existing_deal.date_source_count}, "
+                        f"confidence: {existing_confidence:.2f} → {new_confidence:.2f})"
+                    )
+                    existing_deal.date_confidence = new_confidence
+                    existing_deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+            elif date_confidence > existing_confidence:
+                # New date has higher confidence - prefer it regardless of earlier/later
+                # This handles cases like Emergent where Jan 1 (low confidence guess) came first
+                # and Jan 20 (high confidence from press release) came later
+                logger.info(
+                    f"Updating deal #{existing_deal.id} date: "
+                    f"{existing_deal.announced_date} → {announced_date} "
+                    f"(higher confidence: {existing_confidence:.2f} → {date_confidence:.2f})"
+                )
+                existing_deal.announced_date = announced_date
+                existing_deal.date_confidence = date_confidence
+                existing_deal.date_source_count = (existing_deal.date_source_count or 1) + 1
+                existing_deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+            elif _is_likely_placeholder_date(existing_deal.announced_date) and not _is_likely_placeholder_date(announced_date):
+                # Existing date looks like a placeholder (Jan 1, first of month, etc.)
+                # and new date looks more specific - prefer the new date
+                logger.info(
+                    f"Updating deal #{existing_deal.id} date: "
+                    f"{existing_deal.announced_date} → {announced_date} "
+                    f"(existing date looks like placeholder)"
+                )
+                existing_deal.announced_date = announced_date
+                existing_deal.date_confidence = max(existing_confidence, date_confidence)
+                existing_deal.date_source_count = (existing_deal.date_source_count or 1) + 1
+                existing_deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+            elif announced_date < existing_deal.announced_date and date_confidence >= existing_confidence - 0.1:
+                # New date is earlier AND confidence is similar - prefer earlier (original logic)
+                # Only apply this if confidence difference is small (within 0.1)
                 logger.info(
                     f"Updating deal #{existing_deal.id} date: "
                     f"{existing_deal.announced_date} → {announced_date} (earlier source found)"
                 )
                 existing_deal.announced_date = announced_date
-                existing_deal.date_confidence = max(existing_deal.date_confidence, date_confidence)
+                existing_deal.date_confidence = max(existing_confidence, date_confidence)
                 existing_deal.date_source_count = (existing_deal.date_source_count or 1) + 1
                 existing_deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-
-            elif date_diff <= 1:
-                # Dates match (within 1 day tolerance) - this is CONFIRMATION
-                # Increment source count and boost confidence (multi-source bonus)
-                existing_deal.date_source_count = (existing_deal.date_source_count or 1) + 1
-                # Multi-source bonus: +0.1 for each additional confirming source
-                new_confidence = min(0.95, existing_deal.date_confidence + 0.1)
-                if new_confidence > existing_deal.date_confidence:
-                    logger.info(
-                        f"Date confirmed for deal #{existing_deal.id}: "
-                        f"{existing_deal.announced_date} (sources: {existing_deal.date_source_count}, "
-                        f"confidence: {existing_deal.date_confidence:.2f} → {new_confidence:.2f})"
-                    )
-                    existing_deal.date_confidence = new_confidence
-                    existing_deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
         elif announced_date and not existing_deal.announced_date:
             # Deal had no date, now we have one
