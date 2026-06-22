@@ -537,3 +537,32 @@ class ScanJob(SQLModel, table=True):
 
     # Trigger type
     trigger: str = Field(default="scheduled")  # scheduled, manual, api
+
+
+class ContentHash(SQLModel, table=True):
+    """Persistent content hash cache for cross-run deduplication.
+
+    FIX (2026-01): Saves ~$10-15/month by preventing re-extraction of
+    syndicated articles that were processed in a previous scan run.
+
+    - 30-day TTL to catch syndication across days (same article on TechCrunch → VentureBeat)
+    - Content length stored to prefer longer articles (full article > headline)
+    - Index on (content_hash, expires_at) for efficient lookup + cleanup
+
+    Usage:
+        Check before LLM extraction: SELECT * FROM content_hashes
+        WHERE content_hash = ? AND expires_at > NOW()
+    """
+    __tablename__ = "content_hashes"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    content_hash: str = Field(max_length=32, index=True)  # SHA256 first 32 chars (128-bit)
+    content_length: int = Field(default=0)  # For preferring longer content
+    source_url: Optional[str] = Field(default=None, max_length=2000)  # Original URL (debugging)
+    created_at: datetime = Field(
+        default_factory=utc_now_naive,
+        sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    )
+    expires_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), index=True)
+    )  # created_at + 30 days

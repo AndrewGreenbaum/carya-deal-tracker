@@ -15,6 +15,7 @@ OPTIMIZED:
 import asyncio
 import hashlib
 import logging
+import random
 import re
 import instructor
 import httpx
@@ -38,6 +39,16 @@ _current_scan_id: ContextVar[Optional[str]] = ContextVar('scan_id', default=None
 # FIX (2026-01): Now stores (hash, length) to prefer longer content
 _content_hash_cache: dict[str, int] = {}  # hash -> content length
 _content_hash_lock = asyncio.Lock()  # FIX: Async-safe cache access
+
+# =============================================================================
+# TOKEN USAGE BATCHING (reduces DB writes)
+# =============================================================================
+# FIX (2026-01): Batch token usage writes to reduce DB overhead
+# Collects usage records and flushes every BATCH_SIZE or on explicit flush
+
+TOKEN_USAGE_BATCH_SIZE = 10  # Flush every 10 extractions
+_token_usage_batch: list[dict] = []  # Buffer for pending token usage records
+_token_usage_batch_lock = asyncio.Lock()  # Async-safe batch access
 
 # Minimum content length improvement to replace cached version
 # If new content is 2x longer, it's worth re-processing
@@ -245,17 +256,7 @@ DISAMBIGUATION: Benchmark≠Benchmark International/Electronics, GV≠NYSE:GV, T
 
 COMPANY NAME: Must be actual company, NOT article titles like "America's Construction Problem". If can't identify → startup_name="<UNKNOWN>", is_new_announcement=False
 
-URLS: Only extract if EXPLICITLY mentioned. Never guess/construct URLs. Set to null if not in article.
-
-COMPANY WEBSITE EXTRACTION (helps users find the startup):
-Look for these patterns to extract company_website:
-- Direct mentions: "acme.com", "www.acme.io", "visit acme.ai"
-- In text: "Learn more at [domain]", "visit [startup] at [url]"
-- In company descriptions: "[Startup], available at [domain]"
-- Common TLDs: .com, .io, .ai, .co, .dev, .app, .tech, .health
-
-Extract the ROOT DOMAIN only (e.g., "https://acme.com" not "https://acme.com/about")
-If no website mentioned → company_website=null (enrichment will try to find it later)
+URLS: Only extract if EXPLICITLY in article text. Never guess. Set to null if not mentioned.
 
 DATE EXTRACTION (IMPORTANT - affects data accuracy):
 - Extract the ANNOUNCEMENT/CLOSING date of the funding round, NOT the article's publication date
@@ -311,12 +312,7 @@ Some articles may only contain a headline with minimal context. Extract what you
 - If company name is missing from headline → startup_name="<UNKNOWN>", is_new_announcement=False
 - Headlines with clear lead language ("leads", "led") ARE sufficient for is_lead=True
 
-CONFIDENCE SCORING (0.0-1.0):
-- 0.80-1.0: All clear (company + amount + round + date + "raises/raised/announces")
-- 0.60-0.79: Most clear, 1 field missing (e.g., date or round type unknown)
-- 0.50-0.59: Headline-only but company + amount clear (minimum for acceptance)
-- 0.35-0.49: Sparse info, some uncertainty (may be accepted for external sources)
-- <0.35: Cannot verify as real funding (company unclear OR no amount OR background mention)
+CONFIDENCE SCORING (0.0-1.0): Higher = more complete info. Low confidence (<0.35) for unclear company, no amount, or background mentions.
 
 Return ONE deal per article (the primary/new announcement, not historical mentions).
 Output valid JSON matching the schema."""
@@ -373,6 +369,62 @@ def _calculate_cost(
     return round(cost, 6)
 
 
+async def flush_token_usage_batch(force: bool = False) -> None:
+    """Flush pending token usage records to database.
+
+    Args:
+        force: If True, flush even if batch isn't full (used at end of scan)
+    """
+    global _token_usage_batch
+
+    async with _token_usage_batch_lock:
+        if not _token_usage_batch:
+            return
+
+        if not force and len(_token_usage_batch) < TOKEN_USAGE_BATCH_SIZE:
+            return
+
+        # Grab batch and clear buffer
+        batch_to_flush = _token_usage_batch.copy()
+        _token_usage_batch = []
+
+    # Flush outside lock to avoid blocking other adds
+    logger.debug(f"[TOKEN BATCH] Flushing {len(batch_to_flush)} token usage records")
+
+    try:
+        from ..archivist.database import get_session
+        from ..archivist.models import TokenUsage
+
+        async with get_session() as session:
+            for record in batch_to_flush:
+                usage = TokenUsage(
+                    timestamp=record["timestamp"],
+                    source_name=record["source_name"],
+                    scan_id=record["scan_id"],
+                    article_url=record["article_url"],
+                    input_tokens=record["input_tokens"],
+                    output_tokens=record["output_tokens"],
+                    cache_read_tokens=record["cache_read_tokens"],
+                    cache_write_tokens=record["cache_write_tokens"],
+                    model=record["model"],
+                    estimated_cost_usd=record["estimated_cost_usd"]
+                )
+                session.add(usage)
+
+            await session.commit()
+
+        total_cost = sum(r["estimated_cost_usd"] for r in batch_to_flush)
+        logger.info(
+            f"Token usage batch saved: {len(batch_to_flush)} records, "
+            f"total cost=${total_cost:.4f}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to flush token usage batch: {e}", exc_info=True)
+        # Re-add failed records to batch for retry
+        async with _token_usage_batch_lock:
+            _token_usage_batch = batch_to_flush + _token_usage_batch
+
+
 async def log_token_usage(
     input_tokens: int,
     output_tokens: int,
@@ -383,7 +435,10 @@ async def log_token_usage(
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0
 ) -> None:
-    """Log token usage to database for cost tracking.
+    """Log token usage to database for cost tracking (batched for efficiency).
+
+    FIX (2026-01): Now batches writes every 10 extractions to reduce DB overhead.
+    Call flush_token_usage_batch(force=True) at end of scan to ensure all records saved.
 
     Args:
         input_tokens: Number of input tokens used
@@ -395,6 +450,8 @@ async def log_token_usage(
         cache_read_tokens: Tokens read from cache
         cache_write_tokens: Tokens written to cache
     """
+    global _token_usage_batch
+
     # Use context values if not explicitly provided (ContextVar.get() for async safety)
     context_source = _current_source_name.get()
     context_scan_id = _current_scan_id.get()
@@ -411,45 +468,30 @@ async def log_token_usage(
         )
 
     cost = _calculate_cost(input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
-    logger.info(f"[TOKEN DEBUG] log_token_usage called: source={source}, in={input_tokens}, out={output_tokens}")
+    logger.debug(f"[TOKEN DEBUG] log_token_usage called: source={source}, in={input_tokens}, out={output_tokens}")
 
-    try:
-        # Import here to avoid circular imports
-        from ..archivist.database import get_session
-        from ..archivist.models import TokenUsage
+    # Create record for batch
+    record = {
+        "timestamp": datetime.now(timezone.utc),
+        "source_name": source,
+        "scan_id": job_id,
+        "article_url": article_url[:2000] if article_url and len(article_url) > 2000 else article_url,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "cache_write_tokens": cache_write_tokens,
+        "model": model,
+        "estimated_cost_usd": cost
+    }
 
-        logger.info(f"[TOKEN DEBUG] About to create TokenUsage object")
-        async with get_session() as session:
-            usage = TokenUsage(
-                timestamp=datetime.now(timezone.utc),
-                source_name=source,
-                scan_id=job_id,
-                article_url=article_url[:2000] if article_url and len(article_url) > 2000 else article_url,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cache_read_tokens=cache_read_tokens,
-                cache_write_tokens=cache_write_tokens,
-                model=model,
-                estimated_cost_usd=cost
-            )
-            logger.info(f"[TOKEN DEBUG] TokenUsage created, adding to session")
-            session.add(usage)
-            logger.info(f"[TOKEN DEBUG] Committing...")
-            await session.commit()  # Explicit commit to ensure data is saved
-            logger.info(f"[TOKEN DEBUG] Commit complete!")
+    # Add to batch
+    async with _token_usage_batch_lock:
+        _token_usage_batch.append(record)
+        batch_size = len(_token_usage_batch)
 
-        logger.info(
-            f"Token usage saved: source={source}, input={input_tokens}, "
-            f"output={output_tokens}, cost=${cost:.4f}"
-        )
-    except Exception as e:
-        # Don't fail extraction if logging fails, but log details for debugging
-        logger.error(f"Failed to log token usage: {e}", exc_info=True)
-        logger.error(
-            f"  Token logging params: source={source}, input={input_tokens}, "
-            f"output={output_tokens}, cache_read={cache_read_tokens}, "
-            f"cache_write={cache_write_tokens}, cost=${cost:.4f}"
-        )
+    # Flush if batch is full
+    if batch_size >= TOKEN_USAGE_BATCH_SIZE:
+        await flush_token_usage_batch()
 
 
 # Keywords that indicate funding content (for early exit optimization)
@@ -612,10 +654,14 @@ async def _reextract_with_sonnet(
                 cache_write_tokens=cache_write
             )
 
-        # Apply same post-processing as Haiku (company + investor validation BEFORE fund verification)
+        # Apply same post-processing as Haiku (all validation steps)
         # This ensures fair comparison between Haiku and Sonnet results
+        # FIX (2026-01): Added _validate_round_type and _validate_founders_in_text
+        # which were missing, causing duplicate calls after Sonnet returned
         response = _validate_company_in_text(response, article_text)
+        response = _validate_round_type(response)
         response = _validate_investors_in_text(response, article_text)
+        response = _validate_founders_in_text(response, article_text)
         response = _verify_tracked_fund(response, article_text)
 
         # Decide which result is better
@@ -673,6 +719,15 @@ CRYPTO_KEYWORDS = [
     # Crypto-specific terms
     "wallet connect", "metamask", "dex", "amm", "tvl",
 ]
+
+# FIX (2026-01): Pre-compile crypto keyword regex for efficiency
+# Was iterating through 35+ keywords for every article, now single regex search
+# Escape special chars and join with | for alternation
+_CRYPTO_KEYWORDS_ESCAPED = [re.escape(kw) for kw in CRYPTO_KEYWORDS]
+CRYPTO_KEYWORDS_PATTERN = re.compile(
+    r'(' + '|'.join(_CRYPTO_KEYWORDS_ESCAPED) + r')',
+    re.IGNORECASE
+)
 
 # Company name patterns that indicate crypto (for stricter detection)
 # FIX 2026-01: Removed ambiguous patterns that cause false positives
@@ -874,7 +929,8 @@ def _is_crypto_deal(deal: DealExtraction, article_text: str) -> bool:
     # IMPROVED (2026-01): Increased threshold from 3 to 4 keywords, and added
     # protection for legitimate AI companies that work with blockchain
     # (e.g., "blockchain AI infrastructure" should NOT be flagged)
-    crypto_count = sum(1 for kw in CRYPTO_KEYWORDS if kw in text_lower)
+    # FIX (2026-01): Use pre-compiled regex for efficiency (was 35+ string searches)
+    crypto_count = len(CRYPTO_KEYWORDS_PATTERN.findall(text_lower))
 
     # Check for AI signals that protect against false crypto classification
     ai_signals = ["ai infrastructure", "machine learning", "llm", "large language model",
@@ -1542,14 +1598,14 @@ async def extract_deal(
             )
 
             # Log token usage from the completion
-            # DEBUG: Log completion object details
-            logger.info(f"[TOKEN DEBUG] completion type={type(completion)}, has_usage={hasattr(completion, 'usage') if completion else 'None'}")
+            # FIX (2026-01): Changed from logger.info to logger.debug (reduce log spam)
+            logger.debug(f"[TOKEN DEBUG] completion type={type(completion)}, has_usage={hasattr(completion, 'usage') if completion else 'None'}")
             if completion and hasattr(completion, 'usage'):
                 usage = completion.usage
                 # Extract cache tokens if available (Anthropic-specific)
                 cache_read = getattr(usage, 'cache_read_input_tokens', 0) or 0
                 cache_write = getattr(usage, 'cache_creation_input_tokens', 0) or 0
-                logger.info(f"Claude call tokens: in={usage.input_tokens}, out={usage.output_tokens}")
+                logger.debug(f"Claude call tokens: in={usage.input_tokens}, out={usage.output_tokens}")
                 try:
                     await log_token_usage(
                         input_tokens=usage.input_tokens,
@@ -1560,7 +1616,7 @@ async def extract_deal(
                         cache_read_tokens=cache_read,
                         cache_write_tokens=cache_write
                     )
-                    logger.info(f"[TOKEN DEBUG] log_token_usage completed successfully for source={source_name}")
+                    logger.debug(f"[TOKEN DEBUG] log_token_usage completed successfully for source={source_name}")
                 except Exception as e:
                     logger.error(f"[TOKEN DEBUG] log_token_usage raised: {e}", exc_info=True)
             else:
@@ -1668,11 +1724,16 @@ async def extract_deal(
 
             # HYBRID EXTRACTION: Re-extract with Sonnet for low-confidence results
             # Only if: enabled, confidence in range, valid deal, has quality issues
+            # FIX (2026-01): Different thresholds for internal vs external sources
+            hybrid_min = (
+                settings.hybrid_confidence_min_external if is_external_source
+                else settings.hybrid_confidence_min
+            )
             if (
                 response
                 and settings.hybrid_extraction_enabled
                 and response.is_new_announcement
-                and settings.hybrid_confidence_min <= response.confidence_score <= settings.hybrid_confidence_max
+                and hybrid_min <= response.confidence_score <= settings.hybrid_confidence_max
                 and (response.lead_evidence_weak or len(response.founders) == 0)
             ):
                 logger.info(
@@ -1706,23 +1767,8 @@ async def extract_deal(
 
                     response = sonnet_response
 
-                    # CRITICAL: Apply same post-processing to Sonnet response
-                    # Must include ALL post-processing steps in the same order as Haiku
-
-                    # 1. Validate company name is in article (prevents hallucinated companies)
-                    response = _validate_company_in_text(response, article_text)
-
-                    # 2. Validate round type is valid enum value (prevents dedup bypass)
-                    response = _validate_round_type(response)
-
-                    # 3. Validate investors are mentioned in article (prevents hallucination)
-                    response = _validate_investors_in_text(response, article_text)
-
-                    # 4. Validate founders are mentioned in article (prevents hallucination)
-                    response = _validate_founders_in_text(response, article_text)
-
-                    # 5. Verify tracked fund identification
-                    response = _verify_tracked_fund(response, article_text)
+                    # FIX (2026-01): Validation steps 1-5 are now done inside _reextract_with_sonnet()
+                    # Only apply steps 6-11 here (reclassification and additional checks)
 
                     # 6. Crypto reclassification
                     if response.is_ai_deal and _is_crypto_deal(response, article_text):
@@ -1816,12 +1862,8 @@ async def extract_deal(
 
                     response = sonnet_response
 
-                    # Apply same post-processing to Sonnet response
-                    response = _validate_company_in_text(response, article_text)
-                    response = _validate_round_type(response)
-                    response = _validate_investors_in_text(response, article_text)
-                    response = _validate_founders_in_text(response, article_text)
-                    response = _verify_tracked_fund(response, article_text)
+                    # FIX (2026-01): Validation steps 1-5 are now done inside _reextract_with_sonnet()
+                    # Only apply steps 6-11 here (reclassification and additional checks)
 
                     # Crypto/Consumer reclassification
                     if response.is_ai_deal and _is_crypto_deal(response, article_text):
@@ -1874,30 +1916,36 @@ async def extract_deal(
         except APITimeoutError as e:
             last_error = e
             backoff = 2 ** attempt
+            # FIX (2026-01): Add jitter to prevent thundering herd
+            jittered_backoff = backoff * random.uniform(0.9, 1.1)
             logger.warning(
                 f"Claude API timeout (attempt {attempt + 1}/{MAX_RETRIES + 1}, "
-                f"article_len={article_len}, backoff={backoff}s): {source_url}"
+                f"article_len={article_len}, backoff={jittered_backoff:.1f}s): {source_url}"
             )
             if attempt < MAX_RETRIES:
-                await asyncio.sleep(backoff)
+                await asyncio.sleep(jittered_backoff)
             continue
 
         except RateLimitError as e:
             last_error = e
             backoff = 10 * (attempt + 1)  # 10s, 20s, 30s, 40s
+            # FIX (2026-01): Add jitter to prevent thundering herd
+            jittered_backoff = backoff * random.uniform(0.9, 1.1)
             logger.warning(
                 f"Claude API rate limit (attempt {attempt + 1}/{MAX_RETRIES + 1}, "
-                f"backoff={backoff}s): {e}"
+                f"backoff={jittered_backoff:.1f}s): {e}"
             )
             if attempt < MAX_RETRIES:
-                await asyncio.sleep(backoff)
+                await asyncio.sleep(jittered_backoff)
             continue
 
         except APIError as e:
             last_error = e
             logger.error(f"Claude API error (attempt {attempt + 1}/{MAX_RETRIES + 1}): {e}")
             if attempt < MAX_RETRIES and e.status_code >= 500:
-                await asyncio.sleep(2 ** attempt)  # Retry server errors
+                # FIX (2026-01): Add jitter to prevent thundering herd
+                jittered_backoff = (2 ** attempt) * random.uniform(0.9, 1.1)
+                await asyncio.sleep(jittered_backoff)  # Retry server errors
                 continue
             break  # Don't retry client errors (4xx)
 

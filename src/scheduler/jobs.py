@@ -143,32 +143,115 @@ def get_content_fingerprint(text: str) -> str:
     return md5(fingerprint_text.encode()).hexdigest()
 
 
-async def check_global_content_seen(text: str) -> bool:
+async def check_global_content_seen(text: str, source_url: str = None) -> bool:
     """
-    Check if content has been seen in this run (syndicated article dedup).
+    Check if content has been seen (syndicated article dedup).
+
+    FIX (2026-01): Added persistent database cache to catch syndicated articles
+    across different scan runs (~$10-15/month savings).
+
+    Check order:
+    1. In-memory cache (fast path for same-run duplicates)
+    2. Database cache (catches cross-run duplicates, 30-day TTL)
 
     Returns True if content was already seen (should skip).
-    Adds fingerprint to global set if not seen.
     """
     fingerprint = get_content_fingerprint(text)
     if not fingerprint:
         return False  # Empty content, don't skip
 
+    content_length = len(text) if text else 0
+
+    # Fast path: check in-memory cache first
     async with _global_content_lock:
         if fingerprint in _global_content_hashes:
             return True
+
+    # Slow path: check persistent database cache
+    try:
+        from ..archivist.database import get_session
+        from ..archivist.models import ContentHash
+        from sqlmodel import select
+        from datetime import timedelta
+
+        async with get_session() as session:
+            # Check if hash exists and not expired
+            now = datetime.now(timezone.utc)
+            stmt = select(ContentHash).where(
+                ContentHash.content_hash == fingerprint,
+                ContentHash.expires_at > now
+            )
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                # Found in persistent cache - check if new content is longer
+                if content_length > existing.content_length * 2:
+                    # New content is 2x longer, update and process
+                    existing.content_length = content_length
+                    existing.source_url = source_url
+                    existing.expires_at = now + timedelta(days=30)
+                    await session.commit()
+                    logger.debug(f"Updating content hash with longer content: {fingerprint[:16]}...")
+                    # Add to in-memory cache too
+                    async with _global_content_lock:
+                        _global_content_hashes.add(fingerprint)
+                    return False  # Process the longer version
+                else:
+                    # Already seen with similar/longer content
+                    logger.debug(f"Content found in persistent cache: {fingerprint[:16]}...")
+                    return True
+
+            # Not in database - add it
+            new_hash = ContentHash(
+                content_hash=fingerprint,
+                content_length=content_length,
+                source_url=source_url,
+                expires_at=now + timedelta(days=30)
+            )
+            session.add(new_hash)
+            await session.commit()
+
+    except Exception as e:
+        # Don't fail extraction if DB check fails, log and continue
+        logger.warning(f"Persistent content cache check failed: {e}")
+
+    # Add to in-memory cache
+    async with _global_content_lock:
         _global_content_hashes.add(fingerprint)
-        return False
+
+    return False
 
 
 async def clear_global_content_hashes() -> None:
-    """Clear global content hash set. Called at start of each scheduled run."""
+    """Clear global content hash set and clean up expired DB entries.
+
+    Called at start of each scheduled run.
+    FIX (2026-01): Also cleans up expired entries from persistent cache.
+    """
     global _global_content_hashes
     async with _global_content_lock:
         size = len(_global_content_hashes)
         _global_content_hashes.clear()
     if size > 0:
         logger.info(f"Global content hash cache cleared ({size} entries)")
+
+    # Clean up expired entries from persistent cache
+    try:
+        from ..archivist.database import get_session
+        from ..archivist.models import ContentHash
+        from sqlmodel import delete
+
+        async with get_session() as session:
+            now = datetime.now(timezone.utc)
+            stmt = delete(ContentHash).where(ContentHash.expires_at < now)
+            result = await session.execute(stmt)
+            expired_count = result.rowcount
+            await session.commit()
+            if expired_count > 0:
+                logger.info(f"Cleaned up {expired_count} expired content hashes from persistent cache")
+    except Exception as e:
+        logger.warning(f"Failed to clean up expired content hashes: {e}")
 
 
 # =============================================================================
@@ -250,6 +333,67 @@ def is_likely_funding_from_title(title: str) -> bool:
         'million', 'billion', 'backed', 'round', 'investor'
     ]
     return sum(1 for signal in weak_signals if signal in title_lower) >= 2
+
+
+def should_skip_by_source(source_name: str, url: str, title: str) -> tuple[bool, str]:
+    """
+    Source-specific filtering to skip non-funding content.
+
+    FIX (2026-01): Saves ~$5-10/month by skipping content that specific sources
+    produce which is almost never funding announcements.
+
+    Returns (should_skip, reason) tuple.
+    """
+    url_lower = url.lower() if url else ""
+    title_lower = title.lower() if title else ""
+
+    # Crunchbase: Skip reviews, jobs, company-about pages
+    if source_name == "crunchbase" or "crunchbase.com" in url_lower:
+        skip_patterns = [
+            '/reviews/', '/jobs/', '/people/', '/acquisitions/',
+            '/ipo/', '/hub/', '/lists/', '/discover/',
+            '/organization/', '/event/', '/school/',
+        ]
+        for pattern in skip_patterns:
+            if pattern in url_lower:
+                return True, f"Crunchbase non-funding page: {pattern}"
+
+    # YCombinator: Skip pitch pages, about pages, applications
+    if source_name == "ycombinator" or "ycombinator.com" in url_lower:
+        skip_patterns = [
+            '/apply/', '/about/', '/blog/', '/library/',
+            '/resources/', '/faq/', '/contact/',
+        ]
+        for pattern in skip_patterns:
+            if pattern in url_lower:
+                return True, f"YCombinator non-funding page: {pattern}"
+
+        # Also skip if title suggests application/program info
+        skip_titles = [
+            'how to apply', 'application deadline', 'startup school',
+            'office hours', 'yc library', 'founder resource',
+        ]
+        for pattern in skip_titles:
+            if pattern in title_lower:
+                return True, f"YCombinator non-funding title: {pattern}"
+
+    # Hacker News: Skip discussion-only posts (no company website)
+    if source_name == "hackernews" or "news.ycombinator.com" in url_lower:
+        # Skip "Show HN" posts that are just discussions, not funding news
+        if 'show hn:' in title_lower and 'funding' not in title_lower and 'raise' not in title_lower:
+            return True, "HN Show post without funding context"
+
+    # LinkedIn: Skip non-article content
+    if "linkedin.com" in url_lower:
+        skip_patterns = [
+            '/jobs/', '/learning/', '/company/', '/school/',
+            '/groups/', '/events/', '/pulse/topic/',
+        ]
+        for pattern in skip_patterns:
+            if pattern in url_lower:
+                return True, f"LinkedIn non-article page: {pattern}"
+
+    return False, ""
 
 
 async def enrich_new_deals(limit: int = 25):
@@ -684,7 +828,7 @@ async def process_external_articles(
     Returns:
         Dict with processing stats
     """
-    from ..analyst.extractor import extract_deal, set_extraction_context, clear_extraction_context, EXTERNAL_SOURCE_NAMES, EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD, get_extraction_stats
+    from ..analyst.extractor import extract_deal, set_extraction_context, clear_extraction_context, EXTERNAL_SOURCE_NAMES, EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD, get_extraction_stats, flush_token_usage_batch
     from ..archivist.storage import save_deal
     from ..archivist.database import get_session
     from ..archivist.models import Article
@@ -773,6 +917,28 @@ async def process_external_articles(
 
     # OPTIMIZATION: Title pre-filters - skip articles BEFORE Claude call
     # Filter 1: Skip non-announcement titles (year-in-review, interviews, etc.)
+    # Filter 1.5: Source-specific filtering (FIX 2026-01: ~$5-10/month savings)
+    # Skip content that specific sources produce which is almost never funding announcements
+    if "articles_skipped_source_specific" not in stats:
+        stats["articles_skipped_source_specific"] = 0
+
+    source_filtered_articles = []
+    for article in new_articles:
+        should_skip, reason = should_skip_by_source(source_name, article.url, article.title)
+        if should_skip:
+            stats["articles_skipped_source_specific"] += 1
+            logger.debug(f"[{source_name}] Skipping by source rule: {reason}")
+        else:
+            source_filtered_articles.append(article)
+
+    if stats["articles_skipped_source_specific"] > 0:
+        logger.info(f"[{source_name}] Skipped {stats['articles_skipped_source_specific']} articles by source-specific rules")
+
+    new_articles = source_filtered_articles
+    if not new_articles:
+        logger.info(f"[{source_name}] No articles after source-specific filtering")
+        return stats
+
     # Filter 2: Skip titles without funding signals
     # NOTE: Some sources (SEC, YCombinator) bypass title filtering since their
     # content is already funding-related but doesn't have typical news headlines
@@ -805,9 +971,10 @@ async def process_external_articles(
 
     # OPTIMIZATION: Content hash dedup (Jan 2026) - catches syndicated articles with different URLs
     # Same article on TechCrunch + VentureBeat + Crunchbase = 3 Claude calls → now just 1
+    # FIX (2026-01): Now uses persistent DB cache for cross-run dedup (~$10-15/month savings)
     content_dedup_articles = []
     for article in new_articles:
-        if await check_global_content_seen(article.text):
+        if await check_global_content_seen(article.text, source_url=article.url):
             stats["articles_skipped_content_hash"] += 1
         else:
             content_dedup_articles.append(article)
@@ -1023,6 +1190,9 @@ async def process_external_articles(
 
     # Clear extraction context when done
     clear_extraction_context()
+
+    # FIX (2026-01): Flush any remaining token usage records
+    await flush_token_usage_batch(force=True)
 
     return stats
 
@@ -1757,7 +1927,7 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
     # ===== PHASE 0: Clear caches for fresh run =====
     # Without this, duplicate detection prevents processing the same article
     # across different runs (100% data loss after first run)
-    from ..analyst.extractor import clear_content_hash_cache, clear_extraction_stats, get_extraction_stats
+    from ..analyst.extractor import clear_content_hash_cache, clear_extraction_stats, get_extraction_stats, flush_token_usage_batch
     from ..enrichment.brave_enrichment import clear_linkedin_cache
 
     clear_content_hash_cache()
@@ -1918,6 +2088,9 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
                             f"[{job_id}] Updated ScanJob: saved={total_saved}, "
                             f"leads={lead_deals}, enterprise_ai={enterprise_ai_deals}"
                         )
+
+                    # FIX (2026-01): Flush any remaining token usage records
+                    await flush_token_usage_batch(force=True)
             except Exception as e:
                 logger.warning(f"[{job_id}] Failed to update ScanJob record: {e}")
 
@@ -1945,6 +2118,9 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
                         scan_job.error_message = str(e)[:500]  # Truncate long errors
                         await session.commit()
                         logger.info(f"[{job_id}] Updated ScanJob record with failure")
+
+                    # FIX (2026-01): Flush any remaining token usage records
+                    await flush_token_usage_batch(force=True)
             except Exception as update_err:
                 logger.warning(f"[{job_id}] Failed to update ScanJob failure: {update_err}")
 

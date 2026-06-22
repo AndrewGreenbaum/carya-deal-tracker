@@ -57,10 +57,11 @@ class Settings(BaseSettings):
 
     # Hybrid extraction: re-extract with Sonnet for low-confidence results
     hybrid_extraction_enabled: bool = True  # Enable Sonnet re-extraction
-    # FIX (Jan 2026): Lowered from 0.45 to 0.35 to close gap with external threshold
-    # External sources accept at 0.35, so hybrid should start there too
-    # Otherwise deals with 0.35-0.44 confidence rejected without re-extraction attempt
-    hybrid_confidence_min: float = 0.35  # Min confidence to consider for re-extraction
+    # FIX (2026-01): Different thresholds for internal vs external sources
+    # Internal sources (full articles) have more context, so narrow range is fine
+    # External sources (headlines) need wider range since less context available
+    hybrid_confidence_min: float = 0.45  # Min confidence for internal sources
+    hybrid_confidence_min_external: float = 0.35  # Min confidence for external sources
     hybrid_confidence_max: float = 0.65  # Max confidence to consider for re-extraction
 
     # Embedding Settings

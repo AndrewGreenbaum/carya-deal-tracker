@@ -47,19 +47,23 @@ class TestConfidenceThresholds:
     """Tests for confidence threshold constants."""
 
     def test_hybrid_confidence_min_matches_external_threshold(self):
-        """Hybrid min should be low enough to catch external source deals."""
-        # FIX: hybrid_confidence_min should be <= EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD
-        # to avoid gap where deals are rejected without re-extraction attempt
+        """Hybrid min for external sources should be low enough to catch external deals."""
+        # FIX (2026-01): Now using hybrid_confidence_min_external for external sources
         from src.analyst.extractor import EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD
 
-        assert settings.hybrid_confidence_min <= EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD, (
-            f"Hybrid min ({settings.hybrid_confidence_min}) should be <= "
+        assert settings.hybrid_confidence_min_external <= EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD, (
+            f"Hybrid min external ({settings.hybrid_confidence_min_external}) should be <= "
             f"external threshold ({EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD}) to avoid gap"
         )
 
     def test_hybrid_confidence_min_value(self):
-        """Verify hybrid_confidence_min is set to 0.35."""
-        assert settings.hybrid_confidence_min == 0.35
+        """Verify hybrid_confidence_min is set correctly for internal sources."""
+        # FIX (2026-01): Internal sources now use 0.45, external use 0.35
+        assert settings.hybrid_confidence_min == 0.45
+
+    def test_hybrid_confidence_min_external_value(self):
+        """Verify hybrid_confidence_min_external is set to 0.35."""
+        assert settings.hybrid_confidence_min_external == 0.35
 
     def test_hybrid_confidence_max_value(self):
         """Verify hybrid_confidence_max is set to 0.65."""
@@ -370,9 +374,28 @@ class TestConfidenceClamping:
 class TestHybridReextractionTriggers:
     """Tests for hybrid re-extraction trigger conditions."""
 
-    def test_low_confidence_triggers_reextraction(self):
-        """Deals with confidence in [0.35, 0.65] should trigger re-extraction."""
-        # Test boundary conditions
+    def test_low_confidence_triggers_reextraction_internal(self):
+        """Internal sources: confidence in [0.45, 0.65] should trigger re-extraction."""
+        # FIX (2026-01): Internal sources use 0.45 threshold
+        test_cases = [
+            (0.45, True),   # At min boundary - should trigger
+            (0.50, True),   # In middle - should trigger
+            (0.65, True),   # At max boundary - should trigger
+            (0.44, False),  # Below min - should NOT trigger
+            (0.66, False),  # Above max - should NOT trigger
+        ]
+
+        for confidence, should_trigger in test_cases:
+            in_range = (
+                settings.hybrid_confidence_min <= confidence <= settings.hybrid_confidence_max
+            )
+            assert in_range == should_trigger, (
+                f"Internal: Confidence {confidence} should{'not' if not should_trigger else ''} trigger reextraction"
+            )
+
+    def test_low_confidence_triggers_reextraction_external(self):
+        """External sources: confidence in [0.35, 0.65] should trigger re-extraction."""
+        # FIX (2026-01): External sources use 0.35 threshold (lower for headline-only content)
         test_cases = [
             (0.35, True),   # At min boundary - should trigger
             (0.45, True),   # In middle - should trigger
@@ -383,10 +406,10 @@ class TestHybridReextractionTriggers:
 
         for confidence, should_trigger in test_cases:
             in_range = (
-                settings.hybrid_confidence_min <= confidence <= settings.hybrid_confidence_max
+                settings.hybrid_confidence_min_external <= confidence <= settings.hybrid_confidence_max
             )
             assert in_range == should_trigger, (
-                f"Confidence {confidence} should{'not' if not should_trigger else ''} trigger reextraction"
+                f"External: Confidence {confidence} should{'not' if not should_trigger else ''} trigger reextraction"
             )
 
     def test_high_confidence_weak_evidence_triggers_reextraction(self):
