@@ -82,7 +82,7 @@ class Deal(SQLModel, table=True):
     __tablename__ = "deals"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    company_id: int = Field(foreign_key="portfolio_companies.id")
+    company_id: int = Field(foreign_key="portfolio_companies.id", index=True)
 
     # Deduplication key (FIX Jan 2026: prevent race condition duplicates)
     # Hash of normalized_company_name + round_type + date_bucket

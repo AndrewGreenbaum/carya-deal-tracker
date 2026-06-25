@@ -38,7 +38,55 @@ _current_scan_id: ContextVar[Optional[str]] = ContextVar('scan_id', default=None
 # Session-based content hash cache (cleared between runs)
 # Prevents duplicate Claude calls for same article content
 # FIX (2026-01): Now stores (hash, length) to prefer longer content
-_content_hash_cache: dict[str, int] = {}  # hash -> content length
+# FIX (2026-01): Bounded to prevent unbounded memory growth
+
+
+class BoundedContentHashCache:
+    """Bounded LRU-like cache for content hashes to prevent memory leaks.
+
+    When cache exceeds max_size, removes oldest 10% of entries.
+    Supports dict-like access for backwards compatibility.
+    """
+
+    def __init__(self, max_size: int = 10000):
+        self._cache: dict[str, int] = {}  # hash -> content length
+        self._max_size = max_size
+        self._insert_order: list[str] = []  # Track insertion order for LRU eviction
+
+    def get(self, key: str, default: int | None = None) -> int | None:
+        """Get content length for hash, or default if not found."""
+        return self._cache.get(key, default)
+
+    def __getitem__(self, key: str) -> int:
+        """Dict-like access: cache[key]."""
+        return self._cache[key]
+
+    def __setitem__(self, key: str, value: int) -> None:
+        """Dict-like assignment: cache[key] = value. Evicts old entries if needed."""
+        if key not in self._cache:
+            # Evict oldest 10% if at capacity
+            if len(self._cache) >= self._max_size:
+                evict_count = max(1, self._max_size // 10)
+                for _ in range(evict_count):
+                    if self._insert_order:
+                        old_key = self._insert_order.pop(0)
+                        self._cache.pop(old_key, None)
+            self._insert_order.append(key)
+        self._cache[key] = value
+
+    def clear(self) -> None:
+        """Clear all cached entries."""
+        self._cache.clear()
+        self._insert_order.clear()
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._cache
+
+    def __len__(self) -> int:
+        return len(self._cache)
+
+
+_content_hash_cache = BoundedContentHashCache(max_size=10000)
 _content_hash_lock = asyncio.Lock()  # FIX: Async-safe cache access
 
 # =============================================================================
@@ -50,6 +98,79 @@ _content_hash_lock = asyncio.Lock()  # FIX: Async-safe cache access
 TOKEN_USAGE_BATCH_SIZE = 10  # Flush every 10 extractions
 _token_usage_batch: list[dict] = []  # Buffer for pending token usage records
 _token_usage_batch_lock = asyncio.Lock()  # Async-safe batch access
+
+
+# FIX: Register atexit handler to flush token usage on shutdown
+# Without this, small scrapes (<10 articles) lose all token records
+import atexit
+
+
+def _sync_flush_tokens_at_exit() -> None:
+    """Synchronous wrapper for atexit - flushes remaining token usage records.
+
+    Called on interpreter shutdown. Uses synchronous DB access since
+    asyncio event loop may not be running.
+    """
+    if not _token_usage_batch:
+        return
+
+    # Try to get or create an event loop for async flush
+    try:
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # Create a task if loop is running (rare at shutdown)
+            loop.create_task(_async_flush_tokens_at_exit())
+        else:
+            # Most common case: no running loop, create one
+            asyncio.run(_async_flush_tokens_at_exit())
+    except Exception as e:
+        # Best effort - log and continue shutdown
+        logger.warning(f"Failed to flush token usage at exit: {e}")
+
+
+async def _async_flush_tokens_at_exit() -> None:
+    """Async implementation of atexit flush."""
+    global _token_usage_batch
+
+    if not _token_usage_batch:
+        return
+
+    try:
+        from .schemas import DealExtraction  # Avoid circular import at module load
+        from ..archivist.database import get_session
+        from ..archivist.models import TokenUsage
+
+        batch_to_flush = _token_usage_batch.copy()
+        _token_usage_batch.clear()
+
+        async with get_session() as session:
+            for record in batch_to_flush:
+                usage = TokenUsage(
+                    timestamp=record["timestamp"],
+                    source_name=record["source_name"],
+                    scan_id=record["scan_id"],
+                    article_url=record["article_url"],
+                    input_tokens=record["input_tokens"],
+                    output_tokens=record["output_tokens"],
+                    cache_read_tokens=record["cache_read_tokens"],
+                    cache_write_tokens=record["cache_write_tokens"],
+                    model=record["model"],
+                    estimated_cost_usd=record["estimated_cost_usd"]
+                )
+                session.add(usage)
+            await session.commit()
+
+        logger.info(f"Token usage flush at exit: {len(batch_to_flush)} records saved")
+    except Exception as e:
+        logger.error(f"Failed to flush token usage at exit: {e}")
+
+
+atexit.register(_sync_flush_tokens_at_exit)
 
 # Minimum content length improvement to replace cached version
 # If new content is 2x longer, it's worth re-processing
@@ -608,9 +729,8 @@ async def _is_duplicate_content(text: str) -> bool:
 
 def clear_content_hash_cache() -> None:
     """Clear the content hash cache. Call between scrape runs."""
-    global _content_hash_cache
     cache_size = len(_content_hash_cache)
-    _content_hash_cache = {}
+    _content_hash_cache.clear()
     logger.info(f"Content hash cache cleared (had {cache_size} entries)")
 
 

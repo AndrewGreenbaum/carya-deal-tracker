@@ -2,7 +2,6 @@
 Database session management for async SQLAlchemy operations.
 """
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -13,9 +12,6 @@ from sqlmodel import SQLModel
 from ..config.settings import settings
 
 logger = logging.getLogger(__name__)
-
-# Timeout for database commit operations (prevents hung transactions)
-COMMIT_TIMEOUT_SECONDS = 30
 
 
 # Create async engine with connection pooling optimizations
@@ -57,18 +53,18 @@ async def close_db():
 
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get an async database session with commit timeout protection."""
+    """Get an async database session.
+
+    FIX: Removed asyncio.wait_for() wrapper on commit() to prevent race condition.
+    asyncio.wait_for() can cancel a commit mid-flight, causing partial writes.
+    PostgreSQL statement_timeout (30s) is already configured in engine settings
+    to handle stuck transactions safely at the database level.
+    """
     async with async_session_factory() as session:
         try:
             yield session
-            # FIX: Add timeout to commit to prevent hung transactions
-            # This protects against network issues or PostgreSQL unresponsiveness
-            try:
-                await asyncio.wait_for(session.commit(), timeout=COMMIT_TIMEOUT_SECONDS)
-            except asyncio.TimeoutError:
-                logger.error(f"Database commit timeout after {COMMIT_TIMEOUT_SECONDS}s, rolling back")
-                await session.rollback()
-                raise
+            # Let PostgreSQL handle timeout via statement_timeout setting
+            await session.commit()
         except Exception as e:
             logger.error(f"Database session error, rolling back: {e}")
             await session.rollback()
@@ -80,17 +76,14 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
     Use get_session() for non-FastAPI code (scheduler, orchestrator, etc).
     Use get_db() only as a FastAPI Depends() injection.
+
+    FIX: Removed asyncio.wait_for() wrapper on commit() (see get_session).
     """
     async with async_session_factory() as session:
         try:
             yield session
-            # FIX: Add timeout to commit to prevent hung transactions
-            try:
-                await asyncio.wait_for(session.commit(), timeout=COMMIT_TIMEOUT_SECONDS)
-            except asyncio.TimeoutError:
-                logger.error(f"Database commit timeout after {COMMIT_TIMEOUT_SECONDS}s, rolling back")
-                await session.rollback()
-                raise
+            # Let PostgreSQL handle timeout via statement_timeout setting
+            await session.commit()
         except Exception as e:
             logger.error(f"Database session error, rolling back: {e}")
             await session.rollback()

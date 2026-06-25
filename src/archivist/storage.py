@@ -1519,6 +1519,14 @@ async def save_deal(
         )
         session.add(deal_investor)
 
+    # FIX: Flush investors immediately to prevent data loss on mid-loop exceptions
+    # Without this, investors added to session may not persist if an error occurs later
+    try:
+        await session.flush()
+    except Exception as e:
+        logger.error(f"Failed to flush investors for deal {deal.id}: {e}")
+        # Investors already added will be committed with deal (best effort)
+
     # Create article record - use ON CONFLICT to handle race conditions
     # Even for new deals, another task could be inserting the same article URL
     stmt = pg_insert(Article).values(

@@ -43,6 +43,12 @@ _global_urls_lock = asyncio.Lock()
 _global_content_hashes: Set[str] = set()
 _global_content_lock = asyncio.Lock()
 
+# FIX: Event to block processing while caches are being cleared
+# Without this, two jobs starting together can race:
+# Job A clears cache while Job B is in the middle of adding entries
+_cache_clearing_event = asyncio.Event()
+_cache_clearing_event.set()  # Initially not clearing (set = allow processing)
+
 # Tracking parameters to strip from URLs for normalization
 TRACKING_PARAMS = {
     'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
@@ -102,7 +108,12 @@ async def check_global_url_seen(url: str) -> bool:
 
     Returns True if URL was already seen (should skip).
     Adds URL to global set if not seen.
+
+    FIX: Waits for cache clearing to complete to prevent race condition.
     """
+    # Wait for any ongoing cache clearing to complete
+    await _cache_clearing_event.wait()
+
     normalized = normalize_url(url)
 
     async with _global_urls_lock:
@@ -113,13 +124,22 @@ async def check_global_url_seen(url: str) -> bool:
 
 
 async def clear_global_seen_urls() -> None:
-    """Clear global URL set. Called at start of each scheduled run."""
+    """Clear global URL set. Called at start of each scheduled run.
+
+    FIX: Blocks processing during clear to prevent race condition.
+    """
     global _global_seen_urls
-    async with _global_urls_lock:
-        size = len(_global_seen_urls)
-        _global_seen_urls.clear()
-    if size > 0:
-        logger.info(f"Global URL dedup cache cleared ({size} entries)")
+    # Block new additions while clearing
+    _cache_clearing_event.clear()
+    try:
+        async with _global_urls_lock:
+            size = len(_global_seen_urls)
+            _global_seen_urls.clear()
+        if size > 0:
+            logger.info(f"Global URL dedup cache cleared ({size} entries)")
+    finally:
+        # Allow additions again
+        _cache_clearing_event.set()
 
 
 def get_content_fingerprint(text: str) -> str:
@@ -150,12 +170,17 @@ async def check_global_content_seen(text: str, source_url: str = None) -> bool:
     FIX (2026-01): Added persistent database cache to catch syndicated articles
     across different scan runs (~$10-15/month savings).
 
+    FIX (2026-01): Waits for cache clearing to complete to prevent race condition.
+
     Check order:
     1. In-memory cache (fast path for same-run duplicates)
     2. Database cache (catches cross-run duplicates, 30-day TTL)
 
     Returns True if content was already seen (should skip).
     """
+    # Wait for any ongoing cache clearing to complete
+    await _cache_clearing_event.wait()
+
     fingerprint = get_content_fingerprint(text)
     if not fingerprint:
         return False  # Empty content, don't skip
@@ -228,13 +253,20 @@ async def clear_global_content_hashes() -> None:
 
     Called at start of each scheduled run.
     FIX (2026-01): Also cleans up expired entries from persistent cache.
+    FIX (2026-01): Blocks processing during clear to prevent race condition.
     """
     global _global_content_hashes
-    async with _global_content_lock:
-        size = len(_global_content_hashes)
-        _global_content_hashes.clear()
-    if size > 0:
-        logger.info(f"Global content hash cache cleared ({size} entries)")
+    # Block new additions while clearing
+    _cache_clearing_event.clear()
+    try:
+        async with _global_content_lock:
+            size = len(_global_content_hashes)
+            _global_content_hashes.clear()
+        if size > 0:
+            logger.info(f"Global content hash cache cleared ({size} entries)")
+    finally:
+        # Allow additions again
+        _cache_clearing_event.set()
 
     # Clean up expired entries from persistent cache
     try:
@@ -488,112 +520,130 @@ async def enrich_new_deals(limit: int = 25):
                     "founders": founders,
                 })
 
-        # FIX: Parallel enrichment with semaphore (was serial with 0.5s delays = 50s for 100 deals)
-        # Now: 5 concurrent enrichments = ~10-15s for 100 deals (70% faster)
+        # FIX: Parallel enrichment with semaphore - API calls only, batch DB writes
+        # (was opening a new DB session per enrichment, causing pool exhaustion)
+        # Now: 5 concurrent API calls, then batch persist in ONE session
         MAX_CONCURRENT_ENRICHMENT = 5
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_ENRICHMENT)
-        enriched_count = [0]  # Use list to allow mutation in nested function
-        count_lock = asyncio.Lock()
 
-        async def enrich_single_deal(deal_info: dict) -> bool:
-            """Enrich a single deal with semaphore-limited concurrency."""
+        async def enrich_single_deal(deal_info: dict):
+            """Enrich a single deal - API calls only, no DB access."""
             async with semaphore:
                 try:
-                    try:
-                        enrichment = await asyncio.wait_for(
-                            enrich_company_with_context(deal_info["context"]),
-                            timeout=15.0
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning(f"Enrichment timeout for {deal_info['company_name']}")
-                        return False
-
-                    # Continue even if website not found - still want to persist LinkedIn
-                    has_enrichment = (
-                        enrichment.website or
-                        enrichment.ceo_linkedin or
-                        enrichment.founder_linkedins
+                    enrichment = await asyncio.wait_for(
+                        enrich_company_with_context(deal_info["context"]),
+                        timeout=15.0
                     )
-                    if not has_enrichment:
-                        return False
+                    # Return both deal_info and enrichment result
+                    return (deal_info, enrichment)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Enrichment timeout for {deal_info['company_name']}")
+                    return (deal_info, None)
+                except Exception as e:
+                    logger.warning(f"Enrichment error for {deal_info['company_name']}: {e}")
+                    return (deal_info, None)
 
-                    # Update in separate transaction (per-deal isolation)
-                    async with get_session() as db:
-                        # Fetch fresh deal and company objects
-                        deal = await db.get(Deal, deal_info["deal_id"])
-                        if deal and deal.company:
-                            # Only update website if found
-                            if enrichment.website:
-                                deal.company.website = enrichment.website
+                except Exception as e:
+                    logger.warning(f"Enrichment error for {deal_info['company_name']}: {e}")
+                    return (deal_info, None)
 
-                            # Update founders with LinkedIn URLs
-                            founders = deal_info["founders"]
-                            founders_updated = False
+        # Process all deals concurrently (limited by semaphore) - API calls only
+        results = await asyncio.gather(
+            *[enrich_single_deal(d) for d in deals_to_enrich],
+            return_exceptions=True
+        )
 
-                            if enrichment.founder_linkedins or enrichment.ceo_linkedin:
-                                # Update existing founders with their LinkedIn URLs
+        # Filter out exceptions and None enrichments
+        successful_enrichments = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Enrichment gather exception: {result}")
+                continue
+            deal_info, enrichment = result
+            if enrichment is None:
+                continue
+            # Check if we have any useful data
+            has_enrichment = (
+                enrichment.website or
+                enrichment.ceo_linkedin or
+                enrichment.founder_linkedins
+            )
+            if has_enrichment:
+                successful_enrichments.append((deal_info, enrichment))
+
+        if not successful_enrichments:
+            logger.info("No enrichment data found for any deals")
+            return 0
+
+        # FIX: Batch persist ALL enrichment results in ONE session (prevents pool exhaustion)
+        enriched_count = 0
+        async with get_session() as db:
+            for deal_info, enrichment in successful_enrichments:
+                try:
+                    # Fetch fresh deal and company objects
+                    deal = await db.get(Deal, deal_info["deal_id"])
+                    if not deal or not deal.company:
+                        continue
+
+                    # Only update website if found
+                    if enrichment.website:
+                        deal.company.website = enrichment.website
+
+                    # Update founders with LinkedIn URLs
+                    founders = deal_info["founders"]
+                    founders_updated = False
+
+                    if enrichment.founder_linkedins or enrichment.ceo_linkedin:
+                        # Update existing founders with their LinkedIn URLs
+                        for f in founders:
+                            founder_name = f.get("name", "")
+                            if founder_name in enrichment.founder_linkedins:
+                                if not f.get("linkedin_url"):
+                                    f["linkedin_url"] = enrichment.founder_linkedins[founder_name]
+                                    founders_updated = True
+
+                        # Handle CEO LinkedIn - attach to existing founder OR create new entry
+                        if enrichment.ceo_linkedin:
+                            ceo_found = any(f.get("linkedin_url") for f in founders)
+                            if not ceo_found:
+                                # Try to attach to existing CEO/founder
+                                attached = False
                                 for f in founders:
-                                    founder_name = f.get("name", "")
-                                    if founder_name in enrichment.founder_linkedins:
+                                    title_lower = f.get("title", "").lower()
+                                    if any(t in title_lower for t in ("ceo", "chief executive", "founder", "co-founder", "cofounder")):
                                         if not f.get("linkedin_url"):
-                                            f["linkedin_url"] = enrichment.founder_linkedins[founder_name]
+                                            f["linkedin_url"] = enrichment.ceo_linkedin
                                             founders_updated = True
+                                            attached = True
+                                        break
 
-                                # Handle CEO LinkedIn - attach to existing founder OR create new entry
-                                if enrichment.ceo_linkedin:
-                                    ceo_found = any(f.get("linkedin_url") for f in founders)
-                                    if not ceo_found:
-                                        # Try to attach to existing CEO/founder
-                                        attached = False
-                                        for f in founders:
-                                            title_lower = f.get("title", "").lower()
-                                            if any(t in title_lower for t in ("ceo", "chief executive", "founder", "co-founder", "cofounder")):
-                                                if not f.get("linkedin_url"):
-                                                    f["linkedin_url"] = enrichment.ceo_linkedin
-                                                    founders_updated = True
-                                                    attached = True
-                                                break
+                                # If no founders exist OR no CEO title found, ADD the CEO as a new founder
+                                if not attached and enrichment.ceo_name:
+                                    founders.append({
+                                        "name": enrichment.ceo_name,
+                                        "title": "CEO",
+                                        "linkedin_url": enrichment.ceo_linkedin,
+                                    })
+                                    founders_updated = True
+                                    logger.info(f"Added discovered CEO to founders: {enrichment.ceo_name}")
 
-                                        # If no founders exist OR no CEO title found, ADD the CEO as a new founder
-                                        if not attached and enrichment.ceo_name:
-                                            founders.append({
-                                                "name": enrichment.ceo_name,
-                                                "title": "CEO",
-                                                "linkedin_url": enrichment.ceo_linkedin,
-                                            })
-                                            founders_updated = True
-                                            logger.info(f"Added discovered CEO to founders: {enrichment.ceo_name}")
+                        if founders_updated:
+                            deal.founders_json = json.dumps(founders)
 
-                                if founders_updated:
-                                    deal.founders_json = json.dumps(founders)
-
-                            # Commit with timeout to prevent hanging
-                            try:
-                                await asyncio.wait_for(db.commit(), timeout=30.0)
-                                async with count_lock:
-                                    enriched_count[0] += 1
-                                return True
-                            except asyncio.TimeoutError:
-                                logger.error(f"Database commit timeout for {deal_info['company_name']}")
-                                await db.rollback()
-                                return False
-
-                    # Small delay to prevent overwhelming the API (reduced from 0.5s)
-                    await asyncio.sleep(0.1)
-                    return False
+                    enriched_count += 1
 
                 except Exception as e:
                     logger.warning(
-                        f"Error enriching {deal_info['company_name']} (deal_id={deal_info['deal_id']}): {e}",
+                        f"Error persisting enrichment for {deal_info['company_name']}: {e}",
                         exc_info=True,
                     )
-                    return False
+                    continue
 
-        # Process all deals concurrently (limited by semaphore)
-        await asyncio.gather(*[enrich_single_deal(d) for d in deals_to_enrich], return_exceptions=True)
+            # Single commit for all enrichments
+            # (session context manager handles commit automatically)
 
-        logger.info(f"Enriched {enriched_count[0]} companies with website/LinkedIn data")
-        return enriched_count[0]
+        logger.info(f"Enriched {enriched_count} companies with website/LinkedIn data")
+        return enriched_count
 
     except Exception as e:
         logger.error("Enrichment job failed: %s", e, exc_info=True)
@@ -837,6 +887,31 @@ async def process_external_articles(
     # Set extraction context for token logging
     scan_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     set_extraction_context(source_name, scan_id)
+
+    # FIX: Wrap in try/finally to ensure extraction context is always cleared
+    # Without this, context leaks if exception occurs mid-processing
+    try:
+        return await _process_external_articles_impl(
+            articles, source_name, scan_job_id, skip_title_filter
+        )
+    finally:
+        clear_extraction_context()
+        # Flush any remaining token usage records
+        await flush_token_usage_batch(force=True)
+
+
+async def _process_external_articles_impl(
+    articles: List[NormalizedArticle],
+    source_name: str,
+    scan_job_id: Optional[int] = None,
+    skip_title_filter: bool = False,
+) -> Dict[str, int]:
+    """Internal implementation of process_external_articles (extracted for try/finally wrapper)."""
+    from ..analyst.extractor import extract_deal, EXTERNAL_SOURCE_NAMES, EXTERNAL_SOURCE_CONFIDENCE_THRESHOLD, get_extraction_stats
+    from ..archivist.storage import save_deal
+    from ..archivist.database import get_session
+    from ..archivist.models import Article
+    from sqlalchemy import select
 
     stats = {
         "articles_received": len(articles),
@@ -1187,12 +1262,6 @@ async def process_external_articles(
         f"enterprise_ai={stats['enterprise_ai_saved']}, "
         f"errors={stats['errors']}"
     )
-
-    # Clear extraction context when done
-    clear_extraction_context()
-
-    # FIX (2026-01): Flush any remaining token usage records
-    await flush_token_usage_batch(force=True)
 
     return stats
 
@@ -1878,9 +1947,13 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
     return results
 
 
+# Job-level timeout (30 minutes max to prevent hanging forever)
+JOB_TIMEOUT_SECONDS = 1800
+
+
 async def scheduled_scrape_job(trigger: str = "scheduled"):
     """
-    Main scheduled scraping job.
+    Main scheduled scraping job with timeout protection.
 
     Scrapes all 18 implemented funds with parallel execution,
     PLUS all external data sources (Brave Search, SEC, etc.).
@@ -1890,9 +1963,31 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
     which contain partner name queries for funds like Benchmark,
     Khosla, and First Round that don't have useful website scrapers.
 
+    FIX: Wrapped in job-level timeout to prevent hanging forever.
+    If job exceeds 30 minutes, it's killed and logged.
+
     Args:
         trigger: How the job was triggered ("scheduled", "manual", "api")
     """
+    try:
+        await asyncio.wait_for(
+            _scheduled_scrape_job_impl(trigger),
+            timeout=JOB_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            f"SCRAPER_HEALTH_ALERT: Scheduled scrape job timed out after "
+            f"{JOB_TIMEOUT_SECONDS // 60} minutes - job killed"
+        )
+        # Update global tracking for observability
+        global _last_job_status, _last_job_error, _last_job_duration
+        _last_job_status = "timeout"
+        _last_job_error = f"Job timed out after {JOB_TIMEOUT_SECONDS} seconds"
+        _last_job_duration = JOB_TIMEOUT_SECONDS
+
+
+async def _scheduled_scrape_job_impl(trigger: str = "scheduled"):
+    """Internal implementation of scheduled_scrape_job (separated for timeout wrapper)."""
     global _last_job_run, _last_job_status, _last_job_error, _last_job_duration
 
     job_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
