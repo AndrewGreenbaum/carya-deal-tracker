@@ -23,8 +23,15 @@ logger = logging.getLogger(__name__)
 _failed_linkedin_cache: dict[str, float] = {}
 # FIX: asyncio.Lock for thread-safe cache access in concurrent enrichment
 _failed_linkedin_cache_lock = asyncio.Lock()
+
+# COST OPT (2026-01): Cache for successful LinkedIn lookups
+# Key: "founder_name|company_name" -> (linkedin_url, timestamp)
+# Same founder+company often appears in multiple deals
+_successful_linkedin_cache: dict[str, tuple[str, float]] = {}
+_successful_linkedin_cache_lock = asyncio.Lock()
+
 # COST OPTIMIZATION (Jan 2026): Extended from 7 days to 30 days
-# Founder LinkedIn profiles don't change frequently - safe to cache failures longer
+# Founder LinkedIn profiles don't change frequently - safe to cache longer
 # Estimated savings: $8-12/month in Brave API costs
 LINKEDIN_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
@@ -63,13 +70,84 @@ async def _mark_linkedin_failure(founder_name: str, company_name: str):
         _failed_linkedin_cache[key] = time()
 
 
+async def _get_cached_linkedin_success(founder_name: str, company_name: str) -> str | None:
+    """Get cached successful LinkedIn URL if available and not expired.
+
+    Thread-safe with asyncio.Lock.
+    """
+    key = _get_linkedin_cache_key(founder_name, company_name)
+    async with _successful_linkedin_cache_lock:
+        if key not in _successful_linkedin_cache:
+            return None
+        linkedin_url, cached_time = _successful_linkedin_cache[key]
+        if time() - cached_time > LINKEDIN_CACHE_TTL_SECONDS:
+            del _successful_linkedin_cache[key]
+            return None
+        return linkedin_url
+
+
+async def _mark_linkedin_success(founder_name: str, company_name: str, linkedin_url: str):
+    """Cache a successful LinkedIn lookup.
+
+    Thread-safe with asyncio.Lock.
+    """
+    key = _get_linkedin_cache_key(founder_name, company_name)
+    async with _successful_linkedin_cache_lock:
+        _successful_linkedin_cache[key] = (linkedin_url, time())
+
+
 def clear_linkedin_cache():
-    """Clear the failed LinkedIn cache (called at start of scheduled jobs)."""
+    """Clear the failed LinkedIn cache (called at start of scheduled jobs).
+
+    DEPRECATED: Use cleanup_linkedin_cache() instead to preserve valid TTL entries.
+    """
     global _failed_linkedin_cache
     count = len(_failed_linkedin_cache)
     _failed_linkedin_cache = {}
     if count > 0:
         logger.info(f"Cleared LinkedIn cache ({count} entries)")
+
+
+async def cleanup_linkedin_cache() -> int:
+    """Remove only expired entries from LinkedIn caches (preserves valid TTL entries).
+
+    This is the preferred method for cache maintenance at job start, as it
+    preserves valid cached entries and only removes expired ones.
+
+    Returns:
+        Total number of expired entries removed from both caches.
+    """
+    now = time()
+    total_expired = 0
+
+    # Clean up failure cache
+    async with _failed_linkedin_cache_lock:
+        expired_keys = [
+            k for k, ts in _failed_linkedin_cache.items()
+            if now - ts > LINKEDIN_CACHE_TTL_SECONDS
+        ]
+        for k in expired_keys:
+            del _failed_linkedin_cache[k]
+        total_expired += len(expired_keys)
+        failure_active = len(_failed_linkedin_cache)
+
+    # Clean up success cache
+    async with _successful_linkedin_cache_lock:
+        expired_keys = [
+            k for k, (url, ts) in _successful_linkedin_cache.items()
+            if now - ts > LINKEDIN_CACHE_TTL_SECONDS
+        ]
+        for k in expired_keys:
+            del _successful_linkedin_cache[k]
+        total_expired += len(expired_keys)
+        success_active = len(_successful_linkedin_cache)
+
+    if total_expired:
+        logger.info(f"LinkedIn cache cleanup: removed {total_expired} expired, {failure_active} failures + {success_active} successes active")
+    else:
+        logger.debug(f"LinkedIn cache cleanup: no expired entries, {failure_active} failures + {success_active} successes active")
+
+    return total_expired
 
 
 from dataclasses import dataclass, field
@@ -606,10 +684,14 @@ class BraveEnrichmentClient:
 
         return None
 
-    async def _search(self, query: str, count: int = 5) -> List[Dict]:
+    async def _search(self, query: str, count: int = 5, use_cache: bool = False) -> List[Dict]:
         """Execute Brave Search query using shared client.
 
         FIX #36: Wrapped with timeout to prevent hanging.
+        Args:
+            query: Search query string
+            count: Number of results (default 5)
+            use_cache: If True, use TTL cache for results (recommended for LinkedIn searches)
         """
         client = get_brave_client()
         if not client.validate_api_key():
@@ -619,7 +701,7 @@ class BraveEnrichmentClient:
         try:
             # FIX #36: Add timeout to prevent indefinite hangs
             data = await asyncio.wait_for(
-                client.search_web(query, count),
+                client.search_web(query, count, use_cache=use_cache),
                 timeout=settings.enrichment_timeout,
             )
         except asyncio.TimeoutError:
@@ -708,14 +790,21 @@ class BraveEnrichmentClient:
         if founder_name.lower() in ("ceo", "founder", "unknown", "<unknown>"):
             return None
 
+        # COST OPT: Check cache for recent successes first
+        cached_url = await _get_cached_linkedin_success(founder_name, company_name)
+        if cached_url:
+            logger.debug(f"LinkedIn cache hit (success) for {founder_name}: {cached_url}")
+            return cached_url
+
         # FIX #7: Check cache for recent failures
         if await _is_linkedin_cached_failure(founder_name, company_name):
             logger.debug(f"Skipping LinkedIn search for {founder_name} (cached failure)")
             return None
 
         # FIX #2: Target LinkedIn domain directly for better precision
+        # COST OPT: Enable caching - same founder+company often appears in multiple deals
         query = f'site:linkedin.com/in "{founder_name}" "{company_name}"'
-        results = await self._search(query, count=5)
+        results = await self._search(query, count=5, use_cache=True)
 
         # FIX #8: Track if we found any LinkedIn URLs (even if name didn't match)
         found_any_linkedin = False
@@ -740,6 +829,7 @@ class BraveEnrichmentClient:
                 if profile_name:
                     if _names_match(founder_name, profile_name):
                         logger.debug(f"LinkedIn name match: '{founder_name}' ~ '{profile_name}'")
+                        await _mark_linkedin_success(founder_name, company_name, linkedin_url)
                         return linkedin_url
                     else:
                         logger.debug(f"LinkedIn name mismatch: looking for '{founder_name}', found '{profile_name}'")
@@ -756,6 +846,7 @@ class BraveEnrichmentClient:
                 # Require BOTH first AND last name to appear (stricter matching)
                 if len(name_parts) >= 2 and all(part in text_to_check for part in name_parts[:2]):
                     logger.debug(f"LinkedIn fallback match: both '{name_parts[0]}' and '{name_parts[1]}' found in text")
+                    await _mark_linkedin_success(founder_name, company_name, linkedin_url)
                     return linkedin_url
                 else:
                     # Can't verify this is the right person - skip
@@ -767,13 +858,15 @@ class BraveEnrichmentClient:
         # couldn't match the name (likely wrong person)
         if not found_any_linkedin:
             # Fallback: search without company name but still target LinkedIn
+            # COST OPT: Enable caching for fallback searches too
             query = f'site:linkedin.com/in "{founder_name}" founder startup'
-            results = await self._search(query, count=3)
+            results = await self._search(query, count=3, use_cache=True)
 
             for result in results:
                 url = result.get("url", "")
                 linkedin_url = self._extract_linkedin_url(url)
                 if linkedin_url:
+                    await _mark_linkedin_success(founder_name, company_name, linkedin_url)
                     return linkedin_url
 
         # FIX #7: Mark this as a failed search to avoid redundant future calls
@@ -1003,39 +1096,6 @@ class BraveEnrichmentClient:
                 else:
                     logger.warning(f"CEO LinkedIn rejected for {context.company_name}: wrong company")
             await asyncio.sleep(self.rate_limit_delay)
-
-        # Original fallback: if still no LinkedIn found after processing founders
-        elif not result.ceo_linkedin:
-            ceo_name, linkedin_url = await self.find_ceo_linkedin(context.company_name)
-
-            # IMPROVED (Jan 2026): Secondary web search as fallback
-            if not linkedin_url or not ceo_name:
-                await asyncio.sleep(self.rate_limit_delay)
-                ceo_name_web, linkedin_url_web = await self.find_ceo_via_web_search(context.company_name)
-                if linkedin_url_web and ceo_name_web:
-                    ceo_name, linkedin_url = ceo_name_web, linkedin_url_web
-
-            if linkedin_url and ceo_name:
-                # FIX (Jan 2026): Cross-validate found CEO name against existing founders
-                matching_founder = None
-                if context.founders:
-                    for founder in context.founders:
-                        existing_name = founder.get("name", "")
-                        if _names_match(ceo_name, existing_name):
-                            matching_founder = existing_name
-                            break
-
-                # Validate CEO LinkedIn
-                validation = await validate_founder_linkedin(
-                    founder_name=ceo_name,
-                    company_name=context.company_name,
-                    linkedin_url=linkedin_url,
-                )
-                if validation.is_valid or validation.profile_current_company is None:
-                    # Use matching founder name if found, otherwise use the found name
-                    final_name = matching_founder if matching_founder else ceo_name
-                    result.ceo_name = final_name
-                    result.ceo_linkedin = linkedin_url
 
         return result
 

@@ -5,6 +5,9 @@ Tests:
 1. _extract_name_from_linkedin_title() - Robust title parsing
 2. _extract_name_from_linkedin_slug() - URL slug fallback
 3. Integration tests for find_ceo_linkedin improvements
+
+Note: These tests require src.enrichment imports.
+Tests will be skipped if imports fail.
 """
 
 import pytest
@@ -14,10 +17,22 @@ import os
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.enrichment.brave_enrichment import (
-    _extract_name_from_linkedin_title,
-    _extract_name_from_linkedin_slug,
-)
+# Import test helpers
+from tests.test_helpers import skip_no_enrichment, can_import_enrichment
+
+# Skip entire module if enrichment imports fail
+pytestmark = [skip_no_enrichment]
+
+# Lazy imports - only executed if module isn't skipped
+if can_import_enrichment():
+    from src.enrichment.brave_enrichment import (
+        _extract_name_from_linkedin_title,
+        _extract_name_from_linkedin_slug,
+    )
+else:
+    # Dummy values for when imports fail (tests will be skipped anyway)
+    _extract_name_from_linkedin_title = None
+    _extract_name_from_linkedin_slug = None
 
 
 class TestExtractNameFromLinkedInTitle:

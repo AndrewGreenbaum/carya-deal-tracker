@@ -16,6 +16,7 @@ Used by:
 import asyncio
 import hashlib
 import logging
+import random
 from time import time
 from typing import Optional, Dict, Any, List, Tuple
 
@@ -50,14 +51,14 @@ class TTLCache:
         self._operations_since_cleanup = 0
         self._lock = asyncio.Lock()  # FIX: Async-safe cache access
 
-    def _make_key(self, query: str, search_type: str, freshness: str) -> str:
+    def _make_key(self, query: str, search_type: str, freshness: str, count: int = 20) -> str:
         """Create cache key from query parameters."""
-        key_str = f"{search_type}:{freshness}:{query}"
+        key_str = f"{search_type}:{freshness}:{count}:{query}"
         return hashlib.md5(key_str.encode()).hexdigest()
 
-    async def get(self, query: str, search_type: str, freshness: str) -> Optional[Any]:
+    async def get(self, query: str, search_type: str, freshness: str, count: int = 20) -> Optional[Any]:
         """Get cached result if not expired. Async-safe."""
-        key = self._make_key(query, search_type, freshness)
+        key = self._make_key(query, search_type, freshness, count)
         async with self._lock:
             if key in self._cache:
                 timestamp, value = self._cache[key]
@@ -66,9 +67,9 @@ class TTLCache:
                 del self._cache[key]
             return None
 
-    async def set(self, query: str, search_type: str, freshness: str, value: Any):
+    async def set(self, query: str, search_type: str, freshness: str, value: Any, count: int = 20):
         """Store result in cache. Async-safe."""
-        key = self._make_key(query, search_type, freshness)
+        key = self._make_key(query, search_type, freshness, count)
         async with self._lock:
             self._cache[key] = (time(), value)
 
@@ -221,7 +222,7 @@ class BraveClient:
 
                 # Handle server errors with backoff
                 if response.status_code >= 500:
-                    backoff = self.backoff_base ** attempt
+                    backoff = (self.backoff_base ** attempt) * random.uniform(0.9, 1.1)
                     logger.warning(
                         f"Brave API server error {response.status_code}. "
                         f"Retrying in {backoff:.1f}s (attempt {attempt + 1}/{self.max_retries})"
@@ -239,7 +240,7 @@ class BraveClient:
                     return None
 
             except httpx.TimeoutException:
-                backoff = self.backoff_base ** attempt
+                backoff = (self.backoff_base ** attempt) * random.uniform(0.9, 1.1)
                 logger.warning(
                     f"Brave API timeout. Retrying in {backoff:.1f}s "
                     f"(attempt {attempt + 1}/{self.max_retries})"
@@ -256,7 +257,7 @@ class BraveClient:
 
             except httpx.RequestError as e:
                 # Network errors - retry with backoff
-                backoff = self.backoff_base ** attempt
+                backoff = (self.backoff_base ** attempt) * random.uniform(0.9, 1.1)
                 logger.warning(
                     f"Brave API network error: {e}. Retrying in {backoff:.1f}s "
                     f"(attempt {attempt + 1}/{self.max_retries})"
@@ -288,7 +289,7 @@ class BraveClient:
         """
         # Check cache first
         if use_cache:
-            cached = await _query_cache.get(query, "news", freshness)
+            cached = await _query_cache.get(query, "news", freshness, count)
             if cached is not None:
                 logger.debug(f"Cache hit for news query: {query[:50]}...")
                 return cached
@@ -304,7 +305,7 @@ class BraveClient:
 
         # Store in cache
         if use_cache and result is not None:
-            await _query_cache.set(query, "news", freshness, result)
+            await _query_cache.set(query, "news", freshness, result, count)
 
         return result
 
@@ -331,7 +332,7 @@ class BraveClient:
 
         # Check cache first
         if use_cache:
-            cached = await _query_cache.get(query, "web", cache_freshness)
+            cached = await _query_cache.get(query, "web", cache_freshness, count)
             if cached is not None:
                 logger.debug(f"Cache hit for web query: {query[:50]}...")
                 return cached
@@ -349,7 +350,7 @@ class BraveClient:
 
         # Store in cache
         if use_cache and result is not None:
-            await _query_cache.set(query, "web", cache_freshness, result)
+            await _query_cache.set(query, "web", cache_freshness, result, count)
 
         return result
 

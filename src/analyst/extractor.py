@@ -23,7 +23,8 @@ from contextvars import ContextVar
 from anthropic import Anthropic, APITimeoutError, APIError, RateLimitError
 from instructor.core import InstructorRetryException
 from typing import Optional, List, Set
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
+from dateutil.relativedelta import relativedelta
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ _extraction_stats = {
     "amount_flagged_for_review": 0,  # Amounts flagged for market size confusion
     "round_type_corrected": 0,     # Round types corrected to UNKNOWN (invalid enum)
     "founders_removed": 0,         # Founders removed for not being in text
+    "relative_date_corrected": 0,  # Dates corrected from relative date phrases (e.g., "6 months ago")
 }
 _extraction_stats_thread_lock = threading.Lock()
 
@@ -325,12 +327,12 @@ CACHED_SYSTEM_MESSAGE[0]["text"] = SYSTEM_PROMPT
 # TOKEN USAGE LOGGING
 # =============================================================================
 
-# Claude 3.5 Haiku pricing (December 2024 - after 20% price drop)
-# See: https://simonwillison.net/2024/Dec/5/claude-35-haiku-price-drops-by-20/
-HAIKU_INPUT_COST_PER_MILLION = 0.80  # $0.80 per 1M input tokens
-HAIKU_OUTPUT_COST_PER_MILLION = 4.00  # $4.00 per 1M output tokens
-HAIKU_CACHE_READ_COST_PER_MILLION = 0.08  # $0.08 per 1M cache read tokens (10% of input)
-HAIKU_CACHE_WRITE_COST_PER_MILLION = 1.00  # $1.00 per 1M cache write tokens (125% of input)
+# Claude Haiku 4.5 pricing (October 2025)
+# See: https://www.anthropic.com/pricing
+HAIKU_INPUT_COST_PER_MILLION = 1.00  # $1.00 per 1M input tokens
+HAIKU_OUTPUT_COST_PER_MILLION = 5.00  # $5.00 per 1M output tokens
+HAIKU_CACHE_READ_COST_PER_MILLION = 0.10  # $0.10 per 1M cache read tokens (10% of input)
+HAIKU_CACHE_WRITE_COST_PER_MILLION = 1.25  # $1.25 per 1M cache write tokens (125% of input)
 
 
 def set_extraction_context(source_name: str, scan_id: Optional[str] = None) -> None:
@@ -431,7 +433,7 @@ async def log_token_usage(
     source_name: Optional[str] = None,
     scan_id: Optional[str] = None,
     article_url: Optional[str] = None,
-    model: str = "claude-3-5-haiku-20241022",
+    model: str = "claude-haiku-4-5-20251001",
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0
 ) -> None:
@@ -515,10 +517,23 @@ SUPPORTING_KEYWORDS = [
 # FIX: Pre-compute combined keyword list at module level (was created on every call)
 ALL_FUNDING_KEYWORDS = STRONG_FUNDING_KEYWORDS + AMOUNT_KEYWORDS + SUPPORTING_KEYWORDS
 
+# Pre-compile keyword patterns for efficiency (follows CRYPTO_KEYWORDS_PATTERN pattern)
+_STRONG_FUNDING_ESCAPED = [re.escape(kw) for kw in STRONG_FUNDING_KEYWORDS]
+STRONG_FUNDING_PATTERN = re.compile(
+    r'(' + '|'.join(_STRONG_FUNDING_ESCAPED) + r')',
+    re.IGNORECASE
+)
+
+_AMOUNT_KEYWORDS_ESCAPED = [re.escape(kw) for kw in AMOUNT_KEYWORDS]
+AMOUNT_KEYWORDS_PATTERN = re.compile(
+    r'(' + '|'.join(_AMOUNT_KEYWORDS_ESCAPED) + r')',
+    re.IGNORECASE
+)
+
 
 def is_likely_funding_content(text: str) -> bool:
     """
-    Quick check if text is likely about funding.
+    Quick check if text is likely about funding. Uses compiled regex.
 
     Used for early exit optimization - skip Claude call if text
     doesn't contain funding-related keywords.
@@ -527,18 +542,15 @@ def is_likely_funding_content(text: str) -> bool:
     - 1 strong keyword + 1 amount keyword (e.g., "raised $50 million")
     - 3+ total keywords (broader coverage)
     """
-    text_lower = text.lower()
-
     # Check for strong keyword + amount (most reliable signal)
-    has_strong = any(kw in text_lower for kw in STRONG_FUNDING_KEYWORDS)
-    has_amount = any(kw in text_lower for kw in AMOUNT_KEYWORDS)
+    has_strong = bool(STRONG_FUNDING_PATTERN.search(text))
+    has_amount = bool(AMOUNT_KEYWORDS_PATTERN.search(text))
     if has_strong and has_amount:
         return True
 
     # Fallback: require 3+ keywords total
-    # FIX: Use pre-computed module-level constant (was creating list on every call)
-    matches = sum(1 for kw in ALL_FUNDING_KEYWORDS if kw in text_lower)
-    return matches >= 3
+    all_matches = STRONG_FUNDING_PATTERN.findall(text) + AMOUNT_KEYWORDS_PATTERN.findall(text)
+    return len(all_matches) >= 3
 
 
 def _compute_content_hash(text: str) -> str:
@@ -1160,6 +1172,119 @@ def _validate_deal_amount(deal: DealExtraction, article_text: str) -> DealExtrac
     return deal
 
 
+# =============================================================================
+# RELATIVE DATE VALIDATION (FIX 2026-01)
+# =============================================================================
+# Patterns to detect relative date phrases in article text
+# These indicate the article mentions a date relative to publication time
+RELATIVE_DATE_PATTERNS = [
+    (re.compile(r"(\d+)\s*months?\s*ago", re.IGNORECASE), "months"),
+    (re.compile(r"(\d+)\s*years?\s*ago", re.IGNORECASE), "years"),
+    (re.compile(r"(\d+)\s*weeks?\s*ago", re.IGNORECASE), "weeks"),
+    (re.compile(r"last\s+year", re.IGNORECASE), "last_year"),
+    (re.compile(r"earlier\s+this\s+year", re.IGNORECASE), "earlier_this_year"),
+    (re.compile(r"late\s+last\s+year", re.IGNORECASE), "late_last_year"),
+    (re.compile(r"early\s+last\s+year", re.IGNORECASE), "early_last_year"),
+]
+
+
+def _parse_relative_date(match: re.Match, unit: str, reference_date: date) -> Optional[date]:
+    """
+    Parse a relative date phrase into an actual date.
+
+    Args:
+        match: The regex match object
+        unit: The type of relative date ("months", "years", "weeks", "last_year", etc.)
+        reference_date: The date to calculate relative to (article publication or today)
+
+    Returns:
+        The calculated date, or None if unable to parse
+    """
+    try:
+        if unit == "months":
+            months_ago = int(match.group(1))
+            return reference_date - relativedelta(months=months_ago)
+        elif unit == "years":
+            years_ago = int(match.group(1))
+            return reference_date - relativedelta(years=years_ago)
+        elif unit == "weeks":
+            weeks_ago = int(match.group(1))
+            return reference_date - timedelta(weeks=weeks_ago)
+        elif unit == "last_year":
+            return reference_date - relativedelta(years=1)
+        elif unit == "earlier_this_year":
+            # Assume mid-year (around 6 months ago relative to Dec/Jan)
+            return date(reference_date.year, 6, 1)
+        elif unit == "late_last_year":
+            return date(reference_date.year - 1, 11, 1)
+        elif unit == "early_last_year":
+            return date(reference_date.year - 1, 2, 1)
+    except (ValueError, OverflowError) as e:
+        logger.debug(f"Error parsing relative date: {e}")
+    return None
+
+
+def _validate_relative_date_extraction(
+    deal: DealExtraction,
+    article_text: str,
+    article_published_date: Optional[date] = None,
+) -> DealExtraction:
+    """
+    Detect when LLM extracted today's date but article mentions older relative dates.
+
+    FIX (2026-01): When Claude sees "6 months ago" but doesn't know the current date,
+    it might extract the wrong date. This post-processing step detects this case and
+    attempts to correct the date.
+
+    Args:
+        deal: The extracted deal
+        article_text: Original article text
+        article_published_date: When the article was published (used as reference)
+
+    Returns:
+        Modified deal with corrected round_date if a relative date was detected
+    """
+    if not deal.round_date:
+        return deal
+
+    today = date.today()
+    days_from_today = abs((deal.round_date - today).days)
+
+    # Only check if date is suspiciously close to today (within 7 days)
+    # If the LLM extracted a date from months/years ago, it's probably correct
+    if days_from_today > 7:
+        return deal
+
+    # Use article publication date as reference, fallback to today
+    reference_date = article_published_date or today
+
+    # Check for relative date patterns that indicate older events
+    text_lower = article_text.lower()
+    for pattern, unit in RELATIVE_DATE_PATTERNS:
+        match = pattern.search(text_lower)
+        if match:
+            # Found "X months ago" or similar - this is suspicious if date is near today
+            matched_phrase = match.group(0)
+
+            # Calculate what the date should be
+            corrected_date = _parse_relative_date(match, unit, reference_date)
+
+            if corrected_date and corrected_date != deal.round_date:
+                # Check if the corrected date is significantly different (>30 days)
+                days_diff = abs((corrected_date - deal.round_date).days)
+                if days_diff > 30:
+                    logger.warning(
+                        f"RELATIVE DATE FIX for {deal.startup_name}: "
+                        f"Article says '{matched_phrase}' but extracted {deal.round_date}. "
+                        f"Correcting to {corrected_date} (reference: {reference_date})"
+                    )
+                    increment_extraction_stat("relative_date_corrected")
+                    deal.round_date = corrected_date
+                    break  # Only correct once
+
+    return deal
+
+
 def _is_consumer_ai_deal(deal: DealExtraction, article_text: str) -> bool:
     """
     Detect if deal is consumer AI (should NOT be Enterprise AI).
@@ -1431,17 +1556,28 @@ def truncate_article_smart(text: str, max_chars: int = MAX_ARTICLE_CHARS) -> str
 def build_extraction_prompt(
     article_text: str,
     fund_context: Optional[FundConfig] = None,
-    source_url: str = ""
+    source_url: str = "",
+    article_published_date: Optional[date] = None,
 ) -> str:
-    """Build the extraction prompt with optional fund-specific context."""
+    """Build the extraction prompt with optional fund-specific context and date reference."""
 
     # OPTIMIZATION: Truncate long articles to reduce token usage
     truncated_text = truncate_article_smart(article_text)
 
+    # FIX (2026-01): Include date context for relative date extraction
+    today = date.today()
+    date_context = f"""
+REFERENCE DATES (for calculating relative dates like "6 months ago"):
+- Today's date: {today.strftime('%Y-%m-%d')}
+- Article published: {article_published_date.strftime('%Y-%m-%d') if article_published_date else 'unknown'}
+- Use article publication date as reference for relative dates in the article text
+- Example: If article says "6 months ago" and was published on {today.strftime('%Y-%m-%d')}, calculate ~{(today - timedelta(days=180)).strftime('%B %Y')}
+"""
+
     prompt = f"""Analyze this article and extract all funding deal information.
 
 SOURCE URL: {source_url}
-
+{date_context}
 ARTICLE TEXT:
 ---
 {truncated_text}
@@ -1476,6 +1612,7 @@ async def extract_deal(
     skip_funding_check: bool = False,
     skip_dedup_check: bool = False,
     is_external_source: bool = False,
+    article_published_date: Optional[date] = None,
 ) -> Optional[DealExtraction]:
     """
     Extract a single funding deal from article text.
@@ -1493,6 +1630,7 @@ async def extract_deal(
         skip_funding_check: If True, skip the funding keyword check
         skip_dedup_check: If True, skip the duplicate content check
         is_external_source: If True, use lenient processing for external-only funds
+        article_published_date: Publication date of the article (for relative date extraction)
 
     Returns:
         DealExtraction with structured deal information, or None if duplicate
@@ -1578,7 +1716,7 @@ async def extract_deal(
             )
         )
 
-    prompt = build_extraction_prompt(article_text, fund_context, source_url)
+    prompt = build_extraction_prompt(article_text, fund_context, source_url, article_published_date)
 
     # Use pre-built cached system message (optimization: created once at module load)
     # FIX: Add retry logic and error handling for API calls
@@ -1722,6 +1860,13 @@ async def extract_deal(
                 if response.amount_needs_review and not old_needs_review:
                     increment_extraction_stat("amount_flagged_for_review")
 
+            # Post-process: validate relative date extraction
+            # FIX (2026-01): Detects when LLM extracted wrong date from "6 months ago" etc.
+            if response and response.round_date:
+                response = _validate_relative_date_extraction(
+                    response, article_text, article_published_date
+                )
+
             # HYBRID EXTRACTION: Re-extract with Sonnet for low-confidence results
             # Only if: enabled, confidence in range, valid deal, has quality issues
             # FIX (2026-01): Different thresholds for internal vs external sources
@@ -1820,6 +1965,12 @@ async def extract_deal(
                         response = _validate_deal_amount(response, article_text)
                         if response.amount_needs_review and not old_needs_review:
                             increment_extraction_stat("amount_flagged_for_review")
+
+                    # 12. Relative date validation
+                    if response.round_date:
+                        response = _validate_relative_date_extraction(
+                            response, article_text, article_published_date
+                        )
                 else:
                     # COST TRACKING: Sonnet re-extraction failed
                     logger.warning(
@@ -1905,6 +2056,12 @@ async def extract_deal(
                         response = _validate_deal_amount(response, article_text)
                         if response.amount_needs_review and not old_needs_review:
                             increment_extraction_stat("amount_flagged_for_review")
+
+                    # Relative date validation
+                    if response.round_date:
+                        response = _validate_relative_date_extraction(
+                            response, article_text, article_published_date
+                        )
                 else:
                     logger.warning(
                         f"HYBRID_FAILED_HIGH_CONF: {response.startup_name} | "

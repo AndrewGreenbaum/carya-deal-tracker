@@ -9,6 +9,21 @@ import pytest
 
 
 # =============================================================================
+# Global fixtures (autouse)
+# =============================================================================
+@pytest.fixture(autouse=True)
+def set_extraction_context_for_tests():
+    """Set extraction context to avoid 'unknown' source attribution in tests."""
+    try:
+        from src.analyst.extractor import set_extraction_context, clear_extraction_context
+        set_extraction_context(source_name="test", scan_id="test_run")
+        yield
+        clear_extraction_context()
+    except ImportError:
+        yield
+
+
+# =============================================================================
 # Shared fixtures
 # =============================================================================
 @pytest.fixture

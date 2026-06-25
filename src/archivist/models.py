@@ -384,7 +384,7 @@ class TokenUsage(SQLModel, table=True):
     cache_write_tokens: int = Field(default=0)
 
     # Model info
-    model: str = Field(default="claude-3-5-haiku-20241022")
+    model: str = Field(default="claude-haiku-4-5-20251001")
 
     # Calculated cost (USD)
     estimated_cost_usd: float = Field(default=0.0)

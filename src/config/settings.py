@@ -3,7 +3,7 @@ Application settings loaded from environment variables.
 """
 
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 
 
@@ -46,7 +46,7 @@ class Settings(BaseSettings):
         return v
 
     # LLM Settings
-    llm_model: str = "claude-3-5-haiku-20241022"
+    llm_model: str = "claude-haiku-4-5-20251001"
     llm_model_fallback: str = "claude-sonnet-4-20250514"  # Higher-quality model for re-extraction
     llm_temperature: float = 0.0
     llm_max_tokens: int = 4096
@@ -115,11 +115,11 @@ class Settings(BaseSettings):
     google_sheets_credentials: str = ""  # JSON string of service account credentials
     google_sheets_id: str = ""  # Spreadsheet ID from the URL
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        # Allow reading DATABASE_URL from environment
-        extra = "ignore"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 # Create settings instance at import time (singleton pattern)

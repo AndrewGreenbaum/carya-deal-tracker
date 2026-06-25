@@ -1928,14 +1928,14 @@ async def scheduled_scrape_job(trigger: str = "scheduled"):
     # Without this, duplicate detection prevents processing the same article
     # across different runs (100% data loss after first run)
     from ..analyst.extractor import clear_content_hash_cache, clear_extraction_stats, get_extraction_stats, flush_token_usage_batch
-    from ..enrichment.brave_enrichment import clear_linkedin_cache
+    from ..enrichment.brave_enrichment import cleanup_linkedin_cache
 
     clear_content_hash_cache()
     clear_extraction_stats()  # Clear extraction filter stats for fresh monitoring
     await clear_global_seen_urls()
     await clear_global_content_hashes()
-    clear_linkedin_cache()
-    logger.info(f"[{job_id}] Phase 0: Caches cleared (content hash, URL dedup, content dedup, LinkedIn)")
+    await cleanup_linkedin_cache()  # Only remove expired entries, preserve valid cache
+    logger.info(f"[{job_id}] Phase 0: Caches cleared (content hash, URL dedup, content dedup, LinkedIn cleanup)")
 
     start_time = datetime.now(timezone.utc)
 

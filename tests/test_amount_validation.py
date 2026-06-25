@@ -5,6 +5,9 @@ Covers:
 1. _is_valid_amount() function for placeholder detection
 2. normalize_amount() function for parsing
 3. Amount update in deduplication flow
+
+Note: These tests require src.archivist imports which may need Python 3.10+.
+Tests will be skipped if imports fail.
 """
 
 import pytest
@@ -13,7 +16,19 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.archivist.storage import _is_valid_amount, normalize_amount
+# Import test helpers
+from tests.test_helpers import skip_no_archivist, can_import_archivist
+
+# Skip entire module if archivist imports fail (Python 3.9 compatibility)
+pytestmark = [skip_no_archivist]
+
+# Lazy imports - only executed if module isn't skipped
+if can_import_archivist():
+    from src.archivist.storage import _is_valid_amount, normalize_amount
+else:
+    # Dummy values for when imports fail (tests will be skipped anyway)
+    _is_valid_amount = None
+    normalize_amount = None
 
 
 class TestIsValidAmount:

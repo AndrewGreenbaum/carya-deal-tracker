@@ -275,6 +275,7 @@ async def process_article(
             source_name=fund_config.slug,
             fund_context=fund_config,
             is_external_source=is_external_source,
+            article_published_date=article.published_date,
         )
 
         # FIX 1: Handle None return (API failures, timeouts, etc.)
