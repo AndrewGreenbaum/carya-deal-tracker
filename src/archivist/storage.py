@@ -797,13 +797,17 @@ async def find_duplicate_deal(
 
         for deal, company in tier4_candidates:
             existing_normalized = normalize_company_name(company.name)
-            # Check if first 3 characters match (catches "meqprobe" vs "meqsolutions")
+            # FIX: Require at least 60% prefix overlap (not just 3 chars)
+            # This prevents false matches like "MEQ Probe" vs "MEQ Consulting"
             if len(normalized_company) >= 3 and len(existing_normalized) >= 3:
-                if normalized_company[:3] == existing_normalized[:3]:
+                shorter_len = min(len(normalized_company), len(existing_normalized))
+                min_prefix_len = max(3, int(shorter_len * 0.6))
+                if normalized_company[:min_prefix_len] == existing_normalized[:min_prefix_len]:
                     logger.warning(
                         f"Found duplicate (TIER 4 prefix+exact): '{company_name}' {round_type} "
                         f"matches '{company.name}' (deal #{deal.id}, amount={deal.amount}, "
-                        f"date={deal.announced_date}) - same prefix '{normalized_company[:3]}'"
+                        f"date={deal.announced_date}) - same prefix '{normalized_company[:min_prefix_len]}' "
+                        f"(min_prefix_len={min_prefix_len})"
                     )
                     return deal
 
@@ -932,6 +936,20 @@ async def find_duplicate_deal(
 
         for deal, company in tier25_candidates:
             if company_names_match(company_name, company.name):
+                # FIX: Add amount sanity check - if both have amounts, they should be within 5x
+                # This prevents matching a $5M Series A with a $50M Series A extension
+                # EXCEPTION: Allow valuation confusion (if larger amount >= $500M, likely valuation vs funding)
+                if normalized_amount and deal.amount_usd:
+                    larger_amount = max(normalized_amount, deal.amount_usd)
+                    smaller_amount = min(normalized_amount, deal.amount_usd)
+                    ratio = larger_amount / max(1, smaller_amount)
+                    # Skip if ratio > 5x AND larger amount < $500M (unlikely to be valuation confusion)
+                    if ratio > 5 and larger_amount < 500_000_000:
+                        logger.debug(
+                            f"TIER 2.5 skip: '{company_name}' amount ratio {ratio:.1f}x too high "
+                            f"(incoming={normalized_amount}, existing={deal.amount_usd})"
+                        )
+                        continue
                 logger.warning(
                     f"Found duplicate (TIER 2.5 round+date ±30d): '{company_name}' {round_type} "
                     f"matches '{company.name}' {deal.round_type} (deal #{deal.id}, "
@@ -940,13 +958,47 @@ async def find_duplicate_deal(
                     f"- same round type within 30 days"
                 )
                 return deal
+    else:
+        # FIX: Null-date handling for TIER 2.5
+        # For null-date deals, check recent deals with same round (last 30 days by created_at)
+        recent_cutoff_dt = (datetime.now(timezone.utc) - timedelta(days=30)).replace(tzinfo=None)
+        tier25_null_stmt = (
+            select(Deal, PortfolioCompany)
+            .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
+            .where(Deal.round_type == round_type)
+            .where(Deal.created_at >= recent_cutoff_dt)
+        )
+        tier25_null_result = await session.execute(tier25_null_stmt)
+        tier25_null_candidates = tier25_null_result.all()
+
+        for deal, company in tier25_null_candidates:
+            if company_names_match(company_name, company.name):
+                # Apply same amount sanity check (with valuation confusion exception)
+                if normalized_amount and deal.amount_usd:
+                    larger_amount = max(normalized_amount, deal.amount_usd)
+                    smaller_amount = min(normalized_amount, deal.amount_usd)
+                    ratio = larger_amount / max(1, smaller_amount)
+                    if ratio > 5 and larger_amount < 500_000_000:
+                        logger.debug(
+                            f"TIER 2.5 null-date skip: '{company_name}' amount ratio {ratio:.1f}x too high"
+                        )
+                        continue
+                logger.warning(
+                    f"Found duplicate (TIER 2.5 null-date): '{company_name}' {round_type} "
+                    f"matches '{company.name}' {deal.round_type} (deal #{deal.id}, "
+                    f"amounts: incoming={amount}, existing={deal.amount}) "
+                    f"- same round type, recent deal (null incoming date)"
+                )
+                return deal
 
     # =========================================================================
     # TIER 1: General query for strict round match
+    # FIX: Add round_type filter at SQL level to avoid LIMIT 200 missing duplicates
     # =========================================================================
     stmt = (
         select(Deal, PortfolioCompany)
         .join(PortfolioCompany, Deal.company_id == PortfolioCompany.id)
+        .where(Deal.round_type == round_type)
     )
 
     # Date filter with fallback for missing dates - 1-year window
@@ -993,7 +1045,16 @@ async def find_duplicate_deal(
                         )
                         return deal
             else:
-                # One or both amounts missing - still a match if same round type
+                # FIX: One or both amounts missing - require tighter date window (60 days)
+                # This prevents matching a Jan 2025 Series A with a Dec 2025 undisclosed Series A
+                if announced_date and deal.announced_date:
+                    days_apart = abs((announced_date - deal.announced_date).days)
+                    if days_apart > 60:
+                        logger.debug(
+                            f"TIER 1 no-amount skip: '{company_name}' {days_apart} days apart "
+                            f"(incoming={announced_date}, existing={deal.announced_date})"
+                        )
+                        continue
                 logger.info(
                     f"Found duplicate deal (TIER 1, no amount): '{company_name}' matches '{company.name}' "
                     f"(deal #{deal.id}, {deal.round_type})"
