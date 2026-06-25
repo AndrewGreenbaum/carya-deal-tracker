@@ -234,7 +234,7 @@ def clear_extraction_stats() -> None:
 
 from .schemas import DealExtraction, ArticleAnalysis, LeadStatus, RoundType, EnterpriseCategory
 from ..config.settings import settings
-from ..config.funds import FUND_REGISTRY, FundConfig, ScraperType, EXTERNAL_ONLY_FUNDS
+from ..config.funds import FUND_REGISTRY, FundConfig, EXTERNAL_ONLY_FUNDS
 # Note: match_fund_name is imported lazily in _verify_tracked_fund to avoid circular import
 
 # EXTERNAL_ONLY_FUNDS is now imported from config.funds (single source of truth)

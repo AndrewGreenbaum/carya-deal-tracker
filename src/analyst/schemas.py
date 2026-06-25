@@ -11,6 +11,8 @@ from datetime import date, timedelta
 import logging
 import re
 
+from ..common.url_utils import INVALID_WEBSITE_DOMAINS
+
 logger = logging.getLogger(__name__)
 
 # LinkedIn profile URL pattern - must be /in/ not /company/, /jobs/, etc.
@@ -20,13 +22,6 @@ LINKEDIN_PROFILE_PATTERN = re.compile(r'^https?://(?:www\.)?linkedin\.com/in/[a-
 
 # Valid URL pattern for company websites
 VALID_URL_PATTERN = re.compile(r'^https?://[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/.*)?$')
-
-# Domains that are NOT valid company websites
-INVALID_WEBSITE_DOMAINS = {
-    'linkedin.com', 'twitter.com', 'facebook.com', 'instagram.com',
-    'youtube.com', 'tiktok.com', 'medium.com', 'substack.com',
-    'crunchbase.com', 'pitchbook.com', 'techcrunch.com', 'bloomberg.com',
-}
 
 
 class RoundType(str, Enum):

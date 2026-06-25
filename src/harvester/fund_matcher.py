@@ -357,28 +357,6 @@ SEC_ENTITY_PATTERNS: dict[str, list[str]] = {
 }
 
 
-def match_sec_entity(entity_name: str) -> Optional[str]:
-    """
-    Match SEC legal entity name to fund slug.
-
-    SEC Form D filings list legal entity names like "Benchmark Capital Management V, L.P."
-    instead of public names like "Benchmark". This function maps those entities.
-
-    Args:
-        entity_name: The SEC entity name to match
-
-    Returns:
-        Fund slug if matched, None otherwise
-    """
-    if not entity_name:
-        return None
-    name_lower = entity_name.lower()
-    for slug, patterns in SEC_ENTITY_PATTERNS.items():
-        if any(p in name_lower for p in patterns):
-            return slug
-    return None
-
-
 def _has_investment_context(text: str) -> bool:
     """Check if text contains investment-related context words."""
     text_lower = text.lower()
@@ -482,21 +460,3 @@ def match_fund_name(investor_name: str, context_text: str = "") -> Optional[str]
     # Return the match that appears earliest in the string
     matches.sort(key=lambda x: x[1])
     return matches[0][0]
-
-
-def get_all_fund_slugs() -> list[str]:
-    """Get list of all tracked fund slugs."""
-    return list(FUND_NAME_VARIANTS.keys())
-
-
-def get_fund_variants(slug: str) -> list[str]:
-    """Get all name variants for a fund."""
-    return FUND_NAME_VARIANTS.get(slug, [])
-
-
-def is_excluded_by_negative_keyword(investor_name: str, slug: str) -> bool:
-    """Check if an investor name is excluded for a specific fund by negative keywords."""
-    if not investor_name:
-        return False
-    # FIX: Use word boundaries instead of substring matching
-    return _check_negative_keywords(investor_name.lower(), slug)
