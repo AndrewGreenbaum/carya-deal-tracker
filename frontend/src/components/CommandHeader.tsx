@@ -24,7 +24,7 @@ export function CommandHeader({
   void _onPreFundingClick;
 
   return (
-    <header className="h-14 md:h-16 border-b border-slate-800 bg-[#0a0a0c] flex items-center px-3 md:px-6 shrink-0 z-20">
+    <header className="h-14 md:h-16 bg-[#0a0a0c] flex items-center px-3 md:px-6 shrink-0 z-20">
       {/* Left: Menu button (mobile) + Logo */}
       <div className="flex items-center gap-2 md:gap-4">
         {/* Hamburger menu - mobile only */}
