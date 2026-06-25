@@ -139,11 +139,37 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
     return api_key
 
 
+def run_migrations():
+    """Run Alembic migrations on startup."""
+    import subprocess
+    import sys
+
+    print("Running database migrations...")
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            timeout=120,  # 2 minute timeout
+        )
+        if result.returncode == 0:
+            print("Database migrations completed successfully")
+        else:
+            print(f"Migration warning: {result.stderr}")
+    except subprocess.TimeoutExpired:
+        print("Warning: Migration timed out (database may be unavailable)")
+    except Exception as e:
+        print(f"Warning: Could not run migrations: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     print("Starting The Bud Tracker...")
     print(f"Tracking {len(FUND_REGISTRY)} VC funds")
+
+    # Run database migrations first
+    run_migrations()
 
     # Seed funds in database
     try:
