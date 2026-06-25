@@ -21,9 +21,6 @@ import {
   Bot,
   Database,
   XCircle,
-  List,
-  Download,
-  RefreshCw,
   ChevronLeft,
   ChevronRight,
   ArrowUp,
@@ -64,37 +61,6 @@ export function DealsTable({
 
   return (
     <>
-      {/* Header */}
-      <div className="px-4 sm:px-6 py-3 border-b border-slate-800 bg-[#0a0a0c] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0">
-        <h2 className="text-xs sm:text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
-          <List className="w-4 h-4" />
-          <span className="hidden sm:inline">Latest Extractions</span>
-          <span className="sm:hidden">Deals</span>
-          <span className="text-slate-500 font-normal">({pagination.total})</span>
-        </h2>
-        <div className="flex gap-2 w-full sm:w-auto">
-          <button
-            onClick={onExport}
-            className="btn-primary flex items-center justify-center gap-1.5 flex-1 sm:flex-none"
-            aria-label="Export deals to CSV"
-          >
-            <Download className="w-3 h-3" />
-            <span className="hidden sm:inline">EXPORT CSV</span>
-            <span className="sm:hidden">EXPORT</span>
-          </button>
-          <button
-            onClick={onRefresh}
-            disabled={isLoading}
-            className="btn-secondary flex items-center justify-center gap-1.5 flex-1 sm:flex-none"
-            aria-label={isLoading ? 'Refreshing deals...' : 'Refresh deals'}
-          >
-            <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">REFRESH</span>
-            <span className="sm:hidden">{isLoading ? '...' : 'REFRESH'}</span>
-          </button>
-        </div>
-      </div>
-
       {/* Mobile Card View */}
       <div className="md:hidden flex-1 overflow-auto p-4 space-y-3">
         {deals.map((deal) => (
