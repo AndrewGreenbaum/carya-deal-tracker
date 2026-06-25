@@ -374,7 +374,7 @@ function App() {
   }, []);
 
   return (
-    <div className="h-screen flex flex-col bg-black text-white">
+    <div className="h-screen flex flex-col bg-[#050506] text-slate-300 font-['JetBrains_Mono',monospace]">
       {/* Header */}
       <CommandHeader
         systemStatus={systemStatus}
