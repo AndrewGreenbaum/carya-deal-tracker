@@ -26,6 +26,10 @@ from typing import Optional, List, Set
 from datetime import datetime, timezone, date, timedelta
 from dateutil.relativedelta import relativedelta
 
+# FIX (2026-01): Import consolidated suffix constant from storage
+# This ensures _validate_company_in_text uses same suffixes as dedup normalization
+from ..archivist.storage import COMPANY_NAME_SUFFIX_WORDS
+
 logger = logging.getLogger(__name__)
 
 # Task-local context for source tracking (async-safe with contextvars)
@@ -2565,13 +2569,9 @@ def _validate_company_in_text(deal: DealExtraction, article_text: str) -> DealEx
 
     # Extract main word(s) by removing common suffixes
     # These are often added by LLM based on context but may not be in article
-    suffixes_to_strip = {
-        'inc', 'llc', 'ltd', 'corp', 'corporation', 'company',
-        'ai', 'labs', 'tech', 'technologies', 'software', 'systems',
-        'health', 'healthcare', 'bio', 'therapeutics', 'sciences',
-        'cloud', 'data', 'analytics', 'intelligence',
-        'ml', 'ops', 'dev', 'hq', 'app', 'io', 'platform',
-    }
+    # FIX (2026-01): Use consolidated COMPANY_NAME_SUFFIX_WORDS from storage
+    # This ensures _validate_company_in_text uses same suffixes as dedup normalization
+    # Previously had its own hardcoded list that didn't match storage.py
 
     # Words that are too common to use as standalone validation
     # These can appear in many AI/tech articles without being the company name
@@ -2587,9 +2587,10 @@ def _validate_company_in_text(deal: DealExtraction, article_text: str) -> DealEx
     company_words = company_lower.split()
 
     # Filter out suffix words to get core name
+    # FIX (2026-01): Use COMPANY_NAME_SUFFIX_WORDS instead of local suffixes_to_strip
     core_words = [
         w for w in company_words
-        if w not in suffixes_to_strip and len(w) >= 3
+        if w not in COMPANY_NAME_SUFFIX_WORDS and len(w) >= 3
     ]
 
     if not core_words:

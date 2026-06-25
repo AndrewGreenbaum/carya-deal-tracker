@@ -355,6 +355,9 @@ class UpdateDealRequest(BaseModel):
     is_enterprise_ai: Optional[bool] = None
     is_ai_deal: Optional[bool] = None  # FIX 2026-01: Allow updating AI classification
     founders: Optional[List[dict]] = None  # List of {name, title, linkedin_url}
+    # Amount validation flags (for manual flagging)
+    amount_needs_review: Optional[bool] = None
+    amount_review_reason: Optional[str] = None
 
 
 # ----- Endpoints -----
@@ -934,6 +937,8 @@ async def update_deal_endpoint(
                 is_enterprise_ai=request.is_enterprise_ai,
                 is_ai_deal=request.is_ai_deal,
                 founders_json=founders_json,
+                amount_needs_review=request.amount_needs_review,
+                amount_review_reason=request.amount_review_reason,
             )
 
             if not deal:

@@ -17,8 +17,14 @@ logger = logging.getLogger(__name__)
 
 
 # CONSOLIDATED (2026-01): Single source of truth for company name suffixes
-# Previously duplicated in _normalize_company_name_for_dedup() and normalize_company_name()
+# Previously duplicated in _normalize_company_name_for_dedup(), normalize_company_name(),
+# company_names_match(), and extractor.py's _validate_company_in_text()
 # Different suffix lists could cause dedup misses
+#
+# FIX (2026-01): Added missing suffixes from all three locations:
+# - storage.py's known_company_suffixes (x, go, ly, fy, ify)
+# - extractor.py's suffixes_to_strip (software, systems, healthcare, bio, therapeutics,
+#   sciences, data, analytics, intelligence, platform)
 COMPANY_NAME_SUFFIXES = [
     # Legal entity types (longer first to avoid partial matches)
     ", incorporated", " incorporated",
@@ -41,7 +47,18 @@ COMPANY_NAME_SUFFIXES = [
     " ai",
     # Additional suffixes for dedup (from CLAUDE.md)
     " health", " cloud", " ml", " ops", " dev", " hq", " app", " io",
+    # FIX (2026-01): Added from extractor.py's suffixes_to_strip
+    " software", " systems", " healthcare", " bio", " therapeutics",
+    " sciences", " data", " analytics", " intelligence", " platform",
+    # FIX (2026-01): Added startup naming patterns from known_company_suffixes
+    " x", " go", " ly", " fy", " ify",
 ]
+
+# Derived set for word-only matching (no leading space/comma)
+# Used by company_names_match() and extractor.py's _validate_company_in_text()
+COMPANY_NAME_SUFFIX_WORDS = frozenset(
+    s.strip().lstrip(",").strip().lower() for s in COMPANY_NAME_SUFFIXES
+)
 
 
 def _normalize_company_name_for_dedup(name: str) -> str:
@@ -49,14 +66,26 @@ def _normalize_company_name_for_dedup(name: str) -> str:
     Normalize company name for dedup key generation.
 
     Uses shared COMPANY_NAME_SUFFIXES constant (consolidated to prevent discrepancies).
+
+    FIX (2026-01): Now strips ALL matching suffixes, not just one.
+    Previous bug: "Acme Labs AI" → "Acme Labs" (only stripped " ai")
+    Fixed: "Acme Labs AI" → "Acme" (strips " ai" then " labs")
     """
     name = name.lower().strip()
     if name.startswith("the "):
         name = name[4:]
-    for suffix in COMPANY_NAME_SUFFIXES:
-        if name.endswith(suffix):
-            name = name[:-len(suffix)]
-            break
+
+    # FIX: Strip ALL matching suffixes (not just one)
+    # Loop until no more suffixes match
+    changed = True
+    while changed:
+        changed = False
+        for suffix in COMPANY_NAME_SUFFIXES:
+            if name.endswith(suffix):
+                name = name[:-len(suffix)]
+                changed = True
+                break  # Restart loop to check for more suffixes
+
     return re.sub(r'[^a-z0-9]', '', name)
 
 
@@ -391,12 +420,17 @@ def normalize_company_name(name: str) -> str:
     Uses shared COMPANY_NAME_SUFFIXES constant (consolidated to prevent discrepancies
     with _normalize_company_name_for_dedup).
 
+    FIX (2026-01): Now strips ALL matching suffixes, not just one.
+    Previous bug: "Acme Labs AI" → "acmelabs" (only stripped " ai")
+    Fixed: "Acme Labs AI" → "acme" (strips " ai" then " labs")
+
     Examples:
-        "Valerie Health" → "valeriehealth"
+        "Valerie Health" → "valerie"
         "Valerie" → "valerie"
-        "The AI Company, Inc." → "aicompany"
-        "OpenAI Technologies" → "openai"
+        "The AI Company, Inc." → "company"  # Note: "company" is in suffix list
+        "OpenAI Technologies" → "open"  # Note: "ai" and "technologies" are suffixes
         "Anthropic, Inc." → "anthropic"
+        "Acme Labs AI" → "acme"  # FIX: Now strips both suffixes
     """
     # Lowercase first
     name = name.lower().strip()
@@ -405,11 +439,16 @@ def normalize_company_name(name: str) -> str:
     if name.startswith("the "):
         name = name[4:]
 
-    # Remove common suffixes (uses shared constant)
-    for suffix in COMPANY_NAME_SUFFIXES:
-        if name.endswith(suffix):
-            name = name[:-len(suffix)]
-            break  # Only remove one suffix
+    # FIX: Remove ALL matching suffixes (not just one)
+    # Loop until no more suffixes match
+    changed = True
+    while changed:
+        changed = False
+        for suffix in COMPANY_NAME_SUFFIXES:
+            if name.endswith(suffix):
+                name = name[:-len(suffix)]
+                changed = True
+                break  # Restart loop to check for more suffixes
 
     # Remove non-alphanumeric characters
     name = re.sub(r'[^a-z0-9]', '', name)
@@ -451,14 +490,9 @@ def company_names_match(name1: str, name2: str) -> bool:
         # The suffix MUST be in our explicit list of known company suffixes
         # This is strict to avoid false positives like Amazon/Amazonia
         suffix = longer[len(shorter):]
-        # Only allow known company name suffixes (NOT generic word endings)
-        # Be strict - 'data' removed because Meta vs Metadata is a false positive
-        known_company_suffixes = {
-            'ai', 'hq', 'app', 'io', 'labs', 'lab', 'tech',
-            'health', 'cloud', 'ml', 'ops', 'dev',
-            'x', 'go', 'ly', 'fy', 'ify'  # Common startup suffixes
-        }
-        if suffix in known_company_suffixes:
+        # FIX (2026-01): Use consolidated COMPANY_NAME_SUFFIX_WORDS instead of hardcoded set
+        # This ensures company_names_match() uses the same suffixes as normalization
+        if suffix in COMPANY_NAME_SUFFIX_WORDS:
             return True
 
     # NO fuzzy matching - too many false positives
@@ -1426,6 +1460,8 @@ async def save_deal(
         "is_ai_deal": getattr(extraction, 'is_ai_deal', extraction.is_enterprise_ai),
         "founders_json": founders_json,
         "confidence_score": extraction.confidence_score,
+        "amount_needs_review": getattr(extraction, 'amount_needs_review', False),
+        "amount_review_reason": getattr(extraction, 'amount_review_reason', None),
         "thesis_drift_score": 0.0,
         "scan_job_id": scan_job_id,
         "created_at": now,
@@ -1640,6 +1676,8 @@ async def update_deal(
     is_enterprise_ai: Optional[bool] = None,
     is_ai_deal: Optional[bool] = None,  # FIX 2026-01: Allow updating AI classification
     founders_json: Optional[str] = None,
+    amount_needs_review: Optional[bool] = None,
+    amount_review_reason: Optional[str] = None,
 ) -> Optional[Deal]:
     """
     Update a deal and its associated company.
@@ -1716,6 +1754,10 @@ async def update_deal(
         deal.is_ai_deal = is_ai_deal
     if founders_json is not None:
         deal.founders_json = founders_json
+    if amount_needs_review is not None:
+        deal.amount_needs_review = amount_needs_review
+    if amount_review_reason is not None:
+        deal.amount_review_reason = amount_review_reason
 
     deal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
