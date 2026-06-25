@@ -10,6 +10,7 @@ FIX #7: Added cache for failed LinkedIn lookups to avoid redundant API calls.
 """
 
 import asyncio
+import json
 import logging
 import re
 from difflib import SequenceMatcher
@@ -37,8 +38,15 @@ LINKEDIN_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
 
 def _get_linkedin_cache_key(founder_name: str, company_name: str) -> str:
-    """Generate cache key for LinkedIn lookup."""
-    return f"{founder_name.lower().strip()}|{company_name.lower().strip()}"
+    """Generate cache key for LinkedIn lookup.
+
+    FIXED (2026-01): Normalizes names by collapsing multiple spaces.
+    This ensures "John  Smith" and "John Smith" use the same cache key.
+    """
+    # Normalize: lowercase, strip, collapse multiple spaces
+    name = ' '.join(founder_name.lower().split())
+    company = ' '.join(company_name.lower().split())
+    return f"{name}|{company}"
 
 
 async def _is_linkedin_cached_failure(founder_name: str, company_name: str) -> bool:
@@ -216,6 +224,11 @@ def _extract_name_from_linkedin_title(title: str) -> Optional[str]:
     # Remove common suffixes first
     title = re.sub(r'\s*\|\s*LinkedIn\s*$', '', title, flags=re.IGNORECASE)
     title = re.sub(r'\s*-\s*LinkedIn\s*$', '', title, flags=re.IGNORECASE)
+
+    # FIXED (2026-01): Guard against empty/whitespace string after processing
+    title = title.strip()
+    if not title:
+        return None
 
     # Try multiple delimiter patterns (in order of specificity)
     # Pattern 1: Name before common delimiters (-, |, •, –, —, :, ,)
@@ -428,6 +441,8 @@ class BraveEnrichmentClient:
     def __init__(self):
         self.rate_limit_delay = settings.brave_search_rate_limit_delay
         self._http_client: Optional["httpx.AsyncClient"] = None
+        # FIXED (2026-01): Lock to prevent race condition in HTTP client creation
+        self._http_client_lock = asyncio.Lock()
 
     async def __aenter__(self):
         return self
@@ -439,14 +454,21 @@ class BraveEnrichmentClient:
             self._http_client = None
 
     async def _get_http_client(self) -> "httpx.AsyncClient":
-        """Get or create shared HTTP client for website verification."""
+        """Get or create shared HTTP client for website verification.
+
+        FIXED (2026-01): Uses lock to prevent race condition when multiple
+        coroutines call this concurrently. Also limits redirects to prevent
+        redirect chain hijacking.
+        """
         import httpx
-        if self._http_client is None:
-            self._http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(5.0),
-                follow_redirects=True,
-                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-            )
+        async with self._http_client_lock:
+            if self._http_client is None:
+                self._http_client = httpx.AsyncClient(
+                    timeout=httpx.Timeout(5.0),
+                    follow_redirects=True,
+                    max_redirects=3,  # FIX: Limit redirects to prevent hijacking
+                    limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+                )
         return self._http_client
 
     def _is_valid_startup_website(self, url: str, company_name: str) -> bool:
@@ -1018,19 +1040,20 @@ class BraveEnrichmentClient:
                         extracted_title=founder.get("title"),
                     )
 
-                    # Store if validation passed OR we couldn't extract company info
-                    # (some profiles don't have clear company in snippet)
-                    if validation.is_valid or validation.profile_current_company is None:
+                    # FIXED (2026-01): Only store if validation PASSED - no fallback
+                    # Previously stored URLs when validation.profile_current_company was None,
+                    # which allowed invalid URLs when company info couldn't be extracted
+                    if validation.is_valid:
                         result.founder_linkedins[founder_name] = linkedin
                         if not result.ceo_linkedin:
                             result.ceo_name = founder_name
                             result.ceo_linkedin = linkedin
-                        if validation.is_valid:
-                            logger.info(f"LinkedIn VALIDATED for {founder_name}: {linkedin}")
+                        logger.info(f"LinkedIn VALIDATED for {founder_name}: {linkedin}")
                     else:
+                        reason = "wrong company" if validation.profile_current_company else "could not validate"
                         logger.warning(
-                            f"LinkedIn REJECTED for {founder_name} at {context.company_name}: "
-                            f"profile shows '{validation.profile_current_company}' with title '{validation.profile_current_title}'"
+                            f"LinkedIn REJECTED for {founder_name} at {context.company_name}: {reason} "
+                            f"(profile shows '{validation.profile_current_company}' with title '{validation.profile_current_title}')"
                         )
 
                 await asyncio.sleep(self.rate_limit_delay)
@@ -1086,7 +1109,8 @@ class BraveEnrichmentClient:
                     company_name=context.company_name,
                     linkedin_url=linkedin_url,
                 )
-                if validation.is_valid or validation.profile_current_company is None:
+                # FIXED (2026-01): Only store if validation PASSED - no fallback
+                if validation.is_valid:
                     # Use matching founder name if found, otherwise use the found name
                     final_name = matching_founder if matching_founder else ceo_name
                     result.ceo_name = final_name
@@ -1094,7 +1118,8 @@ class BraveEnrichmentClient:
                     result.founder_linkedins[final_name] = linkedin_url
                     logger.info(f"Found CEO for {context.company_name} via fallback: {final_name}")
                 else:
-                    logger.warning(f"CEO LinkedIn rejected for {context.company_name}: wrong company")
+                    reason = "wrong company" if validation.profile_current_company else "could not validate"
+                    logger.warning(f"CEO LinkedIn rejected for {context.company_name}: {reason}")
             await asyncio.sleep(self.rate_limit_delay)
 
         return result
@@ -1184,6 +1209,9 @@ async def persist_deal_linkedin_enrichment(
     """
     Persist LinkedIn enrichment results to a deal's founders_json.
 
+    FIXED (2026-01): Now MERGES with existing founders instead of overwriting.
+    This prevents data loss when enrichment returns a shorter list than original.
+
     Args:
         deal_id: ID of the deal to update
         founders_with_linkedin: Updated list of founder dicts with linkedin_url fields
@@ -1191,19 +1219,41 @@ async def persist_deal_linkedin_enrichment(
     Returns:
         True if update succeeded, False otherwise
     """
-    import json
     from ..archivist.database import get_session
     from ..archivist.models import Deal
 
     try:
         async with get_session() as session:
             deal = await session.get(Deal, deal_id)
-            if deal:
-                deal.founders_json = json.dumps(founders_with_linkedin)
-                await session.commit()
-                logger.info(f"Updated LinkedIn for deal {deal_id}")
-                return True
-            return False
+            if not deal:
+                return False
+
+            # MERGE instead of overwrite - preserves existing founder data
+            existing_founders = json.loads(deal.founders_json or "[]")
+            existing_by_name = {
+                f.get("name", "").lower(): f
+                for f in existing_founders
+                if f.get("name")
+            }
+
+            for founder in founders_with_linkedin:
+                name_key = founder.get("name", "").lower()
+                if not name_key:
+                    continue
+
+                if name_key in existing_by_name:
+                    # Update existing: preserve old fields, add new non-empty values
+                    existing_by_name[name_key].update({
+                        k: v for k, v in founder.items() if v  # Only update non-empty values
+                    })
+                else:
+                    # New founder from enrichment - add to list
+                    existing_by_name[name_key] = founder
+
+            deal.founders_json = json.dumps(list(existing_by_name.values()))
+            await session.commit()
+            logger.info(f"Updated LinkedIn for deal {deal_id} (merged {len(founders_with_linkedin)} enriched founders)")
+            return True
     except Exception as e:
         logger.error(f"Error persisting LinkedIn for deal {deal_id}: {e}")
         return False
