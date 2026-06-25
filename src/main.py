@@ -1012,6 +1012,8 @@ async def update_deal_endpoint(
                 lead_partner=deal.lead_partner_name,
                 verification_snippet=deal.verification_snippet,
                 lead_evidence_weak=getattr(deal, 'lead_evidence_weak', False),
+                amount_needs_review=getattr(deal, 'amount_needs_review', False),
+                amount_review_reason=getattr(deal, 'amount_review_reason', None),
                 company_website=deal.company.website if deal.company and is_valid_url(deal.company.website) else None,
                 company_linkedin=deal.company.linkedin_url if deal.company and is_valid_url(deal.company.linkedin_url) else None,
                 source_url=source_url,
