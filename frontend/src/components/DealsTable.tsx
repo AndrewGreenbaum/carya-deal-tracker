@@ -23,8 +23,6 @@ import {
   XCircle,
   ChevronLeft,
   ChevronRight,
-  ArrowUp,
-  ArrowDown,
   Linkedin,
 } from 'lucide-react';
 import type { Deal, EnterpriseCategory, InvestmentStage, PaginatedDeals, SortDirection } from '../types';
@@ -52,13 +50,15 @@ export function DealsTable({
   onRefresh: _onRefresh,
   onPageChange,
   isLoading = false,
-  sortDirection,
-  onSortChange,
+  sortDirection: _sortDirection,
+  onSortChange: _onSortChange,
   showRejected = false,
 }: DealsTableProps) {
   // Keeping props for API compatibility, but not using them in minimal UI
   void _onExport;
   void _onRefresh;
+  void _sortDirection;
+  void _onSortChange;
   const currentPage = Math.floor(pagination.offset / pagination.limit) + 1;
   const totalPages = Math.ceil(pagination.total / pagination.limit);
 
@@ -84,39 +84,6 @@ export function DealsTable({
       {/* Desktop Table View */}
       <div className="hidden md:block flex-1 overflow-auto">
         <table className="w-full text-left border-collapse">
-          <thead className="bg-[#0a0a0c] sticky top-0 z-10 text-[10px] uppercase font-bold text-slate-500">
-            <tr>
-              <th scope="col" className="px-6 py-3 border-b border-slate-800">Company / Source</th>
-              <th scope="col" className="px-6 py-3 border-b border-slate-800">Stage & Fund</th>
-              <th scope="col" className="px-6 py-3 border-b border-slate-800">AI Category</th>
-              <th scope="col" className="px-6 py-3 border-b border-slate-800 w-24 text-center">
-                Links
-              </th>
-              <th
-                scope="col"
-                aria-sort={sortDirection === 'desc' ? 'descending' : 'ascending'}
-                className="px-6 py-3 border-b border-slate-800 text-right cursor-pointer hover:bg-slate-800/50 transition-colors select-none"
-                onClick={() => onSortChange(sortDirection === 'desc' ? 'asc' : 'desc')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onSortChange(sortDirection === 'desc' ? 'asc' : 'desc');
-                  }
-                }}
-                tabIndex={0}
-                role="button"
-              >
-                <span className="flex items-center justify-end gap-1">
-                  Announced
-                  {sortDirection === 'desc' ? (
-                    <ArrowDown className="w-3 h-3 text-emerald-400" aria-hidden="true" />
-                  ) : (
-                    <ArrowUp className="w-3 h-3 text-emerald-400" aria-hidden="true" />
-                  )}
-                </span>
-              </th>
-            </tr>
-          </thead>
           <tbody className="text-xs divide-y divide-slate-800/50">
             {deals.map((deal) => (
               <DealRow key={deal.id} deal={deal} onClick={() => onDealClick(deal)} showRejected={showRejected} />
