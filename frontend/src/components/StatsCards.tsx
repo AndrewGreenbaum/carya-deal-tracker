@@ -11,11 +11,11 @@ interface StatsCardsProps {
 
 export const StatsCards = memo(function StatsCards({ stats }: StatsCardsProps) {
   return (
-    <div className="px-6 py-4 bg-[#0a0a0c]">
-      <h2 className="text-lg font-medium text-slate-200 tracking-tight">
+    <div className="px-6 pt-4 pb-6 bg-[#0a0a0c]">
+      <h2 className="text-2xl font-semibold text-white tracking-tight">
         Deals
       </h2>
-      <p className="text-xs text-slate-600 mt-0.5">
+      <p className="text-sm text-slate-500 mt-1">
         {stats.newDeals24h.toLocaleString()} companies tracked
       </p>
     </div>
