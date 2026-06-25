@@ -319,6 +319,9 @@ class DealResponse(BaseModel):
     lead_partner: Optional[str] = None
     verification_snippet: Optional[str] = None
     lead_evidence_weak: bool = False  # True if snippet lacks "led by" but Claude said lead
+    # Amount validation flags
+    amount_needs_review: bool = False  # True if amount seems suspicious (e.g., $2B Series A)
+    amount_review_reason: Optional[str] = None  # Why amount needs review
     # Company links
     company_website: Optional[str] = None
     company_linkedin: Optional[str] = None
@@ -726,6 +729,9 @@ async def list_deals(
                     lead_partner=deal.lead_partner_name,
                     verification_snippet=deal.verification_snippet,
                     lead_evidence_weak=getattr(deal, 'lead_evidence_weak', False),
+                    # Amount validation flags
+                    amount_needs_review=getattr(deal, 'amount_needs_review', False),
+                    amount_review_reason=getattr(deal, 'amount_review_reason', None),
                     # Company links (with fallback generation)
                     company_website=company_website,
                     company_linkedin=company_linkedin,
