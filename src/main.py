@@ -140,7 +140,11 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
 
 
 def run_migrations():
-    """Run Alembic migrations on startup."""
+    """Run Alembic migrations on startup.
+
+    Handles the case where database schema exists but alembic_version is out of sync
+    by stamping with the parent revision and retrying.
+    """
     import subprocess
     import sys
 
@@ -154,8 +158,32 @@ def run_migrations():
         )
         if result.returncode == 0:
             print("Database migrations completed successfully")
+        elif "already exists" in result.stderr or "DuplicateColumn" in result.stderr or "DuplicateTable" in result.stderr:
+            # Database schema exists but alembic_version is out of sync
+            # Stamp with the revision before our new migration and retry
+            print("Database schema exists, syncing alembic version...")
+            stamp_result = subprocess.run(
+                [sys.executable, "-m", "alembic", "stamp", "20260121_content_hashes"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if stamp_result.returncode == 0:
+                # Now run only the new migration
+                retry_result = subprocess.run(
+                    [sys.executable, "-m", "alembic", "upgrade", "head"],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if retry_result.returncode == 0:
+                    print("Database migrations completed successfully (after stamp)")
+                else:
+                    print(f"Migration warning after stamp: {retry_result.stderr[-500:]}")
+            else:
+                print(f"Could not stamp database: {stamp_result.stderr}")
         else:
-            print(f"Migration warning: {result.stderr}")
+            print(f"Migration warning: {result.stderr[-500:]}")
     except subprocess.TimeoutExpired:
         print("Warning: Migration timed out (database may be unavailable)")
     except Exception as e:
