@@ -48,14 +48,17 @@ export function DealsTable({
   deals,
   pagination,
   onDealClick,
-  onExport,
-  onRefresh,
+  onExport: _onExport,
+  onRefresh: _onRefresh,
   onPageChange,
   isLoading = false,
   sortDirection,
   onSortChange,
   showRejected = false,
 }: DealsTableProps) {
+  // Keeping props for API compatibility, but not using them in minimal UI
+  void _onExport;
+  void _onRefresh;
   const currentPage = Math.floor(pagination.offset / pagination.limit) + 1;
   const totalPages = Math.ceil(pagination.total / pagination.limit);
 
