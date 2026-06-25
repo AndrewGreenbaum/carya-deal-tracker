@@ -17,24 +17,28 @@ sys.path.insert(0, '.')
 # Import the real function from extractor
 from src.analyst.extractor import _validate_company_in_text
 
-# Import DealExtraction schema to create test instances
-from src.analyst.schemas import DealExtraction, RoundType, LeadStatus
+
+class MockDealExtraction:
+    """
+    Mock DealExtraction for testing _validate_company_in_text.
+
+    The real DealExtraction has many required fields that are irrelevant
+    to company name validation. This mock only includes the fields that
+    _validate_company_in_text actually uses:
+    - startup_name: the company name to validate
+    - is_new_announcement: set to False if name is hallucinated
+    - announcement_rejection_reason: reason for rejection
+    """
+
+    def __init__(self, startup_name: str):
+        self.startup_name = startup_name
+        self.is_new_announcement = True
+        self.announcement_rejection_reason = None
 
 
-def _create_test_deal(startup_name: str) -> DealExtraction:
-    """Create a minimal DealExtraction for testing company validation."""
-    return DealExtraction(
-        startup_name=startup_name,
-        startup_description="Test company",
-        round_label=RoundType.SEED,
-        amount=None,
-        lead_investors=[],
-        participating_investors=[],
-        tracked_fund_is_lead=LeadStatus.NOT_LEAD,
-        is_new_announcement=True,
-        is_enterprise_ai=True,
-        confidence_score=0.8,
-    )
+def _create_test_deal(startup_name: str) -> MockDealExtraction:
+    """Create a minimal mock deal for testing company validation."""
+    return MockDealExtraction(startup_name)
 
 
 def test_exact_match():

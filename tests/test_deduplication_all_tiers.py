@@ -1427,7 +1427,9 @@ class TestNormalizeCompanyName:
     def test_special_characters(self):
         assert normalize_company_name("Open-AI") == "openai"
         assert normalize_company_name("X.AI") == "xai"
-        assert normalize_company_name("AI & ML Corp") == "aiml"
+        # FIX (2026-01): "ml" is now in suffix list, so it gets stripped
+        # "AI & ML Corp" → "ai & ml" (strip corp) → "ai &" (strip ml) → "ai"
+        assert normalize_company_name("AI & ML Corp") == "ai"
 
 
 class TestCompanyNamesMatch:

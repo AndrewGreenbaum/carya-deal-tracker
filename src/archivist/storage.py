@@ -55,10 +55,20 @@ COMPANY_NAME_SUFFIXES = [
 ]
 
 # Derived set for word-only matching (no leading space/comma)
-# Used by company_names_match() and extractor.py's _validate_company_in_text()
+# Used by extractor.py's _validate_company_in_text() for company validation
 COMPANY_NAME_SUFFIX_WORDS = frozenset(
     s.strip().lstrip(",").strip().lower() for s in COMPANY_NAME_SUFFIXES
 )
+
+# More restrictive set for company_names_match() to avoid false positives
+# Does NOT include generic words like "data", "software", "systems" that could
+# cause false matches (e.g., "Meta" vs "Metadata" should NOT match)
+# Only includes suffixes that are clearly startup naming patterns
+COMPANY_NAME_MATCH_SUFFIXES = frozenset({
+    'ai', 'hq', 'app', 'io', 'labs', 'lab', 'tech',
+    'health', 'cloud', 'ml', 'ops', 'dev',
+    'x', 'go', 'ly', 'fy', 'ify'  # Common startup suffixes
+})
 
 
 def _normalize_company_name_for_dedup(name: str) -> str:
@@ -490,9 +500,9 @@ def company_names_match(name1: str, name2: str) -> bool:
         # The suffix MUST be in our explicit list of known company suffixes
         # This is strict to avoid false positives like Amazon/Amazonia
         suffix = longer[len(shorter):]
-        # FIX (2026-01): Use consolidated COMPANY_NAME_SUFFIX_WORDS instead of hardcoded set
-        # This ensures company_names_match() uses the same suffixes as normalization
-        if suffix in COMPANY_NAME_SUFFIX_WORDS:
+        # FIX (2026-01): Use COMPANY_NAME_MATCH_SUFFIXES (more restrictive) instead of
+        # COMPANY_NAME_SUFFIX_WORDS to avoid false positives like Meta/Metadata
+        if suffix in COMPANY_NAME_MATCH_SUFFIXES:
             return True
 
     # NO fuzzy matching - too many false positives
