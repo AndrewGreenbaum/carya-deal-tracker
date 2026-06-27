@@ -120,8 +120,8 @@ export function CommandSidebar({
           {/* Brand */}
           <div className="flex items-center gap-3 pt-6 pb-10">
             <div className="w-2.5 h-2.5 bg-blue-500 rounded-full" />
-            <span className="text-lg font-semibold text-white tracking-tight">
-              Eagle Eye
+            <span className="text-base font-bold tracking-tighter bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 bg-clip-text text-transparent animate-shimmer bg-[length:200%_100%]">
+              Carya Eagle Eye
             </span>
           </div>
 
