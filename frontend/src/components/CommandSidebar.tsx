@@ -303,6 +303,14 @@ export function CommandSidebar({
             )}
           </div>
         </div>
+
+        {/* Bottom status */}
+        <div className="px-6 py-4 shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-purple-500 rounded-full" />
+            <span className="text-xs text-slate-600">18 sources active</span>
+          </div>
+        </div>
       </aside>
     </>
   );
