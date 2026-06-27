@@ -358,7 +358,7 @@ function FilterCheckbox({ label, checked, onChange }: FilterCheckboxProps) {
         onClick={onChange}
         className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
           checked
-            ? 'bg-cyan-600 text-white'
+            ? 'bg-emerald-600 text-white'
             : 'border border-slate-700 text-transparent hover:border-slate-500'
         }`}
       >
