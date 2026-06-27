@@ -1,21 +1,11 @@
 /**
- * CommandSidebar - Left panel with filters, fund list, and cost tracker
- *
- * Features:
- * - Nested filter toggles (Option C structure):
- *   - AI Companies Only (master toggle - when OFF shows all deals incl non-AI)
- *     └─ Enterprise AI Only (sub-filter - only visible when AI is ON)
- *   - Lead Investors
- *   - Show Rejected
- * - Tracked funds list with last scraped times
- * - Category dropdown filter
- * - Cost tracker widget
+ * CommandSidebar - Minimal left panel with navigation, filters, and funds
  */
 
-import { useState, useEffect } from 'react';
-import { Home, ChevronDown, ChevronUp, Search, X, Kanban, Mail, Plane, Settings } from 'lucide-react';
-import type { FilterState, EnterpriseCategory, Fund, ViewType } from '../types';
-import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
+import { useEffect } from 'react';
+import { X, Search } from 'lucide-react';
+import type { FilterState, Fund, ViewType } from '../types';
+import { TRACKED_FUNDS } from '../types';
 
 interface CommandSidebarProps {
   filters: FilterState;
@@ -35,12 +25,13 @@ export function CommandSidebar({
   funds,
   currentView,
   onViewChange,
-  onOpenFeedback,
-  onOpenAircraft,
+  onOpenFeedback: _onOpenFeedback,
+  onOpenAircraft: _onOpenAircraft,
   isMobileOpen = false,
   onMobileClose,
 }: CommandSidebarProps) {
-  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+  void _onOpenFeedback;
+  void _onOpenAircraft;
 
   // Close sidebar when navigating on mobile
   const handleViewChange = (view: ViewType) => {
@@ -63,12 +54,7 @@ export function CommandSidebar({
   const toggleFilter = (key: keyof FilterState) => {
     if (key === 'selectedFund' || key === 'selectedCategory' || key === 'searchQuery' || key === 'sortDirection') return;
 
-    // Option C nested filter logic:
-    // - AI Companies Only = master toggle (when OFF, shows all deals incl non-AI)
-    // - Enterprise AI Only = sub-filter (only applies when AI Companies is ON)
-    // When turning OFF "AI Companies Only", also turn off "Enterprise AI Only"
     if (key === 'aiDealsOnly' && filters.aiDealsOnly) {
-      // Turning OFF AI filter - also turn off Enterprise AI sub-filter
       onFiltersChange({
         ...filters,
         aiDealsOnly: false,
@@ -82,14 +68,6 @@ export function CommandSidebar({
     }
   };
 
-  const setCategory = (category: EnterpriseCategory | undefined) => {
-    onFiltersChange({
-      ...filters,
-      selectedCategory: category,
-    });
-    setShowCategoryDropdown(false);
-  };
-
   const setFund = (fundSlug: string | undefined) => {
     onFiltersChange({
       ...filters,
@@ -97,7 +75,6 @@ export function CommandSidebar({
     });
   };
 
-  // Merge tracked funds with any additional funds from API
   const displayFunds = TRACKED_FUNDS.map((tf) => {
     const apiFund = funds.find((f) => f.slug === tf.slug);
     return {
@@ -118,232 +95,138 @@ export function CommandSidebar({
         />
       )}
 
-      {/* Sidebar - fixed on mobile, static on desktop */}
       <aside
         className={`
-          w-64 h-full bg-[#0a0a0d] border-r border-slate-800/60 flex flex-col shrink-0
+          w-64 h-full bg-black flex flex-col shrink-0
           md:relative md:translate-x-0
           fixed top-0 left-0 z-50 transition-transform duration-300 ease-in-out
           ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}
       >
         {/* Mobile close button */}
-        <div className="md:hidden flex items-center justify-between px-4 py-2 border-b border-slate-800/40">
-          <span className="text-sm font-semibold text-slate-300">Menu</span>
+        <div className="md:hidden flex items-center justify-between px-6 py-3">
+          <span className="text-sm font-medium text-slate-300">Menu</span>
           <button
             onClick={onMobileClose}
-            className="w-11 h-11 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 rounded transition-colors"
+            className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-slate-200 rounded transition-colors"
             aria-label="Close menu"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Brand */}
-        <div className="hidden md:flex items-center gap-3 px-5 py-4">
-          <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full pulse-glow" />
-          <h1 className="text-base font-bold tracking-tighter bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 bg-clip-text text-transparent animate-shimmer bg-[length:200%_100%]">
-            Carya Eagle Eye
-          </h1>
-        </div>
+        {/* Scrollable content */}
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-6">
+          {/* Brand */}
+          <div className="flex items-center gap-3 pt-6 pb-10">
+            <div className="w-2.5 h-2.5 bg-blue-500 rounded-full" />
+            <span className="text-lg font-semibold text-white tracking-tight">
+              Eagle Eye
+            </span>
+          </div>
 
-        {/* Scrollable content area - entire sidebar scrolls */}
-        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide">
           {/* Navigation */}
-          <nav className="px-5 py-4 border-b border-slate-800/40">
-            <div className="space-y-2">
-              <NavItem
-                icon={<Home className="w-4 h-4" />}
-                label="Dashboard"
-                active={currentView === 'dashboard'}
-                onClick={() => handleViewChange('dashboard')}
-              />
-              <NavItem
-                icon={<Kanban className="w-4 h-4" />}
-                label="Tracker"
-                active={currentView === 'tracker'}
-                onClick={() => handleViewChange('tracker')}
-              />
-              <NavItem
-                icon={<Settings className="w-4 h-4" />}
-                label="Settings"
-                active={currentView === 'settings'}
-                onClick={() => handleViewChange('settings')}
-              />
-            </div>
+          <nav className="space-y-1 pb-10">
+            <NavItem
+              label="Dashboard"
+              active={currentView === 'dashboard'}
+              onClick={() => handleViewChange('dashboard')}
+            />
+            <NavItem
+              label="Tracker"
+              active={currentView === 'tracker'}
+              onClick={() => handleViewChange('tracker')}
+            />
+            <NavItem
+              label="Settings"
+              active={currentView === 'settings'}
+              onClick={() => handleViewChange('settings')}
+            />
           </nav>
 
-        {/* Search */}
-        <div className="px-5 py-4 border-b border-slate-800/40">
-          <div className="text-[10px] uppercase text-slate-600 font-semibold mb-3 tracking-widest">
-            Search
-          </div>
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
-            <input
-              type="text"
-              placeholder="Search companies..."
-              value={filters.searchQuery || ''}
-              onChange={(e) => onFiltersChange({ ...filters, searchQuery: e.target.value })}
-              className="w-full bg-slate-900/50 border border-slate-700/50 rounded pl-8 pr-8 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-800/60"
-            />
-            {filters.searchQuery && (
-              <button
-                onClick={() => onFiltersChange({ ...filters, searchQuery: '' })}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Filters */}
-        <div className="px-5 py-4 border-b border-slate-800/40">
-          <div className="text-[10px] uppercase text-slate-600 font-semibold mb-4 tracking-widest">
-            Filters
-          </div>
-          <div className="space-y-3">
-            {/* Master toggle: AI Companies Only */}
-            <FilterCheckbox
-              label="AI Companies Only"
-              checked={filters.aiDealsOnly}
-              onChange={() => toggleFilter('aiDealsOnly')}
-            />
-            {/* Sub-filter: Enterprise AI Only (nested, only visible when AI is on) */}
-            {filters.aiDealsOnly && (
-              <div className="ml-4 border-l border-slate-700/50 pl-3">
-                <FilterCheckbox
-                  label="Enterprise AI Only"
-                  checked={filters.enterpriseAiOnly}
-                  onChange={() => toggleFilter('enterpriseAiOnly')}
-                />
-              </div>
-            )}
-            <FilterCheckbox
-              label="Lead Investors"
-              checked={filters.leadOnly}
-              onChange={() => toggleFilter('leadOnly')}
-            />
-            <FilterCheckbox
-              label="Show Rejected"
-              checked={filters.showRejected}
-              onChange={() => toggleFilter('showRejected')}
-            />
-
-            {/* Category Dropdown */}
-            <div className="mt-4 pt-2">
-              <button
-                onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
-                className="w-full flex items-center justify-between text-sm text-slate-400 hover:text-slate-200 py-3 md:py-2 px-3 bg-slate-900/50 rounded border border-slate-700/50 min-h-[44px] md:min-h-0"
-              >
-                <span>
-                  {filters.selectedCategory
-                    ? CATEGORY_LABELS[filters.selectedCategory]
-                    : 'All Categories'}
-                </span>
-                {showCategoryDropdown ? (
-                  <ChevronUp className="w-4 h-4" />
-                ) : (
-                  <ChevronDown className="w-4 h-4" />
-                )}
-              </button>
-
-              {showCategoryDropdown && (
-                <div className="mt-1 bg-slate-900/80 border border-slate-700/50 rounded overflow-hidden">
-                  <button
-                    onClick={() => setCategory(undefined)}
-                    className={`w-full text-left text-xs px-3 py-3 md:py-2 hover:bg-slate-800/50 min-h-[44px] md:min-h-0 ${
-                      !filters.selectedCategory ? 'text-cyan-500' : 'text-slate-400'
-                    }`}
-                  >
-                    All Categories
-                  </button>
-                  {(Object.keys(CATEGORY_LABELS) as EnterpriseCategory[])
-                    .filter((c) => c !== 'not_ai')
-                    .map((category) => (
-                      <button
-                        key={category}
-                        onClick={() => setCategory(category)}
-                        className={`w-full text-left text-xs px-3 py-3 md:py-2 hover:bg-slate-800/50 min-h-[44px] md:min-h-0 ${
-                          filters.selectedCategory === category
-                            ? 'text-cyan-500'
-                            : 'text-slate-400'
-                        }`}
-                      >
-                        {CATEGORY_LABELS[category]}
-                      </button>
-                    ))}
-                </div>
+          {/* Search */}
+          <div className="pb-8">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-600" />
+              <input
+                type="text"
+                placeholder="Search..."
+                value={filters.searchQuery || ''}
+                onChange={(e) => onFiltersChange({ ...filters, searchQuery: e.target.value })}
+                className="w-full bg-transparent border border-slate-800 rounded-md pl-8 pr-8 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-slate-600"
+              />
+              {filters.searchQuery && (
+                <button
+                  onClick={() => onFiltersChange({ ...filters, searchQuery: '' })}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               )}
             </div>
           </div>
-        </div>
 
-        {/* Tracked Funds List */}
-        <div className="px-5 py-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="text-[10px] uppercase text-slate-600 font-semibold tracking-widest">
-              Tracked Funds [{displayFunds.length}]
+          {/* Filters */}
+          <div className="pb-10">
+            <div className="text-xs uppercase text-blue-500 font-medium mb-4 tracking-wider">
+              Filters
             </div>
-            {filters.selectedFund && (
-              <button
-                onClick={() => setFund(undefined)}
-                className="text-[10px] text-cyan-600 hover:text-cyan-500"
-              >
-                Clear
-              </button>
-            )}
+            <div className="space-y-4">
+              <FilterCheckbox
+                label="Enterprise AI"
+                checked={filters.enterpriseAiOnly}
+                onChange={() => {
+                  // If enterprise AI is being turned on, also turn on aiDealsOnly
+                  if (!filters.enterpriseAiOnly) {
+                    onFiltersChange({ ...filters, aiDealsOnly: true, enterpriseAiOnly: true });
+                  } else {
+                    onFiltersChange({ ...filters, enterpriseAiOnly: false });
+                  }
+                }}
+              />
+              <FilterCheckbox
+                label="Lead Investors"
+                checked={filters.leadOnly}
+                onChange={() => toggleFilter('leadOnly')}
+              />
+            </div>
           </div>
-          <ul className="space-y-1.5 text-xs text-slate-400" role="listbox" aria-label="Tracked funds filter">
-            {displayFunds.map((fund) => (
-              <li key={fund.slug} role="presentation">
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={fund.slug === filters.selectedFund}
-                  onClick={() => setFund(fund.slug === filters.selectedFund ? undefined : fund.slug)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setFund(fund.slug === filters.selectedFund ? undefined : fund.slug);
-                    }
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-3 md:py-2 rounded text-left transition-colors cursor-pointer min-h-[44px] md:min-h-0 ${
-                    fund.slug === filters.selectedFund
-                      ? 'bg-cyan-950/40 text-cyan-500 border-l-2 border-cyan-700'
-                      : 'hover:bg-slate-800/40 hover:text-slate-200'
-                  } ${!fund.isActive ? 'opacity-50' : ''}`}
-                >
-                  <span>{fund.name}</span>
-                  {fund.lastScraped && (
-                    <span className="text-[9px] text-slate-600">
-                      {formatTimeAgo(fund.lastScraped)}
-                    </span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
 
-        {/* Footer Actions - fixed at bottom */}
-        <div className="px-5 py-4 border-t border-slate-800/40 flex items-center justify-center gap-3 shrink-0">
-          <button
-            onClick={onOpenAircraft}
-            className="p-2 hover:bg-slate-800/50 text-slate-500 hover:text-cyan-500 rounded transition-colors"
-            title="Live Aircraft Tracker"
-          >
-            <Plane className="w-5 h-5" />
-          </button>
-          <button
-            onClick={onOpenFeedback}
-            className="p-2 hover:bg-slate-800/50 text-slate-500 hover:text-slate-300 rounded transition-colors"
-            title="Submit feedback"
-          >
-            <Mail className="w-5 h-5" />
-          </button>
+          {/* Funds */}
+          <div className="pb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-xs uppercase text-blue-500 font-medium tracking-wider">
+                Funds
+              </div>
+              {filters.selectedFund && (
+                <button
+                  onClick={() => setFund(undefined)}
+                  className="text-[10px] text-blue-400 hover:text-blue-300"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <ul className="space-y-1 text-sm" role="listbox" aria-label="Tracked funds filter">
+              {displayFunds.map((fund) => (
+                <li key={fund.slug} role="presentation">
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={fund.slug === filters.selectedFund}
+                    onClick={() => setFund(fund.slug === filters.selectedFund ? undefined : fund.slug)}
+                    className={`w-full text-left px-2 py-1.5 rounded text-sm transition-colors cursor-pointer ${
+                      fund.slug === filters.selectedFund
+                        ? 'text-blue-400'
+                        : 'text-slate-500 hover:text-slate-300'
+                    } ${!fund.isActive ? 'opacity-50' : ''}`}
+                  >
+                    {fund.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </aside>
     </>
@@ -351,31 +234,22 @@ export function CommandSidebar({
 }
 
 interface NavItemProps {
-  icon: React.ReactNode;
   label: string;
   active?: boolean;
-  disabled?: boolean;
   onClick: () => void;
 }
 
-function NavItem({ icon, label, active, disabled, onClick }: NavItemProps) {
+function NavItem({ label, active, onClick }: NavItemProps) {
   return (
     <button
       onClick={onClick}
-      disabled={disabled}
-      className={`w-full flex items-center gap-3 px-3 py-3 md:py-2.5 rounded text-sm transition-colors min-h-[44px] md:min-h-0 ${
+      className={`w-full text-left px-2 py-2 rounded text-base transition-colors min-h-[44px] md:min-h-0 ${
         active
-          ? 'bg-cyan-950/40 text-cyan-500 border-l-2 border-cyan-700'
-          : disabled
-          ? 'text-slate-600 cursor-not-allowed'
-          : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+          ? 'text-white font-medium'
+          : 'text-slate-500 hover:text-slate-300'
       }`}
     >
-      {icon}
-      <span>{label}</span>
-      {disabled && (
-        <span className="ml-auto text-[9px] text-slate-600 uppercase">Soon</span>
-      )}
+      {label}
     </button>
   );
 }
@@ -388,32 +262,24 @@ interface FilterCheckboxProps {
 
 function FilterCheckbox({ label, checked, onChange }: FilterCheckboxProps) {
   return (
-    <label className="flex items-center gap-3 text-sm cursor-pointer hover:text-white group min-h-[44px] md:min-h-0 py-1 md:py-0">
-      <div
-        className={`filter-checkbox ${checked ? 'checked' : 'unchecked'} w-5 h-5 md:w-4 md:h-4`}
+    <label className="flex items-center gap-3 text-sm cursor-pointer group min-h-[44px] md:min-h-0">
+      <button
         onClick={onChange}
+        className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
+          checked
+            ? 'bg-blue-600 text-white'
+            : 'border border-slate-700 text-transparent hover:border-slate-500'
+        }`}
       >
-        {checked && '✓'}
-      </div>
-      <span className="group-hover:translate-x-1 transition-transform">{label}</span>
+        {checked && (
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M2.5 6L5 8.5L9.5 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        )}
+      </button>
+      <span className={checked ? 'text-white' : 'text-slate-400'}>{label}</span>
     </label>
   );
-}
-
-function formatTimeAgo(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMinutes = Math.floor(diffMs / 60000);
-
-  if (diffMinutes < 1) return 'just now';
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
 }
 
 export default CommandSidebar;
