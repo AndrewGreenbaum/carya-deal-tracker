@@ -10,22 +10,12 @@
  * - Click to open modal
  */
 
-import React, { memo } from 'react';
+import { memo } from 'react';
 import {
-  Link,
-  FileText,
-  Globe,
-  Cpu,
-  Shield,
-  Building2,
-  Bot,
-  Database,
-  XCircle,
   ChevronLeft,
   ChevronRight,
-  Linkedin,
 } from 'lucide-react';
-import type { Deal, EnterpriseCategory, InvestmentStage, PaginatedDeals, SortDirection } from '../types';
+import type { Deal, PaginatedDeals, SortDirection } from '../types';
 import { STAGE_LABELS } from '../types';
 import { DealCard } from './DealCard';
 
@@ -81,22 +71,18 @@ export function DealsTable({
         )}
       </div>
 
-      {/* Desktop Table View */}
+      {/* Desktop List View */}
       <div className="hidden md:block flex-1 overflow-auto scrollbar-hide">
-        <table className="w-full text-left border-collapse">
-          <tbody className="text-xs divide-y divide-slate-800/50">
-            {deals.map((deal) => (
-              <DealRow key={deal.id} deal={deal} onClick={() => onDealClick(deal)} showRejected={showRejected} />
-            ))}
-            {deals.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
-                  {isLoading ? 'Loading deals...' : 'No deals found matching your filters'}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <div className="divide-y divide-slate-800/40">
+          {deals.map((deal) => (
+            <DealRow key={deal.id} deal={deal} onClick={() => onDealClick(deal)} showRejected={showRejected} />
+          ))}
+          {deals.length === 0 && (
+            <div className="px-6 py-12 text-center text-slate-500">
+              {isLoading ? 'Loading deals...' : 'No deals found matching your filters'}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Pagination */}
@@ -142,227 +128,35 @@ interface DealRowProps {
 }
 
 const DealRow = memo(function DealRow({ deal, onClick, showRejected = false }: DealRowProps) {
-  // A deal is "rejected" only if not led by a tracked fund
-  // AI classification is informational, not a rejection criteria
   const isRejected = !deal.investorRoles.includes('lead');
-  // When showRejected is enabled, show all deals with full color (no greying out)
   const shouldDim = isRejected && !showRejected;
 
+  const stageLabel = STAGE_LABELS[deal.investmentStage] || deal.investmentStage;
+  const category = deal.enterpriseCategory?.replace('_', ' ');
+
   return (
-    <tr
+    <div
       onClick={onClick}
-      className={`deal-row cursor-pointer group ${
-        shouldDim ? 'opacity-50 grayscale hover:grayscale-0 hover:opacity-100' : ''
+      className={`px-6 py-5 cursor-pointer hover:bg-slate-900/30 transition-colors ${
+        shouldDim ? 'opacity-50 hover:opacity-100' : ''
       }`}
     >
-      {/* Company / Source */}
-      <td className="px-6 py-4">
-        <div
-          className={`text-sm font-bold group-hover:underline underline-offset-4 cursor-pointer ${
-            isRejected ? 'text-slate-400 group-hover:text-white' : 'text-emerald-400'
-          }`}
-        >
-          {deal.startupName}
-        </div>
-        <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1">
-          <SourceIcon source={deal.sourceName} />
-          {deal.sourceName || 'Unknown Source'}
-        </div>
-      </td>
-
-      {/* Stage & Fund */}
-      <td className="px-6 py-4">
-        <div className="flex items-center gap-2 mb-1">
-          <StageBadge stage={deal.investmentStage} isRejected={isRejected} />
-        </div>
-        <div className={`font-bold ${isRejected ? 'text-slate-400' : 'text-white'}`}>
-          {deal.leadInvestor || 'Unknown'}
-        </div>
-      </td>
-
-      {/* AI Category */}
-      <td className="px-6 py-4">
-        <CategoryBadge category={deal.enterpriseCategory} shouldDim={shouldDim} />
-      </td>
-
-      {/* Company Links */}
-      <td className="px-6 py-4">
-        <CompanyLinks
-          website={deal.companyWebsite}
-          ceoLinkedin={deal.founders?.find(f => f.linkedinUrl)?.linkedinUrl}
-          shouldDim={shouldDim}
-        />
-      </td>
-
-      {/* Detected Time */}
-      <td className="px-6 py-4 text-right text-slate-500 font-mono">
-        {formatDate(deal.date)}
-      </td>
-    </tr>
+      <div className="text-base font-semibold text-white">
+        {deal.startupName}
+      </div>
+      <div className="text-sm text-slate-500 mt-1 flex items-center gap-1.5">
+        <span>{stageLabel}</span>
+        <span className="text-slate-700">·</span>
+        <span>{deal.leadInvestor || 'Unknown'}</span>
+        {category && category !== 'not ai' && (
+          <>
+            <span className="text-slate-700">·</span>
+            <span className="text-blue-400 capitalize">{category}</span>
+          </>
+        )}
+      </div>
+    </div>
   );
 });
-
-function SourceIcon({ source }: { source?: string }) {
-  if (!source) return <Link className="w-3 h-3" />;
-
-  const lowerSource = source.toLowerCase();
-  if (lowerSource.includes('sec') || lowerSource.includes('form d')) {
-    return <FileText className="w-3 h-3" />;
-  }
-  if (lowerSource.includes('blog') || lowerSource.includes('sequoia') || lowerSource.includes('a16z')) {
-    return <Globe className="w-3 h-3" />;
-  }
-  return <Link className="w-3 h-3" />;
-}
-
-function StageBadge({ stage, isRejected }: { stage: InvestmentStage; isRejected: boolean }) {
-  if (isRejected) {
-    return (
-      <span className="stage-badge bg-slate-800 text-slate-400 border-slate-700">REJECTED</span>
-    );
-  }
-
-  return <span className={`stage-badge stage-${stage}`}>{STAGE_LABELS[stage]?.toUpperCase() || stage.toUpperCase()}</span>;
-}
-
-const CATEGORY_ICONS: Record<EnterpriseCategory, React.ReactNode> = {
-  // Enterprise AI
-  infrastructure: <Cpu className="w-3 h-3 text-slate-400" />,
-  security: <Shield className="w-3 h-3 text-slate-400" />,
-  vertical_saas: <Building2 className="w-3 h-3 text-slate-400" />,
-  agentic: <Bot className="w-3 h-3 text-slate-400" />,
-  data_intelligence: <Database className="w-3 h-3 text-slate-400" />,
-  // Consumer AI
-  consumer_ai: <Bot className="w-3 h-3 text-blue-400" />,
-  gaming_ai: <Bot className="w-3 h-3 text-purple-400" />,
-  social_ai: <Bot className="w-3 h-3 text-pink-400" />,
-  // Non-AI
-  not_ai: <XCircle className="w-3 h-3 text-red-900" />,
-};
-
-function CategoryBadge({
-  category,
-  shouldDim,
-}: {
-  category?: EnterpriseCategory;
-  shouldDim: boolean;
-}) {
-  const cat = category || 'not_ai';
-  const icon = CATEGORY_ICONS[cat] || CATEGORY_ICONS['not_ai'];
-
-  // Check if it's a consumer AI category
-  const isConsumerAi = cat === 'consumer_ai' || cat === 'gaming_ai' || cat === 'social_ai';
-
-  // FIX: Only show not_ai style when category is actually not_ai
-  // Rejected deals keep their actual category but are styled differently at row level
-  if (cat === 'not_ai') {
-    return (
-      <div className="category-badge category-not_ai">
-        {icon}
-        not ai
-      </div>
-    );
-  }
-
-  // Consumer AI gets a different style
-  if (isConsumerAi) {
-    return (
-      <div className={`category-badge category-consumer ${shouldDim ? 'opacity-75' : ''}`}>
-        {icon}
-        {cat.replace('_', ' ')}
-      </div>
-    );
-  }
-
-  // Enterprise AI categories
-  return (
-    <div className={`category-badge category-${cat} ${shouldDim ? 'opacity-75' : ''}`}>
-      {icon}
-      {cat.replace('_', ' ')}
-    </div>
-  );
-}
-
-function CompanyLinks({
-  website,
-  ceoLinkedin,
-  shouldDim,
-}: {
-  website?: string;
-  ceoLinkedin?: string;
-  shouldDim: boolean;
-}) {
-  const hasWebsite = !!website;
-  const hasLinkedin = !!ceoLinkedin;
-
-  const handleClick = (e: React.MouseEvent, url: string) => {
-    e.stopPropagation(); // Prevent row click
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
-  return (
-    <div className="flex items-center justify-center gap-3">
-      {/* Website Icon */}
-      <button
-        onClick={(e) => hasWebsite && handleClick(e, website!)}
-        disabled={!hasWebsite}
-        className={`p-1.5 rounded transition-all ${
-          hasWebsite
-            ? 'hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 cursor-pointer'
-            : 'text-slate-700 cursor-not-allowed'
-        } ${shouldDim ? 'opacity-50' : ''}`}
-        title={hasWebsite ? `Visit ${website}` : 'No website'}
-      >
-        <Globe className="w-4 h-4" />
-      </button>
-
-      {/* LinkedIn Icon */}
-      <button
-        onClick={(e) => hasLinkedin && handleClick(e, ceoLinkedin!)}
-        disabled={!hasLinkedin}
-        className={`p-1.5 rounded transition-all ${
-          hasLinkedin
-            ? 'hover:bg-slate-700 text-blue-400 hover:text-blue-300 cursor-pointer'
-            : 'text-slate-700 cursor-not-allowed'
-        } ${shouldDim ? 'opacity-50' : ''}`}
-        title={hasLinkedin ? 'CEO LinkedIn' : 'No LinkedIn'}
-      >
-        <Linkedin className="w-4 h-4" />
-      </button>
-    </div>
-  );
-}
-
-function formatDate(dateString: string): string {
-  if (!dateString) return 'Unknown';
-
-  // Parse date components to avoid timezone issues with ISO date strings
-  // "YYYY-MM-DD" parsed by new Date() is treated as UTC midnight,
-  // which can shift to previous day in local timezones behind UTC
-  let date: Date;
-  const parts = dateString.split('T')[0].split('-');
-  if (parts.length >= 3) {
-    const year = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10) - 1; // JS months are 0-indexed
-    const day = parseInt(parts[2], 10);
-    date = new Date(year, month, day);
-  } else {
-    date = new Date(dateString);
-  }
-
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-
-  if (diffHours < 24) {
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  }
-
-  if (diffHours < 48) {
-    return 'Yesterday';
-  }
-
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
 
 export default DealsTable;
