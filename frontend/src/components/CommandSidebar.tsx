@@ -139,6 +139,14 @@ export function CommandSidebar({
           </button>
         </div>
 
+        {/* Brand */}
+        <div className="hidden md:flex items-center gap-3 px-5 py-4">
+          <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full pulse-glow" />
+          <h1 className="text-base font-bold tracking-tighter bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 bg-clip-text text-transparent animate-shimmer bg-[length:200%_100%]">
+            Carya Eagle Eye
+          </h1>
+        </div>
+
         {/* Scrollable content area - entire sidebar scrolls */}
         <div className="flex-1 min-h-0 overflow-y-auto">
           {/* Navigation */}

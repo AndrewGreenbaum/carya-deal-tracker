@@ -12,8 +12,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { CommandHeader } from './components/CommandHeader';
+import { ChevronLeft, ChevronRight, Menu } from 'lucide-react';
 import { CommandSidebar } from './components/CommandSidebar';
 import { StatsCards } from './components/StatsCards';
 import { DealsTable } from './components/DealsTable';
@@ -374,16 +373,8 @@ function App() {
   }, []);
 
   return (
-    <div className="h-screen flex flex-col bg-[#050506] text-slate-300 font-['JetBrains_Mono',monospace]">
-      {/* Header */}
-      <CommandHeader
-        systemStatus={systemStatus}
-        onSettingsClick={() => setSettingsOpen(true)}
-        onPreFundingClick={() => setCurrentView('prefunding')}
-        onMenuClick={() => setMobileMenuOpen(true)}
-      />
-
-      {/* Main Layout */}
+    <div className="h-screen flex bg-[#050506] text-slate-300 font-['JetBrains_Mono',monospace]">
+      {/* Main Layout - no header, content starts immediately */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Sidebar - hidden on mobile (shown via drawer), visible on desktop */}
         <div
@@ -436,6 +427,15 @@ function App() {
 
         {/* Main Content */}
         <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Mobile menu button - no header, just a floating button */}
+          <button
+            onClick={() => setMobileMenuOpen(true)}
+            className="md:hidden absolute top-3 left-3 z-30 flex items-center justify-center w-10 h-10 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 rounded transition-colors"
+            aria-label="Toggle menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+
           {/* Dashboard View */}
           {currentView === 'dashboard' && (
             <>
