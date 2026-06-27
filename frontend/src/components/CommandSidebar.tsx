@@ -2,10 +2,10 @@
  * CommandSidebar - Minimal left panel with navigation, filters, and funds
  */
 
-import { useEffect } from 'react';
-import { X, Search } from 'lucide-react';
-import type { FilterState, Fund, ViewType } from '../types';
-import { TRACKED_FUNDS } from '../types';
+import { useState, useEffect } from 'react';
+import { X, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import type { FilterState, EnterpriseCategory, Fund, ViewType } from '../types';
+import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
 interface CommandSidebarProps {
   filters: FilterState;
@@ -32,6 +32,7 @@ export function CommandSidebar({
 }: CommandSidebarProps) {
   void _onOpenFeedback;
   void _onOpenAircraft;
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
   // Close sidebar when navigating on mobile
   const handleViewChange = (view: ViewType) => {
@@ -66,6 +67,14 @@ export function CommandSidebar({
         [key]: !filters[key],
       });
     }
+  };
+
+  const setCategory = (category: EnterpriseCategory | undefined) => {
+    onFiltersChange({
+      ...filters,
+      selectedCategory: category,
+    });
+    setShowCategoryDropdown(false);
   };
 
   const setFund = (fundSlug: string | undefined) => {
@@ -173,22 +182,76 @@ export function CommandSidebar({
             </div>
             <div className="space-y-4">
               <FilterCheckbox
-                label="Enterprise AI"
-                checked={filters.enterpriseAiOnly}
-                onChange={() => {
-                  // If enterprise AI is being turned on, also turn on aiDealsOnly
-                  if (!filters.enterpriseAiOnly) {
-                    onFiltersChange({ ...filters, aiDealsOnly: true, enterpriseAiOnly: true });
-                  } else {
-                    onFiltersChange({ ...filters, enterpriseAiOnly: false });
-                  }
-                }}
+                label="AI Companies Only"
+                checked={filters.aiDealsOnly}
+                onChange={() => toggleFilter('aiDealsOnly')}
               />
+              {filters.aiDealsOnly && (
+                <div className="ml-6">
+                  <FilterCheckbox
+                    label="Enterprise AI Only"
+                    checked={filters.enterpriseAiOnly}
+                    onChange={() => toggleFilter('enterpriseAiOnly')}
+                  />
+                </div>
+              )}
               <FilterCheckbox
                 label="Lead Investors"
                 checked={filters.leadOnly}
                 onChange={() => toggleFilter('leadOnly')}
               />
+              <FilterCheckbox
+                label="Show Rejected"
+                checked={filters.showRejected}
+                onChange={() => toggleFilter('showRejected')}
+              />
+
+              {/* Category Dropdown */}
+              <div className="pt-2">
+                <button
+                  onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
+                  className="w-full flex items-center justify-between text-sm text-slate-400 hover:text-slate-200 py-2 px-3 bg-slate-900/50 rounded border border-slate-800 min-h-[44px] md:min-h-0"
+                >
+                  <span>
+                    {filters.selectedCategory
+                      ? CATEGORY_LABELS[filters.selectedCategory]
+                      : 'All Categories'}
+                  </span>
+                  {showCategoryDropdown ? (
+                    <ChevronUp className="w-4 h-4" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4" />
+                  )}
+                </button>
+
+                {showCategoryDropdown && (
+                  <div className="mt-1 bg-slate-900/80 border border-slate-800 rounded overflow-hidden">
+                    <button
+                      onClick={() => setCategory(undefined)}
+                      className={`w-full text-left text-xs px-3 py-2 hover:bg-slate-800/50 min-h-[44px] md:min-h-0 ${
+                        !filters.selectedCategory ? 'text-blue-400' : 'text-slate-400'
+                      }`}
+                    >
+                      All Categories
+                    </button>
+                    {(Object.keys(CATEGORY_LABELS) as EnterpriseCategory[])
+                      .filter((c) => c !== 'not_ai')
+                      .map((category) => (
+                        <button
+                          key={category}
+                          onClick={() => setCategory(category)}
+                          className={`w-full text-left text-xs px-3 py-2 hover:bg-slate-800/50 min-h-[44px] md:min-h-0 ${
+                            filters.selectedCategory === category
+                              ? 'text-blue-400'
+                              : 'text-slate-400'
+                          }`}
+                        >
+                          {CATEGORY_LABELS[category]}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
