@@ -65,7 +65,7 @@ export function DealsTable({
   return (
     <>
       {/* Mobile Card View */}
-      <div className="md:hidden flex-1 overflow-auto p-4 space-y-3">
+      <div className="md:hidden flex-1 overflow-auto scrollbar-hide p-4 space-y-3">
         {deals.map((deal) => (
           <DealCard
             key={deal.id}
@@ -82,7 +82,7 @@ export function DealsTable({
       </div>
 
       {/* Desktop Table View */}
-      <div className="hidden md:block flex-1 overflow-auto">
+      <div className="hidden md:block flex-1 overflow-auto scrollbar-hide">
         <table className="w-full text-left border-collapse">
           <tbody className="text-xs divide-y divide-slate-800/50">
             {deals.map((deal) => (
