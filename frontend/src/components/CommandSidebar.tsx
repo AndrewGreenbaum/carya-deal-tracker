@@ -357,8 +357,8 @@ function FilterCheckbox({ label, checked, onChange }: FilterToggleProps) {
       onClick={onChange}
       className="flex items-center gap-2 py-1 cursor-pointer min-h-[44px] md:min-h-0 transition-colors"
     >
-      <div className={`w-1.5 h-1.5 rounded-full transition-colors ${checked ? 'bg-emerald-500' : 'bg-transparent'}`} />
-      <span className={`text-sm transition-colors ${checked ? 'text-white' : 'text-slate-600 hover:text-slate-400'}`}>
+      <div className={`w-1 h-1 rounded-full transition-colors ${checked ? 'bg-emerald-500' : 'bg-transparent'}`} />
+      <span className={`text-xs transition-colors ${checked ? 'text-white' : 'text-slate-600 hover:text-slate-400'}`}>
         {label}
       </span>
     </button>
