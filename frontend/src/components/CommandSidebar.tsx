@@ -345,31 +345,33 @@ function NavItem({ label, active, onClick }: NavItemProps) {
   );
 }
 
-interface FilterCheckboxProps {
+interface FilterToggleProps {
   label: string;
   checked: boolean;
   onChange: () => void;
 }
 
-function FilterCheckbox({ label, checked, onChange }: FilterCheckboxProps) {
+function FilterCheckbox({ label, checked, onChange }: FilterToggleProps) {
   return (
-    <label className="flex items-center gap-3 text-sm cursor-pointer group min-h-[44px] md:min-h-0">
-      <button
-        onClick={onChange}
-        className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
-          checked
-            ? 'bg-emerald-600 text-white'
-            : 'border border-slate-700 text-transparent hover:border-slate-500'
+    <button
+      onClick={onChange}
+      className="flex items-center justify-between w-full py-1.5 cursor-pointer group min-h-[44px] md:min-h-0"
+    >
+      <span className={`text-sm transition-colors ${checked ? 'text-white' : 'text-slate-500'}`}>
+        {label}
+      </span>
+      <div
+        className={`w-8 h-[18px] rounded-full relative transition-colors duration-200 ${
+          checked ? 'bg-emerald-500' : 'bg-slate-700'
         }`}
       >
-        {checked && (
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M2.5 6L5 8.5L9.5 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        )}
-      </button>
-      <span className={checked ? 'text-white' : 'text-slate-400'}>{label}</span>
-    </label>
+        <div
+          className={`absolute top-[3px] w-3 h-3 rounded-full bg-white transition-transform duration-200 ${
+            checked ? 'translate-x-[14px]' : 'translate-x-[3px]'
+          }`}
+        />
+      </div>
+    </button>
   );
 }
 
