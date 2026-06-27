@@ -107,7 +107,7 @@ export function CommandSidebar({
 
       <aside
         className={`
-          w-64 h-full bg-black flex flex-col shrink-0
+          w-64 h-full bg-black border-r border-slate-800/60 flex flex-col shrink-0
           md:relative md:translate-x-0
           fixed top-0 left-0 z-50 transition-transform duration-300 ease-in-out
           ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
