@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { X, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, ChevronDown, ChevronUp } from 'lucide-react';
 import type { FilterState, EnterpriseCategory, Fund, ViewType } from '../types';
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
@@ -33,6 +33,7 @@ export function CommandSidebar({
   void _onOpenFeedback;
   void _onOpenAircraft;
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+  const [showFunds, setShowFunds] = useState(false);
 
   // Close sidebar when navigating on mobile
   const handleViewChange = (view: ViewType) => {
@@ -156,18 +157,17 @@ export function CommandSidebar({
           {/* Search */}
           <div className="pb-8">
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-600" />
               <input
                 type="text"
-                placeholder="Search..."
+                placeholder="Search"
                 value={filters.searchQuery || ''}
                 onChange={(e) => onFiltersChange({ ...filters, searchQuery: e.target.value })}
-                className="w-full bg-transparent border border-slate-800 rounded-md pl-8 pr-8 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-slate-600"
+                className="w-full bg-transparent border-b border-slate-800 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-slate-500"
               />
               {filters.searchQuery && (
                 <button
                   onClick={() => onFiltersChange({ ...filters, searchQuery: '' })}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300"
+                  className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -177,7 +177,7 @@ export function CommandSidebar({
 
           {/* Filters */}
           <div className="pb-10">
-            <div className="text-xs uppercase text-blue-500 font-medium mb-4 tracking-wider">
+            <div className="text-[10px] uppercase text-slate-600 font-semibold mb-4 tracking-widest">
               Filters
             </div>
             <div className="space-y-4">
@@ -229,7 +229,7 @@ export function CommandSidebar({
                     <button
                       onClick={() => setCategory(undefined)}
                       className={`w-full text-left text-xs px-3 py-2 hover:bg-slate-800/50 min-h-[44px] md:min-h-0 ${
-                        !filters.selectedCategory ? 'text-blue-400' : 'text-slate-400'
+                        !filters.selectedCategory ? 'text-cyan-500' : 'text-slate-400'
                       }`}
                     >
                       All Categories
@@ -242,7 +242,7 @@ export function CommandSidebar({
                           onClick={() => setCategory(category)}
                           className={`w-full text-left text-xs px-3 py-2 hover:bg-slate-800/50 min-h-[44px] md:min-h-0 ${
                             filters.selectedCategory === category
-                              ? 'text-blue-400'
+                              ? 'text-cyan-500'
                               : 'text-slate-400'
                           }`}
                         >
@@ -257,38 +257,50 @@ export function CommandSidebar({
 
           {/* Funds */}
           <div className="pb-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="text-xs uppercase text-blue-500 font-medium tracking-wider">
-                Funds
+            <button
+              onClick={() => setShowFunds(!showFunds)}
+              className="flex items-center justify-between w-full mb-2"
+            >
+              <div className="text-[10px] uppercase text-slate-600 font-semibold tracking-widest">
+                Funds {filters.selectedFund && `(1)`}
               </div>
-              {filters.selectedFund && (
-                <button
-                  onClick={() => setFund(undefined)}
-                  className="text-[10px] text-blue-400 hover:text-blue-300"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-            <ul className="space-y-1 text-sm" role="listbox" aria-label="Tracked funds filter">
-              {displayFunds.map((fund) => (
-                <li key={fund.slug} role="presentation">
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={fund.slug === filters.selectedFund}
-                    onClick={() => setFund(fund.slug === filters.selectedFund ? undefined : fund.slug)}
-                    className={`w-full text-left px-2 py-1.5 rounded text-sm transition-colors cursor-pointer ${
-                      fund.slug === filters.selectedFund
-                        ? 'text-blue-400'
-                        : 'text-slate-500 hover:text-slate-300'
-                    } ${!fund.isActive ? 'opacity-50' : ''}`}
+              <div className="flex items-center gap-2">
+                {filters.selectedFund && (
+                  <span
+                    onClick={(e) => { e.stopPropagation(); setFund(undefined); }}
+                    className="text-[10px] text-cyan-600 hover:text-cyan-500 cursor-pointer"
                   >
-                    {fund.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
+                    Clear
+                  </span>
+                )}
+                {showFunds ? (
+                  <ChevronUp className="w-3 h-3 text-slate-600" />
+                ) : (
+                  <ChevronDown className="w-3 h-3 text-slate-600" />
+                )}
+              </div>
+            </button>
+            {showFunds && (
+              <ul className="space-y-1 text-sm mt-3" role="listbox" aria-label="Tracked funds filter">
+                {displayFunds.map((fund) => (
+                  <li key={fund.slug} role="presentation">
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={fund.slug === filters.selectedFund}
+                      onClick={() => setFund(fund.slug === filters.selectedFund ? undefined : fund.slug)}
+                      className={`w-full text-left px-2 py-1.5 rounded text-sm transition-colors cursor-pointer ${
+                        fund.slug === filters.selectedFund
+                          ? 'text-cyan-500'
+                          : 'text-slate-500 hover:text-slate-300'
+                      } ${!fund.isActive ? 'opacity-50' : ''}`}
+                    >
+                      {fund.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       </aside>
@@ -330,7 +342,7 @@ function FilterCheckbox({ label, checked, onChange }: FilterCheckboxProps) {
         onClick={onChange}
         className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
           checked
-            ? 'bg-blue-600 text-white'
+            ? 'bg-cyan-600 text-white'
             : 'border border-slate-700 text-transparent hover:border-slate-500'
         }`}
       >
