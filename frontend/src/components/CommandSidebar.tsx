@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { X, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Mail } from 'lucide-react';
 import type { FilterState, EnterpriseCategory, Fund, ViewType } from '../types';
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
@@ -25,12 +25,11 @@ export function CommandSidebar({
   funds,
   currentView,
   onViewChange,
-  onOpenFeedback: _onOpenFeedback,
+  onOpenFeedback,
   onOpenAircraft: _onOpenAircraft,
   isMobileOpen = false,
   onMobileClose,
 }: CommandSidebarProps) {
-  void _onOpenFeedback;
   void _onOpenAircraft;
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [showFunds, setShowFunds] = useState(false);
@@ -306,9 +305,18 @@ export function CommandSidebar({
 
         {/* Bottom status */}
         <div className="px-6 py-4 shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-purple-500 rounded-full" />
-            <span className="text-xs text-slate-600">18 sources active</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-purple-500 rounded-full" />
+              <span className="text-xs text-slate-600">18 sources active</span>
+            </div>
+            <button
+              onClick={onOpenFeedback}
+              className="text-slate-700 hover:text-slate-400 transition-colors"
+              title="Submit feedback"
+            >
+              <Mail className="w-3 h-3" />
+            </button>
           </div>
         </div>
       </aside>
