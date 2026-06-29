@@ -5,6 +5,8 @@
 import { useState, useEffect } from 'react';
 import { X, ChevronDown, ChevronUp, Mail } from 'lucide-react';
 import type { FilterState, EnterpriseCategory, Fund, ViewType } from '../types';
+
+const NAV_VIEWS: ViewType[] = ['dashboard', 'tracker', 'settings'];
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
 interface CommandSidebarProps {
@@ -17,6 +19,7 @@ interface CommandSidebarProps {
   onOpenAircraft?: () => void;
   isMobileOpen?: boolean;
   onMobileClose?: () => void;
+  sidebarNavIndex?: number;
 }
 
 export function CommandSidebar({
@@ -29,6 +32,7 @@ export function CommandSidebar({
   onOpenAircraft: _onOpenAircraft,
   isMobileOpen = false,
   onMobileClose,
+  sidebarNavIndex = -1,
 }: CommandSidebarProps) {
   void _onOpenAircraft;
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
@@ -106,7 +110,7 @@ export function CommandSidebar({
 
       <aside
         className={`
-          w-64 h-full bg-black border-r border-slate-800/60 flex flex-col shrink-0
+          w-64 h-full bg-black border-r border-slate-800/15 flex flex-col shrink-0
           md:relative md:translate-x-0
           fixed top-0 left-0 z-50 transition-transform duration-300 ease-in-out
           ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
@@ -127,30 +131,24 @@ export function CommandSidebar({
         {/* Scrollable content */}
         <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-6">
           {/* Brand */}
-          <div className="flex items-center gap-3 pt-6 pb-10">
-            <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full pulse-glow" />
-            <span className="text-base font-bold tracking-tighter bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 bg-clip-text text-transparent animate-shimmer bg-[length:200%_100%]">
+          <div className="flex items-center gap-2.5 pt-6 pb-10">
+            <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse shadow-[0_0_6px_rgba(148,163,184,0.6)]" style={{ animationDuration: '4s' }} />
+            <span className="text-[11px] font-light tracking-[0.2em] uppercase text-slate-400 font-mono">
               Carya Eagle Eye
             </span>
           </div>
 
           {/* Navigation */}
-          <nav className="space-y-1 pb-10">
-            <NavItem
-              label="Dashboard"
-              active={currentView === 'dashboard'}
-              onClick={() => handleViewChange('dashboard')}
-            />
-            <NavItem
-              label="Tracker"
-              active={currentView === 'tracker'}
-              onClick={() => handleViewChange('tracker')}
-            />
-            <NavItem
-              label="Settings"
-              active={currentView === 'settings'}
-              onClick={() => handleViewChange('settings')}
-            />
+          <nav className="flex flex-col gap-1 pb-10">
+            {NAV_VIEWS.map((view, index) => (
+              <NavItem
+                key={view}
+                label={view.charAt(0).toUpperCase() + view.slice(1)}
+                active={currentView === view}
+                isKeyboardSelected={index === sidebarNavIndex}
+                onClick={() => handleViewChange(view)}
+              />
+            ))}
           </nav>
 
           {/* Search */}
@@ -205,33 +203,29 @@ export function CommandSidebar({
                 onChange={() => toggleFilter('showRejected')}
               />
 
-              {/* Category Dropdown */}
-              <div className="pt-2">
+              {/* Category */}
+              <div className="pt-3">
                 <button
                   onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
-                  className="w-full flex items-center justify-between text-sm text-slate-400 hover:text-slate-200 py-2 px-3 bg-slate-900/50 rounded border border-slate-800 min-h-[44px] md:min-h-0"
+                  className="flex items-center gap-2 py-1 cursor-pointer min-h-[44px] md:min-h-0 transition-colors"
                 >
-                  <span>
+                  <div className={`w-1 h-1 rounded-full transition-colors ${filters.selectedCategory ? 'bg-emerald-500' : 'bg-transparent'}`} />
+                  <span className={`text-xs transition-colors ${filters.selectedCategory ? 'text-white' : 'text-slate-600 hover:text-slate-400'}`}>
                     {filters.selectedCategory
                       ? CATEGORY_LABELS[filters.selectedCategory]
                       : 'All Categories'}
                   </span>
-                  {showCategoryDropdown ? (
-                    <ChevronUp className="w-4 h-4" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4" />
-                  )}
                 </button>
 
                 {showCategoryDropdown && (
-                  <div className="mt-1 bg-slate-900/80 border border-slate-800 rounded overflow-hidden">
+                  <div className="ml-3 mt-1 space-y-0.5">
                     <button
                       onClick={() => setCategory(undefined)}
-                      className={`w-full text-left text-xs px-3 py-2 hover:bg-slate-800/50 min-h-[44px] md:min-h-0 ${
-                        !filters.selectedCategory ? 'text-cyan-500' : 'text-slate-400'
+                      className={`block text-xs py-1 transition-colors ${
+                        !filters.selectedCategory ? 'text-white' : 'text-slate-600 hover:text-slate-400'
                       }`}
                     >
-                      All Categories
+                      All
                     </button>
                     {(Object.keys(CATEGORY_LABELS) as EnterpriseCategory[])
                       .filter((c) => c !== 'not_ai')
@@ -239,10 +233,10 @@ export function CommandSidebar({
                         <button
                           key={category}
                           onClick={() => setCategory(category)}
-                          className={`w-full text-left text-xs px-3 py-2 hover:bg-slate-800/50 min-h-[44px] md:min-h-0 ${
+                          className={`block text-xs py-1 transition-colors ${
                             filters.selectedCategory === category
-                              ? 'text-cyan-500'
-                              : 'text-slate-400'
+                              ? 'text-white'
+                              : 'text-slate-600 hover:text-slate-400'
                           }`}
                         >
                           {CATEGORY_LABELS[category]}
@@ -327,18 +321,19 @@ export function CommandSidebar({
 interface NavItemProps {
   label: string;
   active?: boolean;
+  isKeyboardSelected?: boolean;
   onClick: () => void;
 }
 
-function NavItem({ label, active, onClick }: NavItemProps) {
+function NavItem({ label, active, isKeyboardSelected, onClick }: NavItemProps) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-2 py-2 rounded text-base transition-colors min-h-[44px] md:min-h-0 ${
+      className={`w-full text-left py-2.5 font-mono text-[13px] transition-colors min-h-[44px] md:min-h-0 ${
         active
-          ? 'text-white font-medium'
-          : 'text-slate-500 hover:text-slate-300'
-      }`}
+          ? 'text-slate-100 font-medium'
+          : 'text-slate-700 hover:text-slate-400'
+      } ${isKeyboardSelected ? 'bg-slate-800/20' : ''}`}
     >
       {label}
     </button>

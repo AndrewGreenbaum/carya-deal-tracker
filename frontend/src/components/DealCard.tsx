@@ -59,7 +59,7 @@ export const DealCard = memo(function DealCard({ deal, onClick, showRejected = f
           </div>
         </div>
         <div className="text-right shrink-0">
-          <div className="text-sm font-bold text-white">{deal.amountInvested}</div>
+          <div className="text-sm font-bold text-white">{deal.amountInvested?.replace(/\bmillion\b/gi, 'M').replace(/\bbillion\b/gi, 'B').replace(/(\d)\s+(M|B)\b/g, '$1$2')}</div>
           <div className="text-xs text-slate-500">{formatDate(deal.date)}</div>
         </div>
       </div>

@@ -14,7 +14,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Menu } from 'lucide-react';
 import { CommandSidebar } from './components/CommandSidebar';
-import { StatsCards } from './components/StatsCards';
+// StatsCards removed - header integrated into DealsTable
 import { DealsTable } from './components/DealsTable';
 import { DealModal } from './components/DealModal';
 import { FeedbackModal } from './components/FeedbackModal';
@@ -130,6 +130,7 @@ function App() {
   const [currentView, setCurrentView] = useState<ViewType>(getInitialView);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarNavIndex, setSidebarNavIndex] = useState(-1);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Data state (deals stored in pagination.deals to avoid redundancy)
@@ -170,7 +171,7 @@ function App() {
     nextScrape: new Date(Date.now() + 3600000).toISOString(),
   });
 
-  // Stats
+  // Stats (used internally for calculations)
   const [stats, setStats] = useState<DashboardStats>({
     newDeals24h: 0,
     newDealsTrend: 0,
@@ -179,6 +180,7 @@ function App() {
     claudeCalls: 0,
     verificationRate: 100,
   });
+  void stats;
 
   // Modal state
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
@@ -236,8 +238,8 @@ function App() {
 
   // Load deals
   const loadDeals = useCallback(
-    async (offset = 0) => {
-      setLoading(true);
+    async (offset = 0, append = false) => {
+      if (!append) setLoading(true);
       try {
         // When showRejected is true, don't apply filters - show everything
         // Option C Filter logic (nested):
@@ -259,14 +261,13 @@ function App() {
         });
 
         // Use API results directly - no client-side filtering needed
-        // The API already filters based on the parameters we sent
-        setPagination({
-          deals: result.deals,
+        setPagination((prev) => ({
+          deals: append ? [...prev.deals, ...result.deals] : result.deals,
           total: result.total,
           limit: PAGE_SIZE,
           offset: result.offset,
           hasMore: result.hasMore,
-        });
+        }));
 
         // Calculate stats from the results
         // Use total count as "companies scanned" - this is the total in the database
@@ -350,6 +351,24 @@ function App() {
     loadSystemStatus();
   };
 
+  const NAV_VIEWS: ViewType[] = ['dashboard', 'tracker', 'settings'];
+  const handleSidebarNav = useCallback((direction: 'up' | 'down' | 'select' | 'focus' | 'blur') => {
+    if (direction === 'focus') {
+      setSidebarNavIndex(NAV_VIEWS.indexOf(currentView));
+    } else if (direction === 'blur') {
+      setSidebarNavIndex(-1);
+    } else if (direction === 'up') {
+      setSidebarNavIndex(prev => Math.max(0, prev - 1));
+    } else if (direction === 'down') {
+      setSidebarNavIndex(prev => Math.min(NAV_VIEWS.length - 1, prev + 1));
+    } else if (direction === 'select') {
+      setSidebarNavIndex(prev => {
+        setCurrentView(NAV_VIEWS[prev]);
+        return -1;
+      });
+    }
+  }, [currentView]);
+
   const handleExport = () => {
     // Use same Option C filter logic as loadDeals
     const url = getExportUrl({
@@ -363,9 +382,11 @@ function App() {
     window.open(url, '_blank');
   };
 
-  const handlePageChange = (newOffset: number) => {
-    loadDeals(newOffset);
-  };
+  const handleLoadMore = useCallback(() => {
+    if (pagination.hasMore) {
+      loadDeals(pagination.offset + PAGE_SIZE, true);
+    }
+  }, [pagination.hasMore, pagination.offset, loadDeals]);
 
   const handleSortChange = useCallback((direction: SortDirection) => {
     // Update sort direction in filters - this triggers API refetch via useEffect
@@ -391,6 +412,7 @@ function App() {
               onViewChange={setCurrentView}
               onOpenFeedback={() => setFeedbackOpen(true)}
               onOpenAircraft={() => setAircraftTrackerOpen(true)}
+              sidebarNavIndex={sidebarNavIndex}
             />
           </div>
         </div>
@@ -439,9 +461,6 @@ function App() {
           {/* Dashboard View */}
           {currentView === 'dashboard' && (
             <>
-              {/* Stats Cards */}
-              <StatsCards stats={stats} />
-
               {/* Scan Progress Bar - shows when scan is running */}
               {(() => {
                 if (!systemStatus.nextScrape) return null;
@@ -482,11 +501,12 @@ function App() {
                     onDealClick={setSelectedDeal}
                     onExport={handleExport}
                     onRefresh={handleRefresh}
-                    onPageChange={handlePageChange}
+                    onLoadMore={handleLoadMore}
                     isLoading={loading}
                     sortDirection={filters.sortDirection}
                     onSortChange={handleSortChange}
                     showRejected={filters.showRejected}
+                    onSidebarNav={handleSidebarNav}
                   />
                 </ErrorBoundary>
               </div>
