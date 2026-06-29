@@ -201,6 +201,7 @@ _extraction_stats = {
     "round_type_corrected": 0,     # Round types corrected to UNKNOWN (invalid enum)
     "founders_removed": 0,         # Founders removed for not being in text
     "relative_date_corrected": 0,  # Dates corrected from relative date phrases (e.g., "6 months ago")
+    "fund_raise_rejected": 0,      # Deals rejected because startup name is a tracked VC fund
 }
 _extraction_stats_thread_lock = threading.Lock()
 
@@ -795,6 +796,7 @@ async def _reextract_with_sonnet(
         # FIX (2026-01): Added _validate_round_type and _validate_founders_in_text
         # which were missing, causing duplicate calls after Sonnet returned
         response = _validate_company_in_text(response, article_text)
+        response = _validate_startup_not_fund(response, article_text)
         response = _validate_round_type(response)
         response = _validate_investors_in_text(response, article_text)
         response = _validate_founders_in_text(response, article_text)
@@ -852,8 +854,11 @@ CRYPTO_KEYWORDS = [
     "decentralized", "on-chain", "tokenomics", "staking",
     "yield farming", "liquidity pool", "airdrop", "bridge",
     "validator", "consensus", "gas fee", "mint",
+    # Tokenization (crypto asset tokenization, distinct from NLP tokenization)
+    "tokenization", "tokenize", "tokenized",
     # Crypto-specific terms
     "wallet connect", "metamask", "dex", "amm", "tvl",
+    "memecoin", "meme coin", "altcoin", "stablecoin",
 ]
 
 # FIX (2026-01): Pre-compile crypto keyword regex for efficiency
@@ -898,6 +903,11 @@ CRYPTO_URL_PATTERNS = [
     "crypto", "defi", "nft", "web3",  # In domain name (strong signal)
     "coindesk", "cointelegraph", "theblock.co", "decrypt.co",  # Crypto news sites
     "token",  # Usually crypto-specific
+]
+
+# Known crypto/web3 companies that should NOT be classified as Enterprise AI
+KNOWN_CRYPTO_COMPANIES = [
+    "farcaster", "cork",
 ]
 
 # Keywords that indicate Enterprise AI (B2B AI companies)
@@ -1049,6 +1059,11 @@ def _is_crypto_deal(deal: DealExtraction, article_text: str) -> bool:
     text_lower = article_text.lower()
     name_lower = deal.startup_name.lower() if deal.startup_name else ""
 
+    # Check 0: Known crypto company (strongest signal)
+    if any(known in name_lower for known in KNOWN_CRYPTO_COMPANIES):
+        logger.debug(f"Crypto detected (known company): {deal.startup_name}")
+        return True
+
     # Check 1a: Company name contains explicit crypto patterns (substring match OK)
     if any(pattern in name_lower for pattern in CRYPTO_COMPANY_PATTERNS):
         logger.debug(f"Crypto detected by company name pattern: {deal.startup_name}")
@@ -1060,6 +1075,18 @@ def _is_crypto_deal(deal: DealExtraction, article_text: str) -> bool:
         if re.search(pattern, name_lower):
             logger.debug(f"Crypto detected by strict company pattern: {deal.startup_name}")
             return True
+
+    # Check 1c: Description contains crypto signals (lower threshold - descriptions are curated)
+    desc_lower = deal.startup_description.lower() if deal.startup_description else ""
+    if desc_lower:
+        crypto_desc_keywords = len(CRYPTO_KEYWORDS_PATTERN.findall(desc_lower))
+        if crypto_desc_keywords >= 1:
+            # Only if NO AI signals in description (protect NLP tokenization companies)
+            ai_desc_signals = ["nlp", "natural language", "machine learning", "neural",
+                               "large language model", "llm", "text processing", "ai model"]
+            if not any(sig in desc_lower for sig in ai_desc_signals):
+                logger.debug(f"Crypto detected by description keywords ({crypto_desc_keywords}): {deal.startup_name}")
+                return True
 
     # Check 2: Article is dominated by crypto keywords
     # IMPROVED (2026-01): Increased threshold from 3 to 4 keywords, and added
@@ -1078,6 +1105,23 @@ def _is_crypto_deal(deal: DealExtraction, article_text: str) -> bool:
     if crypto_count >= threshold:
         logger.debug(f"Crypto detected by keyword density ({crypto_count}/{threshold}): {deal.startup_name}")
         return True
+
+    # Check 2b: Article contains crypto self-labeling phrases
+    # These are phrases where the company/article explicitly identifies as crypto
+    CRYPTO_SELF_LABELS = [
+        "tokenization startup", "tokenization company", "tokenization platform",
+        "tokenization protocol", "tokenization project",
+        "blockchain startup", "blockchain company", "blockchain platform",
+        "crypto startup", "crypto company", "crypto platform", "crypto project",
+        "defi startup", "defi company", "defi platform", "defi protocol",
+        "nft marketplace", "nft platform", "nft startup",
+        "web3 startup", "web3 company", "web3 platform",
+    ]
+    if any(label in text_lower for label in CRYPTO_SELF_LABELS):
+        # Protect NLP tokenization companies from false positives
+        if not has_ai_signals:
+            logger.debug(f"Crypto detected by self-label phrase: {deal.startup_name}")
+            return True
 
     # Check 3: Lead investor has "crypto" in name (e.g., "a16z crypto")
     if deal.tracked_fund_name and "crypto" in deal.tracked_fund_name.lower():
@@ -1891,6 +1935,9 @@ async def extract_deal(
             # Post-process: validate company name is in article (prevents hallucinated companies)
             response = _validate_company_in_text(response, article_text)
 
+            # Post-process: reject fund raises (startup = tracked VC fund)
+            response = _validate_startup_not_fund(response, article_text)
+
             # Post-process: validate round type is valid enum value (prevents dedup bypass)
             response = _validate_round_type(response)
 
@@ -2659,6 +2706,57 @@ def _validate_company_in_text(deal: DealExtraction, article_text: str) -> DealEx
     deal.announcement_rejection_reason = (
         f"Company name '{deal.startup_name}' not found in article text - likely hallucinated"
     )
+
+    return deal
+
+
+def _validate_startup_not_fund(deal: DealExtraction, article_text: str) -> DealExtraction:
+    """
+    Reject deals where the startup name is actually a tracked VC fund.
+    Catches fund raises (e.g., "a16z raises $15B Fund VII") being saved as portfolio deals.
+    """
+    if not deal or not deal.startup_name:
+        return deal
+
+    from src.harvester.fund_matcher import match_fund_name
+
+    # Check if startup name matches any tracked fund
+    matched_slug = match_fund_name(deal.startup_name)
+    if matched_slug:
+        logger.warning(
+            f"Rejecting fund raise: startup '{deal.startup_name}' matches "
+            f"tracked fund '{matched_slug}'"
+        )
+        increment_extraction_stat("fund_raise_rejected")
+        deal.is_new_announcement = False
+        deal.announcement_rejection_reason = (
+            f"Startup name matches tracked fund: {matched_slug} (likely fund raise, not portfolio deal)"
+        )
+        return deal
+
+    # Secondary check: fund-raise keywords in article with large amounts
+    # Catches phrases like "raised a new fund", "Fund VII", "LP commitments"
+    text_lower = article_text.lower() if article_text else ""
+    FUND_RAISE_PHRASES = [
+        "raised a fund", "raised a new fund", "new fund",
+        "fund i", "fund ii", "fund iii", "fund iv", "fund v",
+        "fund vi", "fund vii", "fund viii", "fund ix", "fund x",
+        "limited partners", "lp commitments", "fund size",
+        "assets under management", "aum", "fundraising",
+    ]
+    if any(phrase in text_lower for phrase in FUND_RAISE_PHRASES):
+        # Only reject if amount is very large (>$1B) — normal deals aren't this big
+        amount_usd = _parse_amount_to_usd(deal.amount)
+        if amount_usd and amount_usd >= 1_000_000_000:
+            logger.warning(
+                f"Rejecting likely fund raise: '{deal.startup_name}' "
+                f"with fund-raise keywords and amount {deal.amount}"
+            )
+            increment_extraction_stat("fund_raise_rejected")
+            deal.is_new_announcement = False
+            deal.announcement_rejection_reason = (
+                f"Likely fund raise: fund-raise keywords + amount {deal.amount} >= $1B"
+            )
 
     return deal
 
