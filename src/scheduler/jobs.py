@@ -1884,6 +1884,7 @@ async def scrape_external_sources(days: int = 7, scan_job_id: Optional[int] = No
     health_rate = (successful_sources / total_sources * 100) if total_sources > 0 else 0
 
     # Get extraction filter stats (from extractor.py post-processing)
+    from ..analyst.extractor import get_extraction_stats
     extraction_filter_stats = get_extraction_stats()
 
     # Add health metrics to results
