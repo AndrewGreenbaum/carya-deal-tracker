@@ -126,14 +126,15 @@ export const DealModal = memo(function DealModal({ deal, onClose, onDealUpdated 
 
   // Focus the close button when modal opens
   useEffect(() => {
-    closeButtonRef.current?.focus();
-
-    // Store the previously focused element
+    // Store the previously focused element BEFORE focusing modal
     const previouslyFocused = document.activeElement as HTMLElement;
+    closeButtonRef.current?.focus();
 
     return () => {
       // Restore focus when modal closes
-      previouslyFocused?.focus?.();
+      if (previouslyFocused && document.body.contains(previouslyFocused)) {
+        previouslyFocused.focus?.();
+      }
     };
   }, []);
 

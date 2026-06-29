@@ -130,7 +130,6 @@ function App() {
   const [currentView, setCurrentView] = useState<ViewType>(getInitialView);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [sidebarNavIndex, setSidebarNavIndex] = useState(-1);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Data state (deals stored in pagination.deals to avoid redundancy)
@@ -351,23 +350,6 @@ function App() {
     loadSystemStatus();
   };
 
-  const NAV_VIEWS: ViewType[] = ['dashboard', 'tracker', 'settings'];
-  const handleSidebarNav = useCallback((direction: 'up' | 'down' | 'select' | 'focus' | 'blur') => {
-    if (direction === 'focus') {
-      setSidebarNavIndex(NAV_VIEWS.indexOf(currentView));
-    } else if (direction === 'blur') {
-      setSidebarNavIndex(-1);
-    } else if (direction === 'up') {
-      setSidebarNavIndex(prev => Math.max(0, prev - 1));
-    } else if (direction === 'down') {
-      setSidebarNavIndex(prev => Math.min(NAV_VIEWS.length - 1, prev + 1));
-    } else if (direction === 'select') {
-      setSidebarNavIndex(prev => {
-        setCurrentView(NAV_VIEWS[prev]);
-        return -1;
-      });
-    }
-  }, [currentView]);
 
   const handleExport = () => {
     // Use same Option C filter logic as loadDeals
@@ -412,7 +394,6 @@ function App() {
               onViewChange={setCurrentView}
               onOpenFeedback={() => setFeedbackOpen(true)}
               onOpenAircraft={() => setAircraftTrackerOpen(true)}
-              sidebarNavIndex={sidebarNavIndex}
             />
           </div>
         </div>
@@ -506,7 +487,7 @@ function App() {
                     sortDirection={filters.sortDirection}
                     onSortChange={handleSortChange}
                     showRejected={filters.showRejected}
-                    onSidebarNav={handleSidebarNav}
+                    modalOpen={!!selectedDeal}
                   />
                 </ErrorBoundary>
               </div>

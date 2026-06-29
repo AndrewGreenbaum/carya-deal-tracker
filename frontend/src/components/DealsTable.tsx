@@ -27,7 +27,7 @@ interface DealsTableProps {
   sortDirection: SortDirection;
   onSortChange: (direction: SortDirection) => void;
   showRejected?: boolean;
-  onSidebarNav?: (direction: 'up' | 'down' | 'select' | 'focus' | 'blur') => void;
+  modalOpen?: boolean;
 }
 
 export function DealsTable({
@@ -41,7 +41,7 @@ export function DealsTable({
   sortDirection: _sortDirection,
   onSortChange: _onSortChange,
   showRejected = false,
-  onSidebarNav,
+  modalOpen = false,
 }: DealsTableProps) {
   void _onExport;
   void _onRefresh;
@@ -56,14 +56,47 @@ export function DealsTable({
   const loadMoreRef = useRef(onLoadMore);
   loadMoreRef.current = onLoadMore;
 
-  // Scroll selected row into view
+  // Refs for stable keyboard handler (avoids re-registering on every state change)
+  const selectedIndexRef = useRef(selectedIndex);
+  const dealsRef = useRef(deals);
+  const onDealClickRef = useRef(onDealClick);
+  selectedIndexRef.current = selectedIndex;
+  dealsRef.current = deals;
+  onDealClickRef.current = onDealClick;
+
+  // Track previous modal state and save scroll position
+  const prevModalOpenRef = useRef(modalOpen);
+  const savedScrollRef = useRef(0);
+
+  // Save scroll position when modal opens, restore when it closes
+  useEffect(() => {
+    if (modalOpen && !prevModalOpenRef.current) {
+      // Modal just opened - save scroll position
+      if (containerRef.current) {
+        savedScrollRef.current = containerRef.current.scrollTop;
+      }
+    } else if (!modalOpen && prevModalOpenRef.current) {
+      // Modal just closed - restore scroll position and scroll selected row into view
+      requestAnimationFrame(() => {
+        if (containerRef.current) {
+          containerRef.current.scrollTop = savedScrollRef.current;
+        }
+        if (selectedIndexRef.current >= 0 && rowRefs.current[selectedIndexRef.current]) {
+          rowRefs.current[selectedIndexRef.current]?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+        }
+      });
+    }
+    prevModalOpenRef.current = modalOpen;
+  }, [modalOpen]);
+
+  // Scroll selected row into view when selection changes
   useEffect(() => {
     if (selectedIndex >= 0 && rowRefs.current[selectedIndex]) {
       rowRefs.current[selectedIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
   }, [selectedIndex]);
 
-  // Keyboard navigation
+  // Keyboard navigation - registered once, reads from refs
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Skip if typing in input
@@ -72,6 +105,8 @@ export function DealsTable({
       if (document.querySelector('[aria-modal="true"]')) return;
 
       const key = e.key;
+      const deals = dealsRef.current;
+      const idx = selectedIndexRef.current;
 
       // Up / W / ArrowUp
       if (key === 'ArrowUp' || key === 'w' || key === 'W') {
@@ -87,25 +122,24 @@ export function DealsTable({
         return;
       }
 
-      // Escape - only deselect if no modal was just closed
+      // Escape - do nothing, just keeps selection
       if (key === 'Escape') {
-        // Do nothing - Escape only closes the modal, keeps selection
         return;
       }
 
       // Enter - open selected deal
-      if (key === 'Enter' && selectedIndex >= 0 && selectedIndex < deals.length) {
+      if (key === 'Enter' && idx >= 0 && idx < deals.length) {
         e.preventDefault();
-        onDealClick(deals[selectedIndex]);
+        onDealClickRef.current(deals[idx]);
         return;
       }
 
       // Ctrl+C / Cmd+C - copy deal data
-      if ((e.ctrlKey || e.metaKey) && key === 'c' && selectedIndex >= 0 && selectedIndex < deals.length) {
+      if ((e.ctrlKey || e.metaKey) && key === 'c' && idx >= 0 && idx < deals.length) {
         const selection = window.getSelection();
         if (!selection || selection.toString().length === 0) {
           e.preventDefault();
-          const deal = deals[selectedIndex];
+          const deal = deals[idx];
           const stage = STAGE_LABELS[deal.investmentStage] || deal.investmentStage;
           const amount = deal.amountInvested ? formatAmount(deal.amountInvested) : '';
           const investor = deal.leadInvestor || '';
@@ -121,29 +155,20 @@ export function DealsTable({
         return;
       }
 
-      // Left / A - sidebar nav
-      if (key === 'ArrowLeft' || key === 'a' || key === 'A') {
-        e.preventDefault();
-        onSidebarNav?.('focus');
-        return;
-      }
-
-      // Right / D - back to table
-      if (key === 'ArrowRight' || key === 'd' || key === 'D') {
-        e.preventDefault();
-        onSidebarNav?.('blur');
-        return;
-      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [deals, selectedIndex, onDealClick, onSidebarNav]);
+  }, []); // Empty deps - handler reads from refs, never re-registers
 
-  // Reset selection when deals change
+  // Reset selection only when the list is replaced (filter change), not when appended (load more)
+  const firstDealIdRef = useRef(deals[0]?.id);
   useEffect(() => {
-    setSelectedIndex(-1);
-  }, [deals.length]);
+    if (deals[0]?.id !== firstDealIdRef.current) {
+      setSelectedIndex(-1);
+      firstDealIdRef.current = deals[0]?.id;
+    }
+  }, [deals]);
 
   // Infinite scroll via intersection observer
   useEffect(() => {

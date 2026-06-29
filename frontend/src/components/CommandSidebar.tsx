@@ -19,7 +19,6 @@ interface CommandSidebarProps {
   onOpenAircraft?: () => void;
   isMobileOpen?: boolean;
   onMobileClose?: () => void;
-  sidebarNavIndex?: number;
 }
 
 export function CommandSidebar({
@@ -32,7 +31,6 @@ export function CommandSidebar({
   onOpenAircraft: _onOpenAircraft,
   isMobileOpen = false,
   onMobileClose,
-  sidebarNavIndex = -1,
 }: CommandSidebarProps) {
   void _onOpenAircraft;
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
@@ -140,12 +138,11 @@ export function CommandSidebar({
 
           {/* Navigation */}
           <nav className="flex flex-col gap-1 pb-10">
-            {NAV_VIEWS.map((view, index) => (
+            {NAV_VIEWS.map((view) => (
               <NavItem
                 key={view}
                 label={view.charAt(0).toUpperCase() + view.slice(1)}
                 active={currentView === view}
-                isKeyboardSelected={index === sidebarNavIndex}
                 onClick={() => handleViewChange(view)}
               />
             ))}
@@ -321,11 +318,10 @@ export function CommandSidebar({
 interface NavItemProps {
   label: string;
   active?: boolean;
-  isKeyboardSelected?: boolean;
   onClick: () => void;
 }
 
-function NavItem({ label, active, isKeyboardSelected, onClick }: NavItemProps) {
+function NavItem({ label, active, onClick }: NavItemProps) {
   return (
     <button
       onClick={onClick}
@@ -333,7 +329,7 @@ function NavItem({ label, active, isKeyboardSelected, onClick }: NavItemProps) {
         active
           ? 'text-slate-100 font-medium'
           : 'text-slate-700 hover:text-slate-400'
-      } ${isKeyboardSelected ? 'bg-slate-800/20' : ''}`}
+      }`}
     >
       {label}
     </button>
