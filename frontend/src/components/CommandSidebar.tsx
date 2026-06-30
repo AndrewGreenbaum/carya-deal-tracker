@@ -305,7 +305,7 @@ export function CommandSidebar({
             <div className="flex items-center gap-2 relative">
               <button
                 onClick={() => setShowShortcuts(!showShortcuts)}
-                className="w-3 h-3 rounded-full bg-emerald-900 hover:bg-emerald-700 transition-colors"
+                className="w-1.5 h-1.5 rounded-full bg-zinc-700 hover:bg-zinc-500 transition-colors"
                 title="Keyboard shortcuts"
               />
               <button
@@ -321,6 +321,10 @@ export function CommandSidebar({
                   <div className="space-y-1 font-mono">
                     <div><span className="text-slate-500">1</span> Dashboard</div>
                     <div><span className="text-slate-500">2</span> Tracker</div>
+                    <div className="border-t border-zinc-800 pt-1 mt-1.5 text-slate-500">Dashboard</div>
+                    <div><span className="text-slate-500">W/S</span> Up / Down</div>
+                    <div><span className="text-slate-500">Enter</span> Open deal</div>
+                    <div><span className="text-slate-500">Ctrl+C</span> Copy name</div>
                     <div className="border-t border-zinc-800 pt-1 mt-1.5 text-slate-500">Tracker</div>
                     <div><span className="text-slate-500">J/K</span> Up / Down</div>
                     <div><span className="text-slate-500">H/L</span> Prev / Next col</div>
