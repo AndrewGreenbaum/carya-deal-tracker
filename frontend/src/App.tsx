@@ -195,6 +195,14 @@ function App() {
     return () => clearTimeout(timer);
   }, [filters.searchQuery]);
 
+  // Intercept settings view → open panel overlay instead
+  useEffect(() => {
+    if (currentView === 'settings') {
+      setSettingsOpen(true);
+      setCurrentView('dashboard');
+    }
+  }, [currentView]);
+
   // Sync view to URL hash for refresh persistence
   useEffect(() => {
     window.location.hash = currentView;
