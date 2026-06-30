@@ -313,7 +313,7 @@ const DealRow = memo(React.forwardRef<HTMLDivElement, DealRowProps>(function Dea
       {/* Raised */}
       <div className="text-[15px] font-medium text-right pr-9">
         {deal.amountInvested && deal.amountInvested !== 'Undisclosed' ? (
-          <span className={`tabular-nums ${parseAmount(deal.amountInvested) >= 100 ? 'text-zinc-50 font-semibold' : 'text-zinc-400'}`}>
+          <span className="tabular-nums text-zinc-400">
             {formatAmount(deal.amountInvested)}
           </span>
         ) : (
@@ -387,16 +387,6 @@ function formatAmount(amount: string): string {
     .replace(/(\d)\s+(M|B)\b/g, '$1$2');
 }
 
-function parseAmount(amount: string): number {
-  const match = amount.match(/\$?([\d.]+)\s*(B|M|K)?/i);
-  if (!match) return 0;
-  const num = parseFloat(match[1]);
-  const unit = (match[2] || '').toUpperCase();
-  if (unit === 'B') return num * 1000;
-  if (unit === 'M') return num;
-  if (unit === 'K') return num / 1000;
-  return num;
-}
 
 function CompanyLinks({
   website,
