@@ -22,7 +22,7 @@ import {
   type DragOverEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { Plus, RefreshCw, Upload } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 import { TrackerColumn } from './TrackerColumn';
 import { TrackerCard } from './TrackerCard';
@@ -342,8 +342,7 @@ export function Tracker() {
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3">
-        <RefreshCw className="w-6 h-6 text-slate-400 animate-spin" />
-        <span className="text-slate-500 text-sm">Loading your pipeline...</span>
+        <span className="text-zinc-600 text-xs">Loading...</span>
       </div>
     );
   }
@@ -351,47 +350,34 @@ export function Tracker() {
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-800 gap-3 sm:gap-0">
-        <div>
-          <h1 className="text-lg sm:text-xl font-bold text-white">Deal Tracker</h1>
-          <p className="text-sm text-slate-400">
-            {stats?.total || 0} companies in pipeline
-          </p>
-        </div>
-        <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
-          <button
-            onClick={loadAll}
-            className="p-2.5 sm:p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center"
-            title="Refresh"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
+      <div className="flex items-baseline justify-between px-6 sm:px-12 pt-10 sm:pt-12 pb-8 sm:pb-10">
+        <h1 className="text-sm font-semibold text-zinc-200 tracking-[-0.02em]">Pipeline</h1>
+        <div className="flex items-baseline gap-6">
+          <span className="text-xs text-zinc-600">
+            {stats?.total || 0} companies
+          </span>
           <button
             onClick={() => setIsBulkAddModalOpen(true)}
-            className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 sm:py-2 bg-slate-700 hover:bg-slate-600 text-white rounded font-medium transition-colors flex-1 sm:flex-none min-h-[44px] sm:min-h-0"
+            className="text-[11px] text-zinc-700 hover:text-zinc-400 transition-colors min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center"
           >
-            <Upload className="w-4 h-4" />
-            <span className="hidden sm:inline">Bulk Add</span>
-            <span className="sm:hidden">Bulk</span>
+            Bulk
           </button>
           <button
             onClick={handleCreateNew}
-            className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 sm:py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-medium transition-colors flex-1 sm:flex-none min-h-[44px] sm:min-h-0"
+            className="text-[11px] text-zinc-700 hover:text-zinc-400 transition-colors min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center"
           >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Add Company</span>
-            <span className="sm:hidden">Add</span>
+            <Plus className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
       {/* Error Banner */}
       {error && (
-        <div className="mx-6 mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm">
+        <div className="mx-6 sm:mx-12 mb-4 text-xs text-red-400">
           {error}
           <button
             onClick={() => setError(null)}
-            className="ml-2 underline hover:no-underline"
+            className="ml-2 text-zinc-600 hover:text-zinc-400 transition-colors"
           >
             Dismiss
           </button>
@@ -399,7 +385,7 @@ export function Tracker() {
       )}
 
       {/* Kanban Board */}
-      <div className="flex-1 min-h-0 overflow-auto p-4 sm:p-6">
+      <div className="flex-1 min-h-0 overflow-auto px-6 sm:px-12 pb-12">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
@@ -407,7 +393,7 @@ export function Tracker() {
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex gap-3 sm:gap-4 min-h-full pb-4" style={{ minWidth: 'max-content' }}>
+          <div className="flex gap-10 sm:gap-14 min-h-full pb-4" style={{ minWidth: 'max-content' }}>
             {columns.map((column) => {
               const columnItems = getItemsByStatus(column.slug);
               return (
@@ -426,13 +412,12 @@ export function Tracker() {
                 />
               );
             })}
-            {/* Add Column Button */}
+            {/* Add Column */}
             <button
               onClick={handleAddColumn}
-              className="flex flex-col items-center justify-center w-64 sm:w-72 shrink-0 h-32 border-2 border-dashed border-slate-700 rounded-lg text-slate-500 hover:border-slate-600 hover:text-slate-400 transition-colors min-h-[44px]"
+              className="shrink-0 text-lg font-light text-zinc-800 hover:text-zinc-500 transition-colors pt-0.5 px-3 min-w-[44px] min-h-[44px] flex items-start justify-center"
             >
-              <Plus className="w-6 h-6 mb-1" />
-              <span className="text-sm">Add Column</span>
+              +
             </button>
           </div>
 
