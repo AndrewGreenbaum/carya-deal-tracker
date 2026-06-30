@@ -453,12 +453,12 @@ CACHED_SYSTEM_MESSAGE[0]["text"] = SYSTEM_PROMPT
 # TOKEN USAGE LOGGING
 # =============================================================================
 
-# Claude Haiku 4.5 pricing (October 2025)
+# Claude 3.5 Haiku pricing (October 2024)
 # See: https://www.anthropic.com/pricing
-HAIKU_INPUT_COST_PER_MILLION = 1.00  # $1.00 per 1M input tokens
-HAIKU_OUTPUT_COST_PER_MILLION = 5.00  # $5.00 per 1M output tokens
-HAIKU_CACHE_READ_COST_PER_MILLION = 0.10  # $0.10 per 1M cache read tokens (10% of input)
-HAIKU_CACHE_WRITE_COST_PER_MILLION = 1.25  # $1.25 per 1M cache write tokens (125% of input)
+HAIKU_INPUT_COST_PER_MILLION = 0.80  # $0.80 per 1M input tokens
+HAIKU_OUTPUT_COST_PER_MILLION = 4.00  # $4.00 per 1M output tokens
+HAIKU_CACHE_READ_COST_PER_MILLION = 0.08  # $0.08 per 1M cache read tokens (10% of input)
+HAIKU_CACHE_WRITE_COST_PER_MILLION = 1.00  # $1.00 per 1M cache write tokens (125% of input)
 
 
 def set_extraction_context(source_name: str, scan_id: Optional[str] = None) -> None:

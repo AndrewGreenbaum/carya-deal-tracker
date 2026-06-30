@@ -46,7 +46,7 @@ class Settings(BaseSettings):
         return v
 
     # LLM Settings
-    llm_model: str = "claude-haiku-4-5-20251001"
+    llm_model: str = "claude-3-5-haiku-20241022"
     llm_model_fallback: str = "claude-sonnet-4-20250514"  # Higher-quality model for re-extraction
     llm_temperature: float = 0.0
     llm_max_tokens: int = 4096
