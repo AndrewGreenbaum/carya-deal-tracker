@@ -529,12 +529,12 @@ function App() {
             </ErrorBoundary>
           )}
 
-          {/* Tracker View */}
-          {currentView === 'tracker' && (
+          {/* Tracker View - always mounted, hidden when inactive */}
+          <div className={currentView === 'tracker' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
             <ErrorBoundary>
               <Tracker />
             </ErrorBoundary>
-          )}
+          </div>
 
           {/* Scans View */}
           {currentView === 'scans' && (
