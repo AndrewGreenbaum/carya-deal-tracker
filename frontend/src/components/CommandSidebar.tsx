@@ -37,6 +37,18 @@ export function CommandSidebar({
   const [showFunds, setShowFunds] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
+  // Close shortcuts popover on any outside click
+  useEffect(() => {
+    if (!showShortcuts) return;
+    const close = () => setShowShortcuts(false);
+    // Delay to avoid closing immediately from the same click that opened it
+    const timer = setTimeout(() => document.addEventListener('click', close), 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', close);
+    };
+  }, [showShortcuts]);
+
   // Close sidebar when navigating on mobile
   const handleViewChange = (view: ViewType) => {
     onViewChange(view);
