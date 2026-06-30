@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import { X, ChevronDown, ChevronUp, Mail } from 'lucide-react';
 import type { FilterState, EnterpriseCategory, Fund, ViewType } from '../types';
 
-const NAV_VIEWS: ViewType[] = ['dashboard', 'tracker', 'settings'];
+const NAV_VIEWS: ViewType[] = ['dashboard', 'new', 'tracker', 'settings'];
 import { CATEGORY_LABELS, TRACKED_FUNDS } from '../types';
 
 interface CommandSidebarProps {
@@ -320,7 +320,8 @@ export function CommandSidebar({
                   <div className="text-slate-300 font-medium mb-1.5">Shortcuts</div>
                   <div className="space-y-1 font-mono">
                     <div><span className="text-slate-500">1</span> Dashboard</div>
-                    <div><span className="text-slate-500">2</span> Tracker</div>
+                    <div><span className="text-slate-500">2</span> New</div>
+                    <div><span className="text-slate-500">3</span> Tracker</div>
                     <div className="border-t border-zinc-800 pt-1 mt-1.5 text-slate-500">Dashboard</div>
                     <div><span className="text-slate-500">W/S</span> Up / Down</div>
                     <div><span className="text-slate-500">Enter</span> Open deal</div>

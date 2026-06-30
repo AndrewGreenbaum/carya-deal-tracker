@@ -23,6 +23,7 @@ import { ScraperControl } from './components/ScraperControl';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Tracker } from './components/Tracker';
+import { NewDeals } from './components/NewDeals';
 import { AdminFeedback } from './components/AdminFeedback';
 import { TokenUsage } from './components/TokenUsage';
 import { MindMapDocs } from './components/MindMapDocs';
@@ -124,7 +125,7 @@ function App() {
   // View state - persist to URL hash for refresh
   const getInitialView = (): ViewType => {
     const hash = window.location.hash.slice(1);
-    const validViews: ViewType[] = ['dashboard', 'tracker', 'prefunding', 'stealth', 'scrapers', 'scans', 'settings'];
+    const validViews: ViewType[] = ['dashboard', 'new', 'tracker', 'prefunding', 'stealth', 'scrapers', 'scans', 'settings'];
     return validViews.includes(hash as ViewType) ? (hash as ViewType) : 'dashboard';
   };
   const [currentView, setCurrentView] = useState<ViewType>(getInitialView);
@@ -213,6 +214,8 @@ function App() {
       if (e.key === '1') {
         setCurrentView('dashboard');
       } else if (e.key === '2') {
+        setCurrentView('new');
+      } else if (e.key === '3') {
         setCurrentView('tracker');
       }
     };
@@ -526,6 +529,13 @@ function App() {
           {currentView === 'scrapers' && (
             <ErrorBoundary>
               <ScraperControl />
+            </ErrorBoundary>
+          )}
+
+          {/* New Deals View */}
+          {currentView === 'new' && (
+            <ErrorBoundary>
+              <NewDeals />
             </ErrorBoundary>
           )}
 

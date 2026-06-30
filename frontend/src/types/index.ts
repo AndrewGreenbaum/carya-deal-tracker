@@ -32,7 +32,7 @@ export type EnterpriseCategory =
 
 export type ScraperType = 'html' | 'rss' | 'playwright' | 'external' | 'dom_diff';
 
-export type ViewType = 'dashboard' | 'stealth' | 'settings' | 'scrapers' | 'tracker' | 'scans' | 'prefunding';
+export type ViewType = 'dashboard' | 'stealth' | 'settings' | 'scrapers' | 'tracker' | 'scans' | 'prefunding' | 'new';
 
 export type ServiceStatus = 'live' | 'idle' | 'error' | 'processing';
 
