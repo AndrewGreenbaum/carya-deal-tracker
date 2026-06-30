@@ -536,12 +536,12 @@ function App() {
             </ErrorBoundary>
           )}
 
-          {/* New Deals View */}
-          {currentView === 'new' && (
+          {/* New Deals View - always mounted for instant display */}
+          <div className={currentView === 'new' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
             <ErrorBoundary>
               <NewDeals />
             </ErrorBoundary>
-          )}
+          </div>
 
           {/* Tracker View - always mounted, hidden when inactive */}
           <div className={currentView === 'tracker' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
