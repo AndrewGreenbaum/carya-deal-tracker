@@ -42,19 +42,19 @@ function DnaBackground({ width, height, mouseRef }: { width: number; height: num
   const animRef = useRef<number>(0);
   const timeRef = useRef<number>(0);
 
-  const NODE_COUNT = 28;
-  const AMPLITUDE = 40;
-  const MOUSE_RADIUS = 90;
-  const SPRING = 0.03;
-  const DAMPING = 0.92;
-  const BREAK_FORCE = 8;
+  const NODE_COUNT = 36;
+  const AMPLITUDE = 80;
+  const MOUSE_RADIUS = 120;
+  const SPRING = 0.025;
+  const DAMPING = 0.94;
+  const BREAK_FORCE = 12;
 
   const initNodes = useCallback(() => {
     const strands: DnaNode[][] = [[], []];
     const spacing = height / (NODE_COUNT - 1);
     for (let i = 0; i < NODE_COUNT; i++) {
       const y = i * spacing;
-      const phase1 = (i / NODE_COUNT) * Math.PI * 4;
+      const phase1 = (i / NODE_COUNT) * Math.PI * 5;
       const phase2 = phase1 + Math.PI;
       const cx = width / 2;
       strands[0].push({ x: cx + Math.sin(phase1) * AMPLITUDE, y, baseX: cx + Math.sin(phase1) * AMPLITUDE, baseY: y, vx: 0, vy: 0 });
@@ -75,7 +75,7 @@ function DnaBackground({ width, height, mouseRef }: { width: number; height: num
     if (!ctx) return;
 
     const animate = () => {
-      timeRef.current += 0.004;
+      timeRef.current += 0.006;
       ctx.clearRect(0, 0, width, height);
 
       const mouse = mouseRef.current;
@@ -85,12 +85,9 @@ function DnaBackground({ width, height, mouseRef }: { width: number; height: num
       for (let s = 0; s < 2; s++) {
         for (let i = 0; i < strands[s].length; i++) {
           const node = strands[s][i];
-
-          // Animate base position (slow rotation)
-          const phase = ((i / NODE_COUNT) * Math.PI * 4) + timeRef.current + (s * Math.PI);
+          const phase = ((i / NODE_COUNT) * Math.PI * 5) + timeRef.current + (s * Math.PI);
           node.baseX = width / 2 + Math.sin(phase) * AMPLITUDE;
 
-          // Mouse repulsion
           const dx = node.x - mouse.x;
           const dy = node.y - mouse.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
@@ -100,21 +97,16 @@ function DnaBackground({ width, height, mouseRef }: { width: number; height: num
             node.vy += (dy / dist) * force;
           }
 
-          // Spring back to base
           node.vx += (node.baseX - node.x) * SPRING;
           node.vy += (node.baseY - node.y) * SPRING;
-
-          // Damping
           node.vx *= DAMPING;
           node.vy *= DAMPING;
-
-          // Integrate
           node.x += node.vx;
           node.y += node.vy;
         }
       }
 
-      // Draw rungs (base pairs) - only when nodes are close enough
+      // Draw rungs (base pairs)
       for (let i = 0; i < NODE_COUNT; i++) {
         const a = strands[0][i];
         const b = strands[1][i];
@@ -124,13 +116,13 @@ function DnaBackground({ width, height, mouseRef }: { width: number; height: num
         const baseDist = Math.sqrt((a.baseX - b.baseX) ** 2 + (a.baseY - b.baseY) ** 2);
         const stretch = dist / (baseDist || 1);
 
-        if (stretch < 1.8) {
-          const opacity = Math.max(0, 0.12 * (1 - (stretch - 1) * 1.2));
+        if (stretch < 2.0) {
+          const opacity = Math.max(0, 0.45 * (1 - (stretch - 1) * 1.0));
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
-          ctx.strokeStyle = `rgba(113, 113, 122, ${opacity})`;
-          ctx.lineWidth = 0.5;
+          ctx.strokeStyle = `rgba(161, 161, 170, ${opacity})`;
+          ctx.lineWidth = 0.8;
           ctx.stroke();
         }
       }
@@ -150,20 +142,20 @@ function DnaBackground({ width, height, mouseRef }: { width: number; height: num
             ctx.quadraticCurveTo(prev.x, prev.y, cpx, cpy);
           }
         }
-        ctx.strokeStyle = 'rgba(82, 82, 91, 0.3)';
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(161, 161, 170, 0.6)';
+        ctx.lineWidth = 1.5;
         ctx.stroke();
 
         // Draw nodes
         for (let i = 0; i < strand.length; i++) {
           const node = strand[i];
-          const dx = node.x - node.baseX;
-          const dy = node.y - node.baseY;
-          const displacement = Math.sqrt(dx * dx + dy * dy);
-          const glow = Math.min(displacement / 30, 1);
+          const ddx = node.x - node.baseX;
+          const ddy = node.y - node.baseY;
+          const displacement = Math.sqrt(ddx * ddx + ddy * ddy);
+          const glow = Math.min(displacement / 40, 1);
           ctx.beginPath();
-          ctx.arc(node.x, node.y, 1.5, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(161, 161, 170, ${0.2 + glow * 0.4})`;
+          ctx.arc(node.x, node.y, 2.5 + glow * 1.5, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(212, 212, 216, ${0.5 + glow * 0.5})`;
           ctx.fill();
         }
       }
@@ -180,7 +172,6 @@ function DnaBackground({ width, height, mouseRef }: { width: number; height: num
       ref={canvasRef}
       width={width}
       height={height}
-      className="absolute inset-0 pointer-events-none z-0"
     />
   );
 }
@@ -305,8 +296,12 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
 
       {/* Panel */}
       <div ref={panelRef} className="fixed top-0 right-0 h-full w-full max-w-lg z-50 bg-[#0a0a0c] border-l border-zinc-800/50 shadow-2xl animate-slide-in overflow-y-auto relative" onMouseMove={handlePanelMouseMove} onMouseLeave={handlePanelMouseLeave}>
-        {/* DNA Background */}
-        {panelSize.w > 0 && <DnaBackground width={panelSize.w} height={panelSize.h} mouseRef={dnaMouseRef} />}
+        {/* DNA Background - sticky so it stays visible during scroll */}
+        {panelSize.w > 0 && (
+          <div className="sticky top-0 left-0 w-full h-0 z-0 overflow-visible pointer-events-none">
+            <DnaBackground width={panelSize.w} height={panelSize.h} mouseRef={dnaMouseRef} />
+          </div>
+        )}
 
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between p-4 sm:p-6 border-b border-zinc-800/50 bg-[#0a0a0c]/90 backdrop-blur-sm">
