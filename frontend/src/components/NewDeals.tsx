@@ -48,6 +48,7 @@ export function NewDeals() {
   const [scanTime, setScanTime] = useState<string>('');
   const [seen, setSeen] = useState<Set<string>>(getSeen);
   const [selectedIdx, setSelectedIdx] = useState(-1);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const loadLatestScan = useCallback(async () => {
@@ -74,6 +75,8 @@ export function NewDeals() {
       setScanTime(detail.completed_at || detail.started_at);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -147,7 +150,7 @@ export function NewDeals() {
 
       {/* Deals list */}
       <div className="flex-1 min-h-0 overflow-auto px-6 sm:px-12 pb-12">
-        {deals.length === 0 && !error && (
+        {deals.length === 0 && !error && !loading && (
           <div className="text-xs text-zinc-700 pt-4">No new companies from the latest scan.</div>
         )}
         <div className="flex flex-col">
