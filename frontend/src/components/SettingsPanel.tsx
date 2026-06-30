@@ -11,7 +11,7 @@
  * Command Center dark theme
  */
 
-import { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   X,
   Bell,
@@ -26,6 +26,164 @@ import {
   DollarSign,
   Shield,
 } from 'lucide-react';
+
+interface DnaNode {
+  x: number;
+  y: number;
+  baseX: number;
+  baseY: number;
+  vx: number;
+  vy: number;
+}
+
+function DnaBackground({ width, height, mouseRef }: { width: number; height: number; mouseRef: React.MutableRefObject<{ x: number; y: number }> }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const nodesRef = useRef<DnaNode[][]>([[], []]);
+  const animRef = useRef<number>(0);
+  const timeRef = useRef<number>(0);
+
+  const NODE_COUNT = 28;
+  const AMPLITUDE = 40;
+  const MOUSE_RADIUS = 90;
+  const SPRING = 0.03;
+  const DAMPING = 0.92;
+  const BREAK_FORCE = 8;
+
+  const initNodes = useCallback(() => {
+    const strands: DnaNode[][] = [[], []];
+    const spacing = height / (NODE_COUNT - 1);
+    for (let i = 0; i < NODE_COUNT; i++) {
+      const y = i * spacing;
+      const phase1 = (i / NODE_COUNT) * Math.PI * 4;
+      const phase2 = phase1 + Math.PI;
+      const cx = width / 2;
+      strands[0].push({ x: cx + Math.sin(phase1) * AMPLITUDE, y, baseX: cx + Math.sin(phase1) * AMPLITUDE, baseY: y, vx: 0, vy: 0 });
+      strands[1].push({ x: cx + Math.sin(phase2) * AMPLITUDE, y, baseX: cx + Math.sin(phase2) * AMPLITUDE, baseY: y, vx: 0, vy: 0 });
+    }
+    nodesRef.current = strands;
+  }, [width, height]);
+
+  useEffect(() => {
+    if (width === 0 || height === 0) return;
+    initNodes();
+  }, [width, height, initNodes]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const animate = () => {
+      timeRef.current += 0.004;
+      ctx.clearRect(0, 0, width, height);
+
+      const mouse = mouseRef.current;
+      const strands = nodesRef.current;
+
+      // Update node positions
+      for (let s = 0; s < 2; s++) {
+        for (let i = 0; i < strands[s].length; i++) {
+          const node = strands[s][i];
+
+          // Animate base position (slow rotation)
+          const phase = ((i / NODE_COUNT) * Math.PI * 4) + timeRef.current + (s * Math.PI);
+          node.baseX = width / 2 + Math.sin(phase) * AMPLITUDE;
+
+          // Mouse repulsion
+          const dx = node.x - mouse.x;
+          const dy = node.y - mouse.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < MOUSE_RADIUS && dist > 0) {
+            const force = (1 - dist / MOUSE_RADIUS) * BREAK_FORCE;
+            node.vx += (dx / dist) * force;
+            node.vy += (dy / dist) * force;
+          }
+
+          // Spring back to base
+          node.vx += (node.baseX - node.x) * SPRING;
+          node.vy += (node.baseY - node.y) * SPRING;
+
+          // Damping
+          node.vx *= DAMPING;
+          node.vy *= DAMPING;
+
+          // Integrate
+          node.x += node.vx;
+          node.y += node.vy;
+        }
+      }
+
+      // Draw rungs (base pairs) - only when nodes are close enough
+      for (let i = 0; i < NODE_COUNT; i++) {
+        const a = strands[0][i];
+        const b = strands[1][i];
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const baseDist = Math.sqrt((a.baseX - b.baseX) ** 2 + (a.baseY - b.baseY) ** 2);
+        const stretch = dist / (baseDist || 1);
+
+        if (stretch < 1.8) {
+          const opacity = Math.max(0, 0.12 * (1 - (stretch - 1) * 1.2));
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.strokeStyle = `rgba(113, 113, 122, ${opacity})`;
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
+
+      // Draw strands
+      for (let s = 0; s < 2; s++) {
+        const strand = strands[s];
+        ctx.beginPath();
+        for (let i = 0; i < strand.length; i++) {
+          const node = strand[i];
+          if (i === 0) {
+            ctx.moveTo(node.x, node.y);
+          } else {
+            const prev = strand[i - 1];
+            const cpx = (prev.x + node.x) / 2;
+            const cpy = (prev.y + node.y) / 2;
+            ctx.quadraticCurveTo(prev.x, prev.y, cpx, cpy);
+          }
+        }
+        ctx.strokeStyle = 'rgba(82, 82, 91, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Draw nodes
+        for (let i = 0; i < strand.length; i++) {
+          const node = strand[i];
+          const dx = node.x - node.baseX;
+          const dy = node.y - node.baseY;
+          const displacement = Math.sqrt(dx * dx + dy * dy);
+          const glow = Math.min(displacement / 30, 1);
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, 1.5, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(161, 161, 170, ${0.2 + glow * 0.4})`;
+          ctx.fill();
+        }
+      }
+
+      animRef.current = requestAnimationFrame(animate);
+    };
+
+    animRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animRef.current);
+  }, [width, height]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={width}
+      height={height}
+      className="absolute inset-0 pointer-events-none z-0"
+    />
+  );
+}
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -46,6 +204,29 @@ interface NotificationSettings {
 }
 
 export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dnaMouseRef = useRef<{ x: number; y: number }>({ x: -1000, y: -1000 });
+  const [panelSize, setPanelSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+
+  const handlePanelMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    dnaMouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top + e.currentTarget.scrollTop };
+  }, []);
+
+  const handlePanelMouseLeave = useCallback(() => {
+    dnaMouseRef.current = { x: -1000, y: -1000 };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen || !panelRef.current) return;
+    const obs = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      setPanelSize({ w: Math.floor(width), h: Math.floor(height) });
+    });
+    obs.observe(panelRef.current);
+    return () => obs.disconnect();
+  }, [isOpen]);
+
   const [settings, setSettings] = useState<NotificationSettings>({
     slackWebhookUrl: '',
     discordWebhookUrl: '',
@@ -123,9 +304,12 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
       />
 
       {/* Panel */}
-      <div className="fixed top-0 right-0 h-full w-full max-w-lg z-50 bg-[#0a0a0c] border-l border-slate-800 shadow-2xl animate-slide-in overflow-y-auto">
+      <div ref={panelRef} className="fixed top-0 right-0 h-full w-full max-w-lg z-50 bg-[#0a0a0c] border-l border-zinc-800/50 shadow-2xl animate-slide-in overflow-y-auto relative" onMouseMove={handlePanelMouseMove} onMouseLeave={handlePanelMouseLeave}>
+        {/* DNA Background */}
+        {panelSize.w > 0 && <DnaBackground width={panelSize.w} height={panelSize.h} mouseRef={dnaMouseRef} />}
+
         {/* Header */}
-        <div className="sticky top-0 z-10 flex items-center justify-between p-4 sm:p-6 border-b border-slate-800 bg-[#0a0a0c]">
+        <div className="sticky top-0 z-10 flex items-center justify-between p-4 sm:p-6 border-b border-zinc-800/50 bg-[#0a0a0c]/90 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <Bell className="w-5 h-5 text-emerald-400" />
             <h2 className="text-lg font-bold text-white">Settings</h2>
@@ -139,7 +323,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         </div>
 
         {/* Content */}
-        <div className="p-4 sm:p-6 space-y-6 sm:space-y-8">
+        <div className="relative z-10 p-4 sm:p-6 space-y-6 sm:space-y-8">
           {/* Slack Configuration */}
           <section>
             <div className="flex items-center gap-2 mb-4">
@@ -352,7 +536,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         </div>
 
         {/* Footer */}
-        <div className="sticky bottom-0 p-4 sm:p-6 border-t border-slate-800 bg-[#0a0a0c]">
+        <div className="sticky bottom-0 z-10 p-4 sm:p-6 border-t border-zinc-800/50 bg-[#0a0a0c]/90 backdrop-blur-sm">
           {saveStatus === 'success' && (
             <div className="flex items-center gap-2 text-emerald-400 text-sm mb-4">
               <CheckCircle className="w-4 h-4" />
