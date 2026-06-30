@@ -172,6 +172,7 @@ function DnaBackground({ width, height, mouseRef }: { width: number; height: num
       ref={canvasRef}
       width={width}
       height={height}
+      className="w-full h-full"
     />
   );
 }
@@ -201,7 +202,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
 
   const handlePanelMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    dnaMouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top + e.currentTarget.scrollTop };
+    dnaMouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }, []);
 
   const handlePanelMouseLeave = useCallback(() => {
@@ -296,9 +297,9 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
 
       {/* Panel */}
       <div ref={panelRef} className="fixed top-0 right-0 h-full w-full max-w-lg z-50 bg-[#0a0a0c] border-l border-zinc-800/50 shadow-2xl animate-slide-in overflow-y-auto relative" onMouseMove={handlePanelMouseMove} onMouseLeave={handlePanelMouseLeave}>
-        {/* DNA Background - sticky so it stays visible during scroll */}
-        {panelSize.w > 0 && (
-          <div className="sticky top-0 left-0 w-full h-0 z-0 overflow-visible pointer-events-none">
+        {/* DNA Background - fixed position matching panel bounds */}
+        {panelSize.w > 0 && panelSize.h > 0 && (
+          <div className="fixed top-0 right-0 h-full w-full max-w-lg pointer-events-none z-0">
             <DnaBackground width={panelSize.w} height={panelSize.h} mouseRef={dnaMouseRef} />
           </div>
         )}
