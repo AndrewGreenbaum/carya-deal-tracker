@@ -319,6 +319,7 @@ export function CommandSidebar({
                 <div className="absolute bottom-6 right-0 bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2.5 text-[10px] text-slate-400 whitespace-nowrap z-50 shadow-xl">
                   <div className="text-slate-300 font-medium mb-1.5">Shortcuts</div>
                   <div className="space-y-1 font-mono">
+                    <div><span className="text-slate-500">/</span> Search</div>
                     <div><span className="text-slate-500">1</span> Dashboard</div>
                     <div><span className="text-slate-500">2</span> Tracker</div>
                     <div><span className="text-slate-500">3</span> New</div>

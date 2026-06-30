@@ -211,7 +211,11 @@ function App() {
       // Skip if modifier keys are held (allow Cmd+1 for browser tabs)
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-      if (e.key === '1') {
+      if (e.key === '/') {
+        e.preventDefault();
+        const searchInput = document.querySelector('input[placeholder="Search"]') as HTMLInputElement;
+        if (searchInput) searchInput.focus();
+      } else if (e.key === '1') {
         setCurrentView('dashboard');
       } else if (e.key === '2') {
         setCurrentView('tracker');
