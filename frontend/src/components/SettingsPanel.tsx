@@ -296,13 +296,16 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
       />
 
       {/* Panel */}
-      <div ref={panelRef} className="fixed top-0 right-0 h-full w-full max-w-lg z-50 bg-[#0a0a0c] border-l border-zinc-800/50 shadow-2xl animate-slide-in overflow-y-auto relative" onMouseMove={handlePanelMouseMove} onMouseLeave={handlePanelMouseLeave}>
-        {/* DNA Background - fixed position matching panel bounds */}
-        {panelSize.w > 0 && panelSize.h > 0 && (
-          <div className="fixed top-0 right-0 h-full w-full max-w-lg pointer-events-none z-0">
+      <div ref={panelRef} className="fixed top-0 right-0 h-full w-full max-w-lg z-50 border-l border-zinc-800/50 shadow-2xl animate-slide-in overflow-y-auto" onMouseMove={handlePanelMouseMove} onMouseLeave={handlePanelMouseLeave}>
+        {/* Background layer */}
+        <div className="fixed top-0 right-0 h-full w-full max-w-lg bg-[#0a0a0c] z-0" />
+
+        {/* DNA canvas layer */}
+        <div className="fixed top-0 right-0 h-full w-full max-w-lg z-[1] pointer-events-none">
+          {panelSize.w > 0 && panelSize.h > 0 && (
             <DnaBackground width={panelSize.w} height={panelSize.h} mouseRef={dnaMouseRef} />
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between p-4 sm:p-6 border-b border-zinc-800/50 bg-[#0a0a0c]/90 backdrop-blur-sm">
