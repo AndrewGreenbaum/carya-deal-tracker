@@ -229,7 +229,7 @@ export function DealsTable({
       </div>
 
       {/* Desktop Table View */}
-      <div ref={containerRef} className="hidden md:block flex-1 overflow-auto scrollbar-hide">
+      <div ref={containerRef} className="hidden md:block flex-1 overflow-auto scrollbar-hide font-sans">
         {/* Page Header */}
         <div className="flex items-baseline justify-between px-6 sm:px-12 pt-10 sm:pt-12 pb-8 sm:pb-10">
           <span className="text-sm font-semibold text-zinc-200 tracking-[-0.02em]">Deals</span>

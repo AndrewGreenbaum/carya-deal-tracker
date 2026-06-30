@@ -348,7 +348,7 @@ export function Tracker() {
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex flex-col flex-1 min-h-0 font-sans">
       {/* Header */}
       <div className="flex items-baseline justify-between px-6 sm:px-12 pt-10 sm:pt-12 pb-8 sm:pb-10">
         <h1 className="text-sm font-semibold text-zinc-200 tracking-[-0.02em]">Pipeline</h1>

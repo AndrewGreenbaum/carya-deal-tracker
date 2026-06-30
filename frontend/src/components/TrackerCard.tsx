@@ -30,7 +30,8 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
 
   const isCurrentlyDragging = isDragging || isSortableDragging;
 
-  const amountIsLarge = item.amount && parseAmountValue(item.amount) >= 100;
+  const displayAmount = formatAmount(item.amount);
+  const amountIsLarge = displayAmount && parseAmountValue(item.amount || '') >= 100;
 
   return (
     <div
@@ -41,8 +42,8 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
       role="article"
       aria-label={`${item.companyName}${item.leadInvestor ? `, led by ${item.leadInvestor}` : ''}`}
       className={`
-        py-5 px-2 -mx-1 border-b border-zinc-800/40 cursor-grab rounded select-none
-        hover:bg-zinc-800/15 transition-[background] duration-150
+        py-5 px-2 -mx-1 border-b border-zinc-800/40 cursor-grab rounded-md select-none
+        first:pt-1 hover:bg-zinc-800/15 transition-[background] duration-150
         ${isCurrentlyDragging ? 'opacity-30 cursor-grabbing' : ''}
       `}
       onClick={() => !isCurrentlyDragging && onClick?.()}
@@ -52,11 +53,11 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
         <h4 className="text-[15px] font-semibold text-zinc-50 tracking-[-0.02em] truncate">
           {item.companyName}
         </h4>
-        {item.amount && (
+        {displayAmount && (
           <span className={`text-[15px] font-medium tabular-nums shrink-0 ${
             amountIsLarge ? 'text-zinc-50 font-semibold' : 'text-zinc-400'
           }`}>
-            {item.amount}
+            {displayAmount}
           </span>
         )}
       </div>
@@ -75,7 +76,7 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
 
       {/* Next Step */}
       {item.nextStep && (
-        <div className="text-[11px] text-amber-500/60 mt-2 truncate">
+        <div className="text-[11px] text-amber-400/60 mt-2 truncate">
           {item.nextStep}
         </div>
       )}
@@ -107,14 +108,48 @@ function formatAddedDate(dateString: string): string {
   }
 }
 
+function formatAmount(raw: string | undefined | null): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  if (!trimmed || /^(N\/A|Unknown|n\/a|unknown)$/i.test(trimmed)) return '';
+
+  // Match optional $, number, optional unit (word or abbreviation), optional modifier like "+"
+  const match = trimmed.match(/^\$?([\d,.]+)\s*(billion|million|thousand|B|M|K)?\s*(\+?)$/i);
+  if (!match) return trimmed; // Can't parse, return as-is
+
+  const numStr = match[1].replace(/,/g, '');
+  const num = parseFloat(numStr);
+  if (isNaN(num)) return trimmed;
+
+  const unitRaw = (match[2] || '').toLowerCase();
+  const modifier = match[3] || '';
+
+  let suffix = '';
+  if (unitRaw === 'b' || unitRaw === 'billion') suffix = 'B';
+  else if (unitRaw === 'm' || unitRaw === 'million') suffix = 'M';
+  else if (unitRaw === 'k' || unitRaw === 'thousand') suffix = 'K';
+
+  // No unit: raw dollar amount — convert large numbers to shorthand
+  if (!suffix) {
+    if (num >= 1_000_000_000) return `$${+(num / 1_000_000_000).toFixed(1)}B${modifier}`;
+    if (num >= 1_000_000) return `$${+(num / 1_000_000).toFixed(1)}M${modifier}`;
+    if (num >= 1_000) return `$${+(num / 1_000).toFixed(0)}K${modifier}`;
+    return `$${num}${modifier}`;
+  }
+
+  // Format with clean number (strip trailing .0)
+  const clean = num % 1 === 0 ? num.toString() : num.toString();
+  return `$${clean}${suffix}${modifier}`;
+}
+
 function parseAmountValue(amount: string): number {
-  const match = amount.match(/\$?([\d.]+)\s*(B|M|K)?/i);
+  const match = amount.match(/\$?([\d,.]+)\s*(billion|million|thousand|B|M|K)?/i);
   if (!match) return 0;
-  const num = parseFloat(match[1]);
-  const unit = (match[2] || '').toUpperCase();
-  if (unit === 'B') return num * 1000;
-  if (unit === 'M') return num;
-  if (unit === 'K') return num / 1000;
+  const num = parseFloat(match[1].replace(/,/g, ''));
+  const unit = (match[2] || '').toLowerCase();
+  if (unit === 'b' || unit === 'billion') return num * 1000;
+  if (unit === 'm' || unit === 'million') return num;
+  if (unit === 'k' || unit === 'thousand') return num / 1000;
   return num;
 }
 
