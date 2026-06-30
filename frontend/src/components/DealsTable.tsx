@@ -64,6 +64,9 @@ export function DealsTable({
   dealsRef.current = deals;
   onDealClickRef.current = onDealClick;
 
+  // Suppress hover during keyboard navigation (scrollIntoView moves rows under cursor)
+  const isKeyboardNavRef = useRef(false);
+
   // Track previous modal state and save scroll position
   const prevModalOpenRef = useRef(modalOpen);
   const savedScrollRef = useRef(0);
@@ -91,7 +94,10 @@ export function DealsTable({
 
   // Scroll selected row into view when selection changes
   useEffect(() => {
-    if (selectedIndex >= 0 && rowRefs.current[selectedIndex]) {
+    if (selectedIndex === 0 && containerRef.current) {
+      // First row: scroll to top so header/column labels stay visible
+      containerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (selectedIndex >= 0 && rowRefs.current[selectedIndex]) {
       rowRefs.current[selectedIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
   }, [selectedIndex]);
@@ -111,6 +117,7 @@ export function DealsTable({
       // Up / W / ArrowUp
       if (key === 'ArrowUp' || key === 'w' || key === 'W') {
         e.preventDefault();
+        isKeyboardNavRef.current = true;
         setSelectedIndex(prev => Math.max(0, prev - 1));
         return;
       }
@@ -118,6 +125,7 @@ export function DealsTable({
       // Down / S / ArrowDown
       if (key === 'ArrowDown' || key === 's' || key === 'S') {
         e.preventDefault();
+        isKeyboardNavRef.current = true;
         setSelectedIndex(prev => Math.min(deals.length - 1, prev + 1));
         return;
       }
@@ -170,6 +178,15 @@ export function DealsTable({
     }
   }, [deals]);
 
+  // Re-enable hover selection when user moves the mouse
+  useEffect(() => {
+    const handleMouseMove = () => {
+      isKeyboardNavRef.current = false;
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
   // Infinite scroll via intersection observer
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -201,31 +218,31 @@ export function DealsTable({
           />
         ))}
         {deals.length === 0 && !isLoading && (
-          <div className="py-12 text-center text-slate-500">
+          <div className="py-12 text-center text-zinc-600">
             No deals found matching your filters
           </div>
         )}
         <div ref={sentinelRef} className="h-8" />
         {isLoading && deals.length > 0 && (
-          <div className="py-4 text-center text-slate-600 text-xs">Loading...</div>
+          <div className="py-4 text-center text-zinc-700 text-xs">Loading...</div>
         )}
       </div>
 
       {/* Desktop Table View */}
       <div ref={containerRef} className="hidden md:block flex-1 overflow-auto scrollbar-hide">
         {/* Page Header */}
-        <div className="flex items-baseline justify-between px-6 pt-8 pb-5">
-          <span className="text-sm font-semibold text-slate-200 tracking-tight">Deals</span>
-          <span className="text-[11px] text-slate-600">{pagination.total} tracked</span>
+        <div className="flex items-baseline justify-between px-6 sm:px-12 pt-10 sm:pt-12 pb-8 sm:pb-10">
+          <span className="text-sm font-semibold text-zinc-200 tracking-[-0.02em]">Deals</span>
+          <span className="text-xs text-zinc-600">{pagination.total} tracked</span>
         </div>
 
         {/* Column Headers */}
-        <div className="grid grid-cols-[1fr_100px_180px_130px_70px] px-6 pb-3 border-b border-slate-800/10">
-          <span className="text-[10px] uppercase tracking-[0.08em] text-slate-700 font-medium">Company</span>
-          <span className="text-[10px] uppercase tracking-[0.08em] text-slate-700 font-medium text-right pr-9">Raised</span>
-          <span className="text-[10px] uppercase tracking-[0.08em] text-slate-700 font-medium">Investor</span>
-          <span className="text-[10px] uppercase tracking-[0.08em] text-slate-700 font-medium text-center">Links</span>
-          <span className="text-[10px] uppercase tracking-[0.08em] text-slate-700 font-medium text-right">When</span>
+        <div className="grid grid-cols-[1fr_100px_180px_130px_70px] px-6 sm:px-12 pb-4 border-b border-zinc-800/15">
+          <span className="text-[11px] uppercase tracking-[0.12em] text-zinc-600 font-medium">Company</span>
+          <span className="text-[11px] uppercase tracking-[0.12em] text-zinc-600 font-medium text-right pr-9">Raised</span>
+          <span className="text-[11px] uppercase tracking-[0.12em] text-zinc-600 font-medium">Investor</span>
+          <span className="text-[11px] uppercase tracking-[0.12em] text-zinc-600 font-medium text-center">Links</span>
+          <span className="text-[11px] uppercase tracking-[0.12em] text-zinc-600 font-medium text-right">When</span>
         </div>
 
         <div>
@@ -236,25 +253,25 @@ export function DealsTable({
               onClick={() => onDealClick(deal)}
               showRejected={showRejected}
               isSelected={index === selectedIndex}
-              onHover={() => setSelectedIndex(index)}
+              onHover={() => { if (!isKeyboardNavRef.current) setSelectedIndex(index); }}
               ref={(el) => { rowRefs.current[index] = el; }}
             />
           ))}
           {deals.length === 0 && !isLoading && (
-            <div className="px-6 py-12 text-center text-slate-500">
+            <div className="px-6 sm:px-12 py-12 text-center text-zinc-600">
               No deals found matching your filters
             </div>
           )}
         </div>
         <div ref={sentinelRef} className="h-8" />
         {isLoading && deals.length > 0 && (
-          <div className="py-4 text-center text-slate-600 text-xs">Loading...</div>
+          <div className="py-4 text-center text-zinc-700 text-xs">Loading...</div>
         )}
       </div>
 
       {/* Toast notification */}
       {toast && (
-        <div className="fixed bottom-6 right-6 bg-slate-800 text-slate-200 text-xs px-4 py-2.5 rounded-lg shadow-lg z-50 animate-fade-in">
+        <div className="fixed bottom-6 right-6 bg-zinc-900 border border-zinc-800/50 text-zinc-200 text-xs px-4 py-2.5 rounded-lg shadow-lg z-50 animate-fade-in">
           {toast}
         </div>
       )}
@@ -279,34 +296,34 @@ const DealRow = memo(React.forwardRef<HTMLDivElement, DealRowProps>(function Dea
       ref={ref}
       onClick={onClick}
       onMouseEnter={onHover}
-      className={`grid grid-cols-[1fr_100px_180px_130px_70px] items-center px-6 py-5 cursor-pointer border-b border-slate-800/5 transition-colors ${
-        isSelected ? 'bg-slate-800/20' : ''
+      className={`grid grid-cols-[1fr_100px_180px_130px_70px] items-center px-6 sm:px-12 py-5 cursor-pointer border-b border-zinc-800/40 transition-[background] duration-150 ${
+        isSelected ? 'bg-zinc-800/15' : ''
       } ${shouldDim ? 'opacity-25 hover:opacity-50' : ''}`}
     >
       {/* Company */}
       <div>
-        <div className="text-[13px] font-semibold text-slate-100 tracking-tight">
+        <div className="text-[15px] font-semibold text-zinc-50 tracking-[-0.02em]">
           {deal.startupName}
         </div>
-        <div className="text-[10px] text-slate-600 mt-0.5">
+        <div className="text-[10px] text-zinc-600 mt-0.5">
           <CategoryLabel category={deal.enterpriseCategory} />
         </div>
       </div>
 
       {/* Raised */}
-      <div className="text-[13px] font-semibold text-right pr-9">
+      <div className="text-[15px] font-medium text-right pr-9">
         {deal.amountInvested && deal.amountInvested !== 'Undisclosed' ? (
-          <span className={parseAmount(deal.amountInvested) >= 100 ? 'text-white' : 'text-slate-200'}>
+          <span className={`tabular-nums ${parseAmount(deal.amountInvested) >= 100 ? 'text-zinc-50 font-semibold' : 'text-zinc-400'}`}>
             {formatAmount(deal.amountInvested)}
           </span>
         ) : (
-          <span className="text-slate-800">—</span>
+          <span className="text-zinc-800">—</span>
         )}
       </div>
 
       {/* Investor */}
       <div>
-        <div className="text-[12px] font-medium text-slate-300">
+        <div className="text-xs font-medium text-zinc-300">
           {deal.leadInvestor || 'Unknown'}
         </div>
         <StageBadge stage={deal.investmentStage} isRejected={isRejected} />
@@ -320,7 +337,7 @@ const DealRow = memo(React.forwardRef<HTMLDivElement, DealRowProps>(function Dea
       />
 
       {/* When */}
-      <div className="text-[11px] text-slate-600 text-right font-mono tabular-nums">
+      <div className="text-[11px] text-zinc-700 text-right font-mono font-light tabular-nums">
         {formatDate(deal.date)}
       </div>
     </div>
@@ -329,7 +346,7 @@ const DealRow = memo(React.forwardRef<HTMLDivElement, DealRowProps>(function Dea
 
 function StageBadge({ stage, isRejected }: { stage: InvestmentStage; isRejected: boolean }) {
   if (isRejected) {
-    return <span className="text-[10px] font-medium text-slate-700">Unknown</span>;
+    return <span className="text-[10px] font-medium text-zinc-700">Unknown</span>;
   }
 
   const stageColors: Record<string, string> = {
@@ -338,11 +355,11 @@ function StageBadge({ stage, isRejected }: { stage: InvestmentStage; isRejected:
     series_b: 'text-blue-400',
     series_c: 'text-blue-300',
     growth: 'text-amber-400',
-    unknown: 'text-slate-600',
+    unknown: 'text-zinc-600',
   };
 
   return (
-    <span className={`text-[10px] font-medium ${stageColors[stage] || 'text-slate-600'}`}>
+    <span className={`text-[10px] font-medium ${stageColors[stage] || 'text-zinc-600'}`}>
       {STAGE_LABELS[stage] || stage}
     </span>
   );
@@ -409,7 +426,7 @@ function CompanyLinks({
         <span className={`block w-[7px] h-[7px] rounded-full transition-all ${
           hasWebsite
             ? 'bg-cyan-500 group-hover/web:scale-[1.6] group-hover/web:shadow-[0_0_6px_rgba(6,182,212,0.4)]'
-            : 'bg-slate-800'
+            : 'bg-zinc-800'
         }`} />
       </button>
       <button
@@ -421,7 +438,7 @@ function CompanyLinks({
         <span className={`block w-[7px] h-[7px] rounded-full transition-all ${
           hasLinkedin
             ? 'bg-blue-500 group-hover/li:scale-[1.6] group-hover/li:shadow-[0_0_6px_rgba(59,130,246,0.4)]'
-            : 'bg-slate-800'
+            : 'bg-zinc-800'
         }`} />
       </button>
     </div>
