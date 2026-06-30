@@ -160,13 +160,13 @@ export function NewDeals() {
                 className={`flex items-center gap-3 py-4 px-2 -mx-1 border-b border-zinc-800/40 rounded-md transition-[background] duration-75 cursor-default ${
                   isSelected ? 'bg-zinc-800/15' : 'hover:bg-zinc-800/15'
                 }`}
-                onMouseEnter={() => markSeen(deal.id)}
+                onClick={() => markSeen(deal.id)}
               >
                 {/* Flashing dot */}
                 <div className="w-4 shrink-0 flex justify-center">
                   {isUnseen && (
                     <div
-                      className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse"
+                      className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"
                       style={{ animationDuration: '3s' }}
                     />
                   )}

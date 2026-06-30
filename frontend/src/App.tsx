@@ -214,9 +214,9 @@ function App() {
       if (e.key === '1') {
         setCurrentView('dashboard');
       } else if (e.key === '2') {
-        setCurrentView('new');
-      } else if (e.key === '3') {
         setCurrentView('tracker');
+      } else if (e.key === '3') {
+        setCurrentView('new');
       }
     };
     window.addEventListener('keydown', handleKeyDown);
