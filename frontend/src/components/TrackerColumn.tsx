@@ -19,6 +19,7 @@ interface TrackerColumnProps {
   count: number;
   isFirst: boolean;
   isLast: boolean;
+  selectedIndex?: number;
   onEditItem: (item: TrackerItem) => void;
   onEditColumn: (column: TrackerColumnType) => void;
   onMoveLeft: (column: TrackerColumnType) => void;
@@ -32,6 +33,7 @@ export function TrackerColumn({
   count,
   isFirst,
   isLast,
+  selectedIndex,
   onEditItem,
   onEditColumn,
   onMoveLeft,
@@ -101,10 +103,11 @@ export function TrackerColumn({
           strategy={verticalListSortingStrategy}
         >
           <div className="flex flex-col">
-            {items.map((item) => (
+            {items.map((item, idx) => (
               <TrackerCard
                 key={item.id}
                 item={item}
+                isSelected={selectedIndex === idx}
                 onClick={() => onEditItem(item)}
               />
             ))}

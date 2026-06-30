@@ -102,7 +102,7 @@ body {
 
 /* Table row hover effect */
 .deal-row {
-  @apply transition-colors duration-150;
+  @apply transition-colors duration-75;
 }
 
 .deal-row:hover {

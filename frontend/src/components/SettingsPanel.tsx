@@ -73,7 +73,6 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     setSaveStatus('idle');
     try {
       // In a real implementation, this would call an API endpoint
-      await new Promise((resolve) => setTimeout(resolve, 1000));
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch {
@@ -88,7 +87,6 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     setTestingSlack(true);
     try {
       // In a real implementation, this would send a test message
-      await new Promise((resolve) => setTimeout(resolve, 1500));
       alert('Slack test message sent!');
     } catch {
       alert('Failed to send Slack test message');
@@ -102,7 +100,6 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     setTestingDiscord(true);
     try {
       // In a real implementation, this would send a test message
-      await new Promise((resolve) => setTimeout(resolve, 1500));
       alert('Discord test message sent!');
     } catch {
       alert('Failed to send Discord test message');

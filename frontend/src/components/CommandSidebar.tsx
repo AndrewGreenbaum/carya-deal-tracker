@@ -35,6 +35,7 @@ export function CommandSidebar({
   void _onOpenAircraft;
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [showFunds, setShowFunds] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   // Close sidebar when navigating on mobile
   const handleViewChange = (view: ViewType) => {
@@ -110,7 +111,7 @@ export function CommandSidebar({
         className={`
           w-64 h-full bg-black border-r border-slate-800/15 flex flex-col shrink-0
           md:relative md:translate-x-0
-          fixed top-0 left-0 z-50 transition-transform duration-300 ease-in-out
+          fixed top-0 left-0 z-50 transition-transform duration-200 ease-in-out
           ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}
       >
@@ -301,13 +302,36 @@ export function CommandSidebar({
               <div className="w-2 h-2 bg-purple-500 rounded-full" />
               <span className="text-xs text-slate-600">18 sources active</span>
             </div>
-            <button
-              onClick={onOpenFeedback}
-              className="text-slate-700 hover:text-slate-400 transition-colors"
-              title="Submit feedback"
-            >
-              <Mail className="w-3 h-3" />
-            </button>
+            <div className="flex items-center gap-2 relative">
+              <button
+                onClick={() => setShowShortcuts(!showShortcuts)}
+                className="w-3 h-3 rounded-full bg-emerald-900 hover:bg-emerald-700 transition-colors"
+                title="Keyboard shortcuts"
+              />
+              <button
+                onClick={onOpenFeedback}
+                className="text-slate-700 hover:text-slate-400 transition-colors"
+                title="Submit feedback"
+              >
+                <Mail className="w-3 h-3" />
+              </button>
+              {showShortcuts && (
+                <div className="absolute bottom-6 right-0 bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2.5 text-[10px] text-slate-400 whitespace-nowrap z-50 shadow-xl">
+                  <div className="text-slate-300 font-medium mb-1.5">Shortcuts</div>
+                  <div className="space-y-1 font-mono">
+                    <div><span className="text-slate-500">1</span> Dashboard</div>
+                    <div><span className="text-slate-500">2</span> Tracker</div>
+                    <div className="border-t border-zinc-800 pt-1 mt-1.5 text-slate-500">Tracker</div>
+                    <div><span className="text-slate-500">J/K</span> Up / Down</div>
+                    <div><span className="text-slate-500">H/L</span> Prev / Next col</div>
+                    <div><span className="text-slate-500">Enter</span> Open card</div>
+                    <div><span className="text-slate-500">N</span> New card</div>
+                    <div><span className="text-slate-500">Shift+H/L</span> Move card</div>
+                    <div><span className="text-slate-500">Esc</span> Clear</div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </aside>
@@ -325,7 +349,7 @@ function NavItem({ label, active, onClick }: NavItemProps) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left py-2.5 font-mono text-[13px] transition-colors min-h-[44px] md:min-h-0 ${
+      className={`w-full text-left py-2.5 font-mono text-[13px] transition-colors min-h-[44px] md:min-h-0 focus:outline-none ${
         active
           ? 'text-slate-100 font-medium'
           : 'text-slate-700 hover:text-slate-400'

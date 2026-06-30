@@ -48,7 +48,6 @@ export function Tracker() {
   const [items, setItems] = useState<TrackerItem[]>([]);
   const [columns, setColumns] = useState<TrackerColumnType[]>([]);
   const [stats, setStats] = useState<TrackerStats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeItem, setActiveItem] = useState<TrackerItem | null>(null);
   const [modalItem, setModalItem] = useState<TrackerItem | null>(null);
@@ -59,6 +58,10 @@ export function Tracker() {
   const [editingColumn, setEditingColumn] = useState<TrackerColumnType | null>(null);
   // Bulk add modal state
   const [isBulkAddModalOpen, setIsBulkAddModalOpen] = useState(false);
+
+  // Keyboard navigation state
+  const [selectedColIdx, setSelectedColIdx] = useState<number>(-1);
+  const [selectedCardIdx, setSelectedCardIdx] = useState<number>(-1);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -83,15 +86,12 @@ export function Tracker() {
 
   const loadItems = useCallback(async () => {
     try {
-      setIsLoading(true);
       setError(null);
       const response = await fetchTrackerItems();
       setItems(response.items);
       setStats(response.stats);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tracker items');
-    } finally {
-      setIsLoading(false);
     }
   }, []);
 
@@ -102,6 +102,180 @@ export function Tracker() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  // Keyboard navigation handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if typing in an input/textarea
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      // Skip if a modal is open
+      if (document.querySelector('[aria-modal="true"]')) return;
+      // Skip if meta/ctrl/alt held (except shift combos)
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const key = e.key;
+      const hasShift = e.shiftKey;
+
+      // Helper: get items for a column index
+      const getColItems = (colIdx: number) => {
+        if (colIdx < 0 || colIdx >= columns.length) return [];
+        return items
+          .filter((i) => i.status === columns[colIdx].slug)
+          .sort((a, b) => a.position - b.position);
+      };
+
+      // N: Create new card
+      if (key === 'n' || key === 'N') {
+        if (!hasShift) {
+          e.preventDefault();
+          setModalItem(null);
+          setIsCreating(true);
+          setIsModalOpen(true);
+        }
+        return;
+      }
+
+      // Escape: Clear selection
+      if (key === 'Escape') {
+        setSelectedColIdx(-1);
+        setSelectedCardIdx(-1);
+        return;
+      }
+
+      // Enter: Open selected card's modal
+      if (key === 'Enter') {
+        if (selectedColIdx >= 0 && selectedCardIdx >= 0) {
+          const colItems = getColItems(selectedColIdx);
+          if (selectedCardIdx < colItems.length) {
+            e.preventDefault();
+            setModalItem(colItems[selectedCardIdx]);
+            setIsCreating(false);
+            setIsModalOpen(true);
+          }
+        }
+        return;
+      }
+
+      // Shift+H/L or Shift+ArrowLeft/Right: Move card between columns
+      if (hasShift && (key === 'H' || key === 'ArrowLeft' || key === 'L' || key === 'ArrowRight')) {
+        if (selectedColIdx < 0 || selectedCardIdx < 0) return;
+        const colItems = getColItems(selectedColIdx);
+        if (selectedCardIdx >= colItems.length) return;
+
+        const direction = (key === 'H' || key === 'ArrowLeft') ? -1 : 1;
+        const targetColIdx = selectedColIdx + direction;
+        if (targetColIdx < 0 || targetColIdx >= columns.length) return;
+
+        e.preventDefault();
+        const draggedItem = colItems[selectedCardIdx];
+        const targetStatus = columns[targetColIdx].slug as TrackerStatus;
+        const targetItems = items
+          .filter((i) => i.status === targetStatus)
+          .sort((a, b) => a.position - b.position);
+        const targetPosition = targetItems.length;
+
+        // Store previous state for rollback
+        const previousItems = [...items];
+
+        // Optimistic update
+        setItems((prev) => {
+          const updated = prev.map((item) =>
+            item.id === draggedItem.id
+              ? { ...item, status: targetStatus, position: targetPosition }
+              : item
+          );
+          const targetColItems = updated
+            .filter((i) => i.status === targetStatus)
+            .sort((a, b) => a.position - b.position);
+          return updated.map((item) => {
+            if (item.status === targetStatus) {
+              const idx = targetColItems.findIndex((c) => c.id === item.id);
+              return { ...item, position: idx };
+            }
+            return item;
+          });
+        });
+
+        // Update selection to follow the card
+        setSelectedColIdx(targetColIdx);
+        setSelectedCardIdx(targetItems.length); // It's now last in new column
+
+        // Sync with backend
+        moveTrackerItem(draggedItem.id, targetStatus, targetPosition).catch(() => {
+          setItems(previousItems);
+        });
+        return;
+      }
+
+      // J/ArrowDown: Next card in column
+      if (key === 'j' || key === 'ArrowDown') {
+        e.preventDefault();
+        if (selectedColIdx < 0) {
+          // First keypress: select first card in first column
+          if (columns.length > 0) {
+            setSelectedColIdx(0);
+            setSelectedCardIdx(0);
+          }
+        } else {
+          const colItems = getColItems(selectedColIdx);
+          if (selectedCardIdx < colItems.length - 1) {
+            setSelectedCardIdx(selectedCardIdx + 1);
+          }
+        }
+        return;
+      }
+
+      // K/ArrowUp: Previous card in column
+      if (key === 'k' || key === 'ArrowUp') {
+        e.preventDefault();
+        if (selectedColIdx < 0) {
+          if (columns.length > 0) {
+            setSelectedColIdx(0);
+            setSelectedCardIdx(0);
+          }
+        } else {
+          if (selectedCardIdx > 0) {
+            setSelectedCardIdx(selectedCardIdx - 1);
+          }
+        }
+        return;
+      }
+
+      // H/ArrowLeft: Previous column
+      if (key === 'h' || key === 'ArrowLeft') {
+        e.preventDefault();
+        if (selectedColIdx < 0) {
+          if (columns.length > 0) {
+            setSelectedColIdx(0);
+            setSelectedCardIdx(0);
+          }
+        } else if (selectedColIdx > 0) {
+          setSelectedColIdx(selectedColIdx - 1);
+          setSelectedCardIdx(0);
+        }
+        return;
+      }
+
+      // L/ArrowRight: Next column
+      if (key === 'l' || key === 'ArrowRight') {
+        e.preventDefault();
+        if (selectedColIdx < 0) {
+          if (columns.length > 0) {
+            setSelectedColIdx(0);
+            setSelectedCardIdx(0);
+          }
+        } else if (selectedColIdx < columns.length - 1) {
+          setSelectedColIdx(selectedColIdx + 1);
+          setSelectedCardIdx(0);
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [columns, items, selectedColIdx, selectedCardIdx, isModalOpen]);
 
   const getItemsByStatus = (status: TrackerStatus): TrackerItem[] => {
     return items
@@ -339,14 +513,6 @@ export function Tracker() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-3">
-        <span className="text-zinc-600 text-xs">Loading...</span>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col flex-1 min-h-0 font-sans">
       {/* Header */}
@@ -394,7 +560,7 @@ export function Tracker() {
           onDragEnd={handleDragEnd}
         >
           <div className="flex gap-10 sm:gap-14 min-h-full pb-4" style={{ minWidth: 'max-content' }}>
-            {columns.map((column) => {
+            {columns.map((column, colIdx) => {
               const columnItems = getItemsByStatus(column.slug);
               return (
                 <TrackerColumn
@@ -404,6 +570,7 @@ export function Tracker() {
                   count={columnItems.length}
                   isFirst={column.position === 0}
                   isLast={column.position === columns.length - 1}
+                  selectedIndex={selectedColIdx === colIdx ? selectedCardIdx : undefined}
                   onEditItem={handleEditItem}
                   onEditColumn={handleEditColumn}
                   onMoveLeft={handleMoveColumnLeft}

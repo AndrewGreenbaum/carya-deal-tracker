@@ -190,7 +190,7 @@ function App() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(filters.searchQuery);
-    }, 300);
+    }, 150);
     return () => clearTimeout(timer);
   }, [filters.searchQuery]);
 
@@ -198,6 +198,27 @@ function App() {
   useEffect(() => {
     window.location.hash = currentView;
   }, [currentView]);
+
+  // Global keyboard shortcuts for view switching (1=Dashboard, 2=Tracker)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if typing in an input/textarea
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      // Skip if a modal is open
+      if (document.querySelector('[aria-modal="true"]')) return;
+      // Skip if modifier keys are held (allow Cmd+1 for browser tabs)
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      if (e.key === '1') {
+        setCurrentView('dashboard');
+      } else if (e.key === '2') {
+        setCurrentView('tracker');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Load system status
   const loadSystemStatus = useCallback(async () => {
@@ -381,7 +402,7 @@ function App() {
       <div className="flex-1 flex overflow-hidden relative">
         {/* Sidebar - hidden on mobile (shown via drawer), visible on desktop */}
         <div
-          className={`hidden md:block h-full transition-all duration-300 ease-in-out shrink-0 ${
+          className={`hidden md:block h-full transition-all duration-150 ease-in-out shrink-0 ${
             sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-64'
           }`}
         >
@@ -416,7 +437,7 @@ function App() {
         {/* Sidebar Toggle Button - hidden on mobile, visible on desktop */}
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className={`hidden md:flex absolute top-1/2 -translate-y-1/2 z-20 items-center justify-center w-4 h-8 bg-slate-900/80 hover:bg-slate-700 border border-slate-800 hover:border-slate-600 rounded-r text-slate-600 hover:text-slate-300 opacity-40 hover:opacity-100 transition-all duration-300 ${
+          className={`hidden md:flex absolute top-1/2 -translate-y-1/2 z-20 items-center justify-center w-4 h-8 bg-slate-900/80 hover:bg-slate-700 border border-slate-800 hover:border-slate-600 rounded-r text-slate-600 hover:text-slate-300 opacity-40 hover:opacity-100 transition-all duration-150 ${
             sidebarCollapsed ? 'left-0' : 'left-64'
           }`}
           title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}

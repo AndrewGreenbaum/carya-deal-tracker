@@ -10,10 +10,11 @@ import type { TrackerItem } from '../types';
 interface TrackerCardProps {
   item: TrackerItem;
   isDragging?: boolean;
+  isSelected?: boolean;
   onClick?: () => void;
 }
 
-export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
+export function TrackerCard({ item, isDragging, isSelected, onClick }: TrackerCardProps) {
   const {
     attributes,
     listeners,
@@ -31,7 +32,6 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
   const isCurrentlyDragging = isDragging || isSortableDragging;
 
   const displayAmount = formatAmount(item.amount);
-  const amountIsLarge = displayAmount && parseAmountValue(item.amount || '') >= 100;
 
   return (
     <div
@@ -43,8 +43,9 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
       aria-label={`${item.companyName}${item.leadInvestor ? `, led by ${item.leadInvestor}` : ''}`}
       className={`
         py-5 px-2 -mx-1 border-b border-zinc-800/40 cursor-grab rounded-md select-none
-        first:pt-1 hover:bg-zinc-800/15 transition-[background] duration-150
+        first:pt-1 hover:bg-zinc-800/15 transition-[background] duration-75
         ${isCurrentlyDragging ? 'opacity-30 cursor-grabbing' : ''}
+        ${isSelected ? 'bg-zinc-800/15' : ''}
       `}
       onClick={() => !isCurrentlyDragging && onClick?.()}
     >
@@ -54,9 +55,7 @@ export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
           {item.companyName}
         </h4>
         {displayAmount && (
-          <span className={`text-[15px] font-medium tabular-nums shrink-0 ${
-            amountIsLarge ? 'text-zinc-50 font-semibold' : 'text-zinc-400'
-          }`}>
+          <span className="text-[15px] font-medium tabular-nums shrink-0 text-zinc-400">
             {displayAmount}
           </span>
         )}
@@ -142,15 +141,5 @@ function formatAmount(raw: string | undefined | null): string {
   return `$${clean}${suffix}${modifier}`;
 }
 
-function parseAmountValue(amount: string): number {
-  const match = amount.match(/\$?([\d,.]+)\s*(billion|million|thousand|B|M|K)?/i);
-  if (!match) return 0;
-  const num = parseFloat(match[1].replace(/,/g, ''));
-  const unit = (match[2] || '').toLowerCase();
-  if (unit === 'b' || unit === 'billion') return num * 1000;
-  if (unit === 'm' || unit === 'million') return num;
-  if (unit === 'k' || unit === 'thousand') return num / 1000;
-  return num;
-}
 
 export default TrackerCard;

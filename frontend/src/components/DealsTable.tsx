@@ -296,7 +296,7 @@ const DealRow = memo(React.forwardRef<HTMLDivElement, DealRowProps>(function Dea
       ref={ref}
       onClick={onClick}
       onMouseEnter={onHover}
-      className={`grid grid-cols-[1fr_100px_180px_130px_70px] items-center px-6 sm:px-12 py-5 cursor-pointer border-b border-zinc-800/40 transition-[background] duration-150 ${
+      className={`grid grid-cols-[1fr_100px_180px_130px_70px] items-center px-6 sm:px-12 py-5 cursor-pointer border-b border-zinc-800/40 transition-[background] duration-75 ${
         isSelected ? 'bg-zinc-800/15' : ''
       } ${shouldDim ? 'opacity-25 hover:opacity-50' : ''}`}
     >
