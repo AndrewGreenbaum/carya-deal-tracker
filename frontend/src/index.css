@@ -16,23 +16,14 @@ body {
   background-color: rgba(16, 185, 129, 0.3);
 }
 
-/* Custom scrollbar - dark theme */
+/* Hide all scrollbars globally */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  display: none;
 }
 
-::-webkit-scrollbar-track {
-  background: #0a0a0c;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+* {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Hide scrollbar utility */
