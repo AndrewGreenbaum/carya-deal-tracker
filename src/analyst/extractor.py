@@ -308,7 +308,14 @@ CONSUMER AI (is_enterprise_ai=False, is_ai_deal=True):
 - social_ai: AI for social/dating apps, AI content creation for consumers
 
 NOT AI (is_enterprise_ai=False, is_ai_deal=False):
-- not_ai: Crypto/blockchain/Web3/DeFi/NFT, non-AI startups, traditional SaaS without AI, fintech without AI
+- crypto: Blockchain, Web3, DeFi, NFT, cryptocurrency, token, stablecoin
+- fintech: Neobank, payments, lending, trading, banking (non-AI traditional fintech)
+- healthcare: Biotech, pharma, clinical trials, medical devices (non-AI)
+- hardware: Semiconductors, chips, devices, manufacturing, physical products
+- saas: Traditional SaaS software without AI features
+- other: Unclear or doesn't fit above categories
+
+IMPORTANT: Use "other" if uncertain about non-AI category. Only use specific categories (crypto, fintech, etc.) if keywords appear EXPLICITLY in the article text.
 
 LEAD VERIFICATION (STRICT)
 LEAD phrases: "led by", "led the", "leads", "co-led", "headed by", "spearheaded"
@@ -1208,6 +1215,78 @@ def _is_consumer_fintech_deal(deal: DealExtraction, article_text: str) -> bool:
 
 
 # =============================================================================
+# NON-AI CATEGORY VALIDATION (Grounded classification)
+# =============================================================================
+
+# Keywords for each non-AI category - only assign category if keywords appear in text
+NON_AI_CATEGORY_KEYWORDS = {
+    EnterpriseCategory.CRYPTO: [
+        "crypto", "cryptocurrency", "blockchain", "web3", "defi",
+        "nft", "token", "stablecoin", "bitcoin", "ethereum", "solana"
+    ],
+    EnterpriseCategory.FINTECH: [
+        "neobank", "payments", "lending", "banking", "trading",
+        "fintech", "payment", "credit", "loan", "brokerage", "neobroker"
+    ],
+    EnterpriseCategory.HEALTHCARE: [
+        "biotech", "pharmaceutical", "pharma", "clinical", "medical",
+        "drug", "therapy", "patient", "healthcare", "health care"
+    ],
+    EnterpriseCategory.HARDWARE: [
+        "semiconductor", "chip", "hardware", "device", "manufacturing",
+        "sensor", "robotics", "physical", "electronics"
+    ],
+    EnterpriseCategory.SAAS: [
+        "saas", "software as a service", "subscription software",
+        "cloud software", "enterprise software"
+    ],
+}
+
+
+def _validate_non_ai_category_in_text(
+    deal: DealExtraction,
+    article_text: str,
+) -> DealExtraction:
+    """
+    Validate that non-AI category keywords appear in article text.
+
+    This ensures grounded classification - LLM can't assign crypto/fintech/etc
+    categories unless those keywords actually appear in the article.
+
+    If category keywords don't appear, downgrade to "other".
+    """
+    # Only validate non-AI categories
+    if deal.is_ai_deal or deal.is_enterprise_ai:
+        return deal
+
+    # Skip if already OTHER or legacy NOT_AI
+    if deal.enterprise_category in (EnterpriseCategory.OTHER, EnterpriseCategory.NOT_AI):
+        return deal
+
+    # Check if category keywords appear in text
+    keywords = NON_AI_CATEGORY_KEYWORDS.get(deal.enterprise_category, [])
+    if not keywords:
+        return deal  # No keywords defined for this category
+
+    text_lower = article_text.lower()
+    desc_lower = deal.startup_description.lower() if deal.startup_description else ""
+
+    # Check both article text and description
+    has_keyword = any(kw in text_lower or kw in desc_lower for kw in keywords)
+
+    if not has_keyword:
+        old_category = deal.enterprise_category.value
+        logger.info(
+            f"Downgrading {deal.startup_name} from {old_category} to OTHER: "
+            f"no {old_category} keywords found in text"
+        )
+        increment_extraction_stat("non_ai_category_downgraded")
+        deal.enterprise_category = EnterpriseCategory.OTHER
+
+    return deal
+
+
+# =============================================================================
 # AMOUNT VALIDATION (Detect market size confusion)
 # =============================================================================
 
@@ -1956,13 +2035,13 @@ async def extract_deal(
             # Post-process: detect and reclassify crypto deals
             if response and response.is_ai_deal and _is_crypto_deal(response, article_text):
                 logger.info(
-                    f"Reclassifying {response.startup_name} as NOT_AI: "
+                    f"Reclassifying {response.startup_name} as CRYPTO: "
                     f"crypto/blockchain detected"
                 )
                 increment_extraction_stat("crypto_filtered")
                 response.is_enterprise_ai = False
                 response.is_ai_deal = False
-                response.enterprise_category = EnterpriseCategory.NOT_AI
+                response.enterprise_category = EnterpriseCategory.CRYPTO
 
             # Post-process: detect and reclassify consumer AI deals
             # FIX: Consumer AI should not be counted as Enterprise AI
@@ -1983,16 +2062,21 @@ async def extract_deal(
 
             # Post-process: detect and reclassify consumer fintech deals
             # FIX 2026-01: Neobrokers, neobanks are NOT AI companies
-            # Trade Republic, Robinhood, etc. should be NOT_AI, not vertical_saas
+            # Trade Republic, Robinhood, etc. should be FINTECH, not vertical_saas
             if response and (response.is_ai_deal or response.is_enterprise_ai) and _is_consumer_fintech_deal(response, article_text):
                 logger.info(
-                    f"Reclassifying {response.startup_name} as NOT_AI: "
+                    f"Reclassifying {response.startup_name} as FINTECH: "
                     f"consumer fintech (neobroker/neobank) detected"
                 )
                 increment_extraction_stat("consumer_fintech_filtered")
                 response.is_enterprise_ai = False
                 response.is_ai_deal = False
-                response.enterprise_category = EnterpriseCategory.NOT_AI
+                response.enterprise_category = EnterpriseCategory.FINTECH
+
+            # Post-process: validate non-AI category is grounded in article text
+            # FIX 2026-01: Only assign specific non-AI categories if keywords appear
+            if response and not response.is_ai_deal and not response.is_enterprise_ai:
+                response = _validate_non_ai_category_in_text(response, article_text)
 
             # Post-process: validate company name isn't an article title
             if response and _looks_like_article_title(response.startup_name):
@@ -2088,11 +2172,11 @@ async def extract_deal(
 
                     # 6. Crypto reclassification
                     if response.is_ai_deal and _is_crypto_deal(response, article_text):
-                        logger.info(f"HYBRID: Reclassifying {response.startup_name} as NOT_AI (crypto)")
+                        logger.info(f"HYBRID: Reclassifying {response.startup_name} as CRYPTO")
                         increment_extraction_stat("crypto_filtered")
                         response.is_enterprise_ai = False
                         response.is_ai_deal = False
-                        response.enterprise_category = EnterpriseCategory.NOT_AI
+                        response.enterprise_category = EnterpriseCategory.CRYPTO
 
                     # 7. Consumer AI reclassification
                     if response.is_enterprise_ai and _is_consumer_ai_deal(response, article_text):
@@ -2108,11 +2192,15 @@ async def extract_deal(
 
                     # 8. Consumer fintech reclassification
                     if (response.is_ai_deal or response.is_enterprise_ai) and _is_consumer_fintech_deal(response, article_text):
-                        logger.info(f"HYBRID: Reclassifying {response.startup_name} as NOT_AI (consumer fintech)")
+                        logger.info(f"HYBRID: Reclassifying {response.startup_name} as FINTECH")
                         increment_extraction_stat("consumer_fintech_filtered")
                         response.is_enterprise_ai = False
                         response.is_ai_deal = False
-                        response.enterprise_category = EnterpriseCategory.NOT_AI
+                        response.enterprise_category = EnterpriseCategory.FINTECH
+
+                    # 8b. Non-AI category validation (grounded classification)
+                    if not response.is_ai_deal and not response.is_enterprise_ai:
+                        response = _validate_non_ai_category_in_text(response, article_text)
 
                     # 9. Article title validation
                     if _looks_like_article_title(response.startup_name):
@@ -2192,7 +2280,7 @@ async def extract_deal(
                         increment_extraction_stat("crypto_filtered")
                         response.is_enterprise_ai = False
                         response.is_ai_deal = False
-                        response.enterprise_category = EnterpriseCategory.NOT_AI
+                        response.enterprise_category = EnterpriseCategory.CRYPTO
 
                     if response.is_enterprise_ai and _is_consumer_ai_deal(response, article_text):
                         increment_extraction_stat("consumer_ai_filtered")
@@ -2208,7 +2296,11 @@ async def extract_deal(
                         increment_extraction_stat("consumer_fintech_filtered")
                         response.is_enterprise_ai = False
                         response.is_ai_deal = False
-                        response.enterprise_category = EnterpriseCategory.NOT_AI
+                        response.enterprise_category = EnterpriseCategory.FINTECH
+
+                    # Non-AI category validation (grounded classification)
+                    if not response.is_ai_deal and not response.is_enterprise_ai:
+                        response = _validate_non_ai_category_in_text(response, article_text)
 
                     if _looks_like_article_title(response.startup_name):
                         increment_extraction_stat("article_title_rejected")

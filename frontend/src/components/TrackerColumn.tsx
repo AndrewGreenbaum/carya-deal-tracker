@@ -10,8 +10,11 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { ChevronLeft, ChevronRight, Pencil, Trash2 } from 'lucide-react';
+
 import { TrackerCard } from './TrackerCard';
 import type { TrackerItem, TrackerColumn as TrackerColumnType } from '../types';
+import { TRACKER_COLOR_CLASSES } from '../types';
 
 interface TrackerColumnProps {
   column: TrackerColumnType;
@@ -19,7 +22,6 @@ interface TrackerColumnProps {
   count: number;
   isFirst: boolean;
   isLast: boolean;
-  selectedIndex?: number;
   onEditItem: (item: TrackerItem) => void;
   onEditColumn: (column: TrackerColumnType) => void;
   onMoveLeft: (column: TrackerColumnType) => void;
@@ -33,7 +35,6 @@ export function TrackerColumn({
   count,
   isFirst,
   isLast,
-  selectedIndex,
   onEditItem,
   onEditColumn,
   onMoveLeft,
@@ -44,47 +45,50 @@ export function TrackerColumn({
     id: column.slug,
   });
 
+  const colorClasses = TRACKER_COLOR_CLASSES[column.color] || TRACKER_COLOR_CLASSES.slate;
+
   return (
-    <div className="flex flex-col w-[280px] sm:w-[300px] shrink-0 group">
+    <div className="flex flex-col w-64 sm:w-72 shrink-0 group">
       {/* Column Header */}
-      <div className="flex items-baseline gap-2 mb-6 sm:mb-8">
-        <h3 className="text-[11px] uppercase tracking-[0.12em] text-zinc-600 font-medium truncate">
-          {column.displayName}
-        </h3>
-        <span className="text-[11px] text-zinc-700">{count}</span>
-        {/* Column Actions — revealed on hover */}
-        <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex items-center gap-2 mb-3 px-1">
+        <div className={`w-2 h-2 rounded-full ${colorClasses.dot}`} />
+        <h3 className="text-sm font-medium text-white truncate">{column.displayName}</h3>
+        <span className="px-2 py-0.5 text-xs bg-slate-800 text-slate-400 rounded-full shrink-0">
+          {count}
+        </span>
+        {/* Column Actions (always visible on mobile, hover on desktop) */}
+        <div className="ml-auto flex items-center gap-0.5 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
           {!isFirst && (
             <button
               onClick={() => onMoveLeft(column)}
-              className="text-[11px] text-zinc-800 hover:text-zinc-400 transition-colors p-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center"
+              className="p-2 sm:p-1 text-slate-500 hover:text-white hover:bg-slate-700 rounded transition-colors"
               title="Move left"
             >
-              &lsaquo;
+              <ChevronLeft className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
             </button>
           )}
           {!isLast && (
             <button
               onClick={() => onMoveRight(column)}
-              className="text-[11px] text-zinc-800 hover:text-zinc-400 transition-colors p-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center"
+              className="p-2 sm:p-1 text-slate-500 hover:text-white hover:bg-slate-700 rounded transition-colors"
               title="Move right"
             >
-              &rsaquo;
+              <ChevronRight className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
             </button>
           )}
           <button
             onClick={() => onEditColumn(column)}
-            className="text-[11px] text-zinc-800 hover:text-zinc-400 transition-colors p-1 tracking-[1px] min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center"
+            className="p-2 sm:p-1 text-slate-500 hover:text-white hover:bg-slate-700 rounded transition-colors"
             title="Edit column"
           >
-            &middot;&middot;&middot;
+            <Pencil className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
           </button>
           <button
             onClick={() => onDeleteColumn(column)}
-            className="text-[11px] text-zinc-800 hover:text-red-400 transition-colors p-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center"
+            className="p-2 sm:p-1 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded transition-colors"
             title="Delete column"
           >
-            &times;
+            <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
           </button>
         </div>
       </div>
@@ -94,20 +98,19 @@ export function TrackerColumn({
         ref={setNodeRef}
         role="region"
         aria-label={`${column.displayName} column, ${count} items`}
-        className={`flex-1 min-h-[200px] transition-colors ${
-          isOver ? 'outline outline-1 outline-emerald-500/20 rounded' : ''
+        className={`flex-1 rounded-lg p-2 transition-colors min-h-[200px] ${
+          isOver ? 'bg-slate-800/50 ring-2 ring-emerald-500/30' : 'bg-slate-900/30'
         }`}
       >
         <SortableContext
           items={items.map((i) => i.id)}
           strategy={verticalListSortingStrategy}
         >
-          <div className="flex flex-col">
-            {items.map((item, idx) => (
+          <div className="space-y-2">
+            {items.map((item) => (
               <TrackerCard
                 key={item.id}
                 item={item}
-                isSelected={selectedIndex === idx}
                 onClick={() => onEditItem(item)}
               />
             ))}
@@ -116,8 +119,11 @@ export function TrackerColumn({
 
         {/* Empty State */}
         {items.length === 0 && (
-          <div className="py-10">
-            <span className="text-xs text-zinc-800">Drop here</span>
+          <div className="flex flex-col items-center justify-center h-24 text-center px-4">
+            <span className="text-slate-500 text-sm">No items</span>
+            <span className="text-slate-600 text-xs mt-1">
+              Drag items here
+            </span>
           </div>
         )}
       </div>

@@ -10,8 +10,31 @@
  * - Click to open modal
  */
 
-import React, { memo, useRef, useEffect, useState } from 'react';
-// No lucide icons needed - using dot indicators
+import React, { memo } from 'react';
+import {
+  Link,
+  FileText,
+  Globe,
+  Cpu,
+  Shield,
+  Building2,
+  Bot,
+  Database,
+  Bitcoin,
+  DollarSign,
+  Heart,
+  Wrench,
+  Cloud,
+  HelpCircle,
+  List,
+  Download,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUp,
+  ArrowDown,
+  Linkedin,
+} from 'lucide-react';
 import type { Deal, EnterpriseCategory, InvestmentStage, PaginatedDeals, SortDirection } from '../types';
 import { STAGE_LABELS } from '../types';
 import { DealCard } from './DealCard';
@@ -22,193 +45,63 @@ interface DealsTableProps {
   onDealClick: (deal: Deal) => void;
   onExport: () => void;
   onRefresh: () => void;
-  onLoadMore: () => void;
+  onPageChange: (offset: number) => void;
   isLoading?: boolean;
   sortDirection: SortDirection;
   onSortChange: (direction: SortDirection) => void;
   showRejected?: boolean;
-  modalOpen?: boolean;
 }
 
 export function DealsTable({
   deals,
   pagination,
   onDealClick,
-  onExport: _onExport,
-  onRefresh: _onRefresh,
-  onLoadMore,
+  onExport,
+  onRefresh,
+  onPageChange,
   isLoading = false,
-  sortDirection: _sortDirection,
-  onSortChange: _onSortChange,
+  sortDirection,
+  onSortChange,
   showRejected = false,
-  modalOpen = false,
 }: DealsTableProps) {
-  void _onExport;
-  void _onRefresh;
-  void _sortDirection;
-  void _onSortChange;
-
-  const [selectedIndex, setSelectedIndex] = useState<number>(-1);
-  const [toast, setToast] = useState<string | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const loadMoreRef = useRef(onLoadMore);
-  loadMoreRef.current = onLoadMore;
-
-  // Refs for stable keyboard handler (avoids re-registering on every state change)
-  const selectedIndexRef = useRef(selectedIndex);
-  const dealsRef = useRef(deals);
-  const onDealClickRef = useRef(onDealClick);
-  selectedIndexRef.current = selectedIndex;
-  dealsRef.current = deals;
-  onDealClickRef.current = onDealClick;
-
-  // Suppress hover during keyboard navigation (scrollIntoView moves rows under cursor)
-  const isKeyboardNavRef = useRef(false);
-
-  // Track previous modal state and save scroll position
-  const prevModalOpenRef = useRef(modalOpen);
-  const savedScrollRef = useRef(0);
-
-  // Save scroll position when modal opens, restore when it closes
-  useEffect(() => {
-    if (modalOpen && !prevModalOpenRef.current) {
-      // Modal just opened - save scroll position
-      if (containerRef.current) {
-        savedScrollRef.current = containerRef.current.scrollTop;
-      }
-    } else if (!modalOpen && prevModalOpenRef.current) {
-      // Modal just closed - restore scroll position and scroll selected row into view
-      requestAnimationFrame(() => {
-        if (containerRef.current) {
-          containerRef.current.scrollTop = savedScrollRef.current;
-        }
-        if (selectedIndexRef.current >= 0 && rowRefs.current[selectedIndexRef.current]) {
-          rowRefs.current[selectedIndexRef.current]?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
-        }
-      });
-    }
-    prevModalOpenRef.current = modalOpen;
-  }, [modalOpen]);
-
-  // Scroll selected row into view when selection changes
-  useEffect(() => {
-    if (selectedIndex === 0 && containerRef.current) {
-      // First row: scroll to top so header/column labels stay visible
-      containerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-    } else if (selectedIndex >= 0 && rowRefs.current[selectedIndex]) {
-      rowRefs.current[selectedIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }
-  }, [selectedIndex]);
-
-  // Keyboard navigation - registered once, reads from refs
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Skip if typing in input
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      // Skip if any modal is open
-      if (document.querySelector('[aria-modal="true"]')) return;
-
-      const key = e.key;
-      const deals = dealsRef.current;
-      const idx = selectedIndexRef.current;
-
-      // Up / W / ArrowUp
-      if (key === 'ArrowUp' || key === 'w' || key === 'W') {
-        e.preventDefault();
-        isKeyboardNavRef.current = true;
-        setSelectedIndex(prev => Math.max(0, prev - 1));
-        return;
-      }
-
-      // Down / S / ArrowDown
-      if (key === 'ArrowDown' || key === 's' || key === 'S') {
-        e.preventDefault();
-        isKeyboardNavRef.current = true;
-        setSelectedIndex(prev => Math.min(deals.length - 1, prev + 1));
-        return;
-      }
-
-      // Escape - do nothing, just keeps selection
-      if (key === 'Escape') {
-        return;
-      }
-
-      // Enter - open selected deal
-      if (key === 'Enter' && idx >= 0 && idx < deals.length) {
-        e.preventDefault();
-        onDealClickRef.current(deals[idx]);
-        return;
-      }
-
-      // Ctrl+C / Cmd+C - copy deal data
-      if ((e.ctrlKey || e.metaKey) && key === 'c' && idx >= 0 && idx < deals.length) {
-        const selection = window.getSelection();
-        if (!selection || selection.toString().length === 0) {
-          e.preventDefault();
-          const deal = deals[idx];
-          const stage = STAGE_LABELS[deal.investmentStage] || deal.investmentStage;
-          const amount = deal.amountInvested ? formatAmount(deal.amountInvested) : '';
-          const investor = deal.leadInvestor || '';
-          const category = deal.enterpriseCategory && deal.enterpriseCategory !== 'not_ai'
-            ? deal.enterpriseCategory.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-            : '';
-          const date = deal.date || '';
-          const row = [deal.startupName, stage, amount, investor, category, date].join('\t');
-          navigator.clipboard.writeText(row);
-          setToast(`Copied: ${deal.startupName}`);
-          setTimeout(() => setToast(null), 2000);
-        }
-        return;
-      }
-
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []); // Empty deps - handler reads from refs, never re-registers
-
-  // Reset selection only when the list is replaced (filter change), not when appended (load more)
-  const firstDealIdRef = useRef(deals[0]?.id);
-  useEffect(() => {
-    if (deals[0]?.id !== firstDealIdRef.current) {
-      setSelectedIndex(-1);
-      firstDealIdRef.current = deals[0]?.id;
-    }
-  }, [deals]);
-
-  // Re-enable hover selection when user moves the mouse
-  useEffect(() => {
-    const handleMouseMove = () => {
-      isKeyboardNavRef.current = false;
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, []);
-
-  // Infinite scroll via intersection observer
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && pagination.hasMore && !isLoading) {
-          loadMoreRef.current();
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [pagination.hasMore, isLoading]);
+  const currentPage = Math.floor(pagination.offset / pagination.limit) + 1;
+  const totalPages = Math.ceil(pagination.total / pagination.limit);
 
   return (
     <>
+      {/* Header */}
+      <div className="px-4 sm:px-6 py-3 border-b border-slate-800 bg-[#0a0a0c] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0">
+        <h2 className="text-xs sm:text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
+          <List className="w-4 h-4" />
+          <span className="hidden sm:inline">Latest Extractions</span>
+          <span className="sm:hidden">Deals</span>
+          <span className="text-slate-500 font-normal">({pagination.total})</span>
+        </h2>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <button
+            onClick={onExport}
+            className="btn-primary flex items-center justify-center gap-1.5 flex-1 sm:flex-none"
+            aria-label="Export deals to CSV"
+          >
+            <Download className="w-3 h-3" />
+            <span className="hidden sm:inline">EXPORT CSV</span>
+            <span className="sm:hidden">EXPORT</span>
+          </button>
+          <button
+            onClick={onRefresh}
+            disabled={isLoading}
+            className="btn-secondary flex items-center justify-center gap-1.5 flex-1 sm:flex-none"
+            aria-label={isLoading ? 'Refreshing deals...' : 'Refresh deals'}
+          >
+            <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">REFRESH</span>
+            <span className="sm:hidden">{isLoading ? '...' : 'REFRESH'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Mobile Card View */}
-      <div className="md:hidden flex-1 overflow-auto scrollbar-hide p-4 space-y-3">
+      <div className="md:hidden flex-1 overflow-auto p-4 space-y-3">
         {deals.map((deal) => (
           <DealCard
             key={deal.id}
@@ -217,62 +110,94 @@ export function DealsTable({
             showRejected={showRejected}
           />
         ))}
-        {deals.length === 0 && !isLoading && (
-          <div className="py-12 text-center text-zinc-600">
-            No deals found matching your filters
+        {deals.length === 0 && (
+          <div className="py-12 text-center text-slate-500">
+            {isLoading ? 'Loading deals...' : 'No deals found matching your filters'}
           </div>
-        )}
-        <div ref={sentinelRef} className="h-8" />
-        {isLoading && deals.length > 0 && (
-          <div className="py-4 text-center text-zinc-700 text-xs">Loading...</div>
         )}
       </div>
 
       {/* Desktop Table View */}
-      <div ref={containerRef} className="hidden md:block flex-1 overflow-auto scrollbar-hide font-sans">
-        {/* Page Header */}
-        <div className="flex items-baseline justify-between px-6 sm:px-12 pt-10 sm:pt-12 pb-8 sm:pb-10">
-          <span className="text-sm font-semibold text-zinc-200 tracking-[-0.02em]">Deals</span>
-          <span className="text-xs text-zinc-600">{pagination.total} tracked</span>
-        </div>
-
-        {/* Column Headers */}
-        <div className="grid grid-cols-[1fr_100px_180px_130px_70px] px-6 sm:px-12 pb-4 border-b border-zinc-800/15">
-          <span className="text-[11px] uppercase tracking-[0.12em] text-zinc-600 font-medium">Company</span>
-          <span className="text-[11px] uppercase tracking-[0.12em] text-zinc-600 font-medium text-right pr-9">Raised</span>
-          <span className="text-[11px] uppercase tracking-[0.12em] text-zinc-600 font-medium">Investor</span>
-          <span className="text-[11px] uppercase tracking-[0.12em] text-zinc-600 font-medium text-center">Links</span>
-          <span className="text-[11px] uppercase tracking-[0.12em] text-zinc-600 font-medium text-right">When</span>
-        </div>
-
-        <div>
-          {deals.map((deal, index) => (
-            <DealRow
-              key={deal.id}
-              deal={deal}
-              onClick={() => onDealClick(deal)}
-              showRejected={showRejected}
-              isSelected={index === selectedIndex}
-              onHover={() => { if (!isKeyboardNavRef.current) setSelectedIndex(index); }}
-              ref={(el) => { rowRefs.current[index] = el; }}
-            />
-          ))}
-          {deals.length === 0 && !isLoading && (
-            <div className="px-6 sm:px-12 py-12 text-center text-zinc-600">
-              No deals found matching your filters
-            </div>
-          )}
-        </div>
-        <div ref={sentinelRef} className="h-8" />
-        {isLoading && deals.length > 0 && (
-          <div className="py-4 text-center text-zinc-700 text-xs">Loading...</div>
-        )}
+      <div className="hidden md:block flex-1 overflow-auto">
+        <table className="w-full text-left border-collapse">
+          <thead className="bg-[#0a0a0c] sticky top-0 z-10 text-[10px] uppercase font-bold text-slate-500">
+            <tr>
+              <th scope="col" className="px-6 py-3 border-b border-slate-800">Company / Source</th>
+              <th scope="col" className="px-6 py-3 border-b border-slate-800">Stage & Fund</th>
+              <th scope="col" className="px-6 py-3 border-b border-slate-800">AI Category</th>
+              <th scope="col" className="px-6 py-3 border-b border-slate-800 w-24 text-center">
+                Links
+              </th>
+              <th
+                scope="col"
+                aria-sort={sortDirection === 'desc' ? 'descending' : 'ascending'}
+                className="px-6 py-3 border-b border-slate-800 text-right cursor-pointer hover:bg-slate-800/50 transition-colors select-none"
+                onClick={() => onSortChange(sortDirection === 'desc' ? 'asc' : 'desc')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSortChange(sortDirection === 'desc' ? 'asc' : 'desc');
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+              >
+                <span className="flex items-center justify-end gap-1">
+                  Announced
+                  {sortDirection === 'desc' ? (
+                    <ArrowDown className="w-3 h-3 text-emerald-400" aria-hidden="true" />
+                  ) : (
+                    <ArrowUp className="w-3 h-3 text-emerald-400" aria-hidden="true" />
+                  )}
+                </span>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="text-xs divide-y divide-slate-800/50">
+            {deals.map((deal) => (
+              <DealRow key={deal.id} deal={deal} onClick={() => onDealClick(deal)} showRejected={showRejected} />
+            ))}
+            {deals.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
+                  {isLoading ? 'Loading deals...' : 'No deals found matching your filters'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
 
-      {/* Toast notification */}
-      {toast && (
-        <div className="fixed bottom-6 right-6 bg-zinc-900 border border-zinc-800/50 text-zinc-200 text-xs px-4 py-2.5 rounded-lg shadow-lg z-50 animate-fade-in">
-          {toast}
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="px-4 sm:px-6 py-3 border-t border-slate-800 bg-[#0a0a0c] flex flex-col sm:flex-row justify-between items-center gap-2">
+          <div className="text-xs text-slate-500 order-2 sm:order-1">
+            <span className="hidden sm:inline">Showing </span>
+            {pagination.offset + 1}-{Math.min(pagination.offset + pagination.limit, pagination.total)}
+            <span className="hidden sm:inline"> of</span>
+            <span className="sm:hidden">/</span> {pagination.total}
+          </div>
+          <div className="flex gap-2 order-1 sm:order-2 w-full sm:w-auto justify-between sm:justify-end">
+            <button
+              onClick={() => onPageChange(Math.max(0, pagination.offset - pagination.limit))}
+              disabled={pagination.offset === 0}
+              className="btn-secondary flex items-center justify-center gap-1 disabled:opacity-50 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0"
+            >
+              <ChevronLeft className="w-4 h-4 sm:w-3 sm:h-3" />
+              <span className="hidden sm:inline">Previous</span>
+            </button>
+            <span className="px-3 py-1.5 text-xs text-slate-400 flex items-center">
+              {currentPage}/{totalPages}
+            </span>
+            <button
+              onClick={() => onPageChange(pagination.offset + pagination.limit)}
+              disabled={!pagination.hasMore}
+              className="btn-secondary flex items-center justify-center gap-1 disabled:opacity-50 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0"
+            >
+              <span className="hidden sm:inline">Next</span>
+              <ChevronRight className="w-4 h-4 sm:w-3 sm:h-3" />
+            </button>
+          </div>
         </div>
       )}
     </>
@@ -283,110 +208,157 @@ interface DealRowProps {
   deal: Deal;
   onClick: () => void;
   showRejected?: boolean;
-  isSelected?: boolean;
-  onHover?: () => void;
 }
 
-const DealRow = memo(React.forwardRef<HTMLDivElement, DealRowProps>(function DealRow({ deal, onClick, showRejected = false, isSelected = false, onHover }, ref) {
+const DealRow = memo(function DealRow({ deal, onClick, showRejected = false }: DealRowProps) {
+  // A deal is "rejected" only if not led by a tracked fund
+  // AI classification is informational, not a rejection criteria
   const isRejected = !deal.investorRoles.includes('lead');
+  // When showRejected is enabled, show all deals with full color (no greying out)
   const shouldDim = isRejected && !showRejected;
 
   return (
-    <div
-      ref={ref}
+    <tr
       onClick={onClick}
-      onMouseEnter={onHover}
-      className={`grid grid-cols-[1fr_100px_180px_130px_70px] items-center px-6 sm:px-12 py-5 cursor-pointer border-b border-zinc-800/40 transition-[background] duration-75 ${
-        isSelected ? 'bg-zinc-800/15' : ''
-      } ${shouldDim ? 'opacity-25 hover:opacity-50' : ''}`}
+      className={`deal-row cursor-pointer group ${
+        shouldDim ? 'opacity-50 grayscale hover:grayscale-0 hover:opacity-100' : ''
+      }`}
     >
-      {/* Company */}
-      <div>
-        <div className="text-[15px] font-semibold text-zinc-50 tracking-[-0.02em]">
+      {/* Company / Source */}
+      <td className="px-6 py-4">
+        <div
+          className={`text-sm font-bold group-hover:underline underline-offset-4 cursor-pointer ${
+            isRejected ? 'text-slate-400 group-hover:text-white' : 'text-emerald-400'
+          }`}
+        >
           {deal.startupName}
         </div>
-        <div className="text-[10px] text-zinc-600 mt-0.5">
-          <CategoryLabel category={deal.enterpriseCategory} />
+        <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1">
+          <SourceIcon source={deal.sourceName} />
+          {deal.sourceName || 'Unknown Source'}
         </div>
-      </div>
+      </td>
 
-      {/* Raised */}
-      <div className="text-[15px] font-medium text-right pr-9">
-        {deal.amountInvested && deal.amountInvested !== 'Undisclosed' ? (
-          <span className="tabular-nums text-zinc-400">
-            {formatAmount(deal.amountInvested)}
-          </span>
-        ) : (
-          <span className="text-zinc-800">—</span>
-        )}
-      </div>
-
-      {/* Investor */}
-      <div>
-        <div className="text-xs font-medium text-zinc-300">
+      {/* Stage & Fund */}
+      <td className="px-6 py-4">
+        <div className="flex items-center gap-2 mb-1">
+          <StageBadge stage={deal.investmentStage} isRejected={isRejected} />
+        </div>
+        <div className={`font-bold ${isRejected ? 'text-slate-400' : 'text-white'}`}>
           {deal.leadInvestor || 'Unknown'}
         </div>
-        <StageBadge stage={deal.investmentStage} isRejected={isRejected} />
-      </div>
+      </td>
 
-      {/* Links */}
-      <CompanyLinks
-        website={deal.companyWebsite}
-        ceoLinkedin={deal.founders?.find(f => f.linkedinUrl)?.linkedinUrl}
-        shouldDim={shouldDim}
-      />
+      {/* AI Category */}
+      <td className="px-6 py-4">
+        <CategoryBadge category={deal.enterpriseCategory} shouldDim={shouldDim} />
+      </td>
 
-      {/* When */}
-      <div className="text-[11px] text-zinc-700 text-right font-mono font-light tabular-nums">
+      {/* Company Links */}
+      <td className="px-6 py-4">
+        <CompanyLinks
+          website={deal.companyWebsite}
+          ceoLinkedin={deal.founders?.find(f => f.linkedinUrl)?.linkedinUrl}
+          shouldDim={shouldDim}
+        />
+      </td>
+
+      {/* Detected Time */}
+      <td className="px-6 py-4 text-right text-slate-500 font-mono">
         {formatDate(deal.date)}
-      </div>
-    </div>
+      </td>
+    </tr>
   );
-}));
+});
+
+function SourceIcon({ source }: { source?: string }) {
+  if (!source) return <Link className="w-3 h-3" />;
+
+  const lowerSource = source.toLowerCase();
+  if (lowerSource.includes('sec') || lowerSource.includes('form d')) {
+    return <FileText className="w-3 h-3" />;
+  }
+  if (lowerSource.includes('blog') || lowerSource.includes('sequoia') || lowerSource.includes('a16z')) {
+    return <Globe className="w-3 h-3" />;
+  }
+  return <Link className="w-3 h-3" />;
+}
 
 function StageBadge({ stage, isRejected }: { stage: InvestmentStage; isRejected: boolean }) {
   if (isRejected) {
-    return <span className="text-[10px] font-medium text-zinc-700">Unknown</span>;
+    return (
+      <span className="stage-badge bg-slate-800 text-slate-400 border-slate-700">REJECTED</span>
+    );
   }
 
-  const stageColors: Record<string, string> = {
-    seed: 'text-purple-400',
-    series_a: 'text-cyan-400',
-    series_b: 'text-blue-400',
-    series_c: 'text-blue-300',
-    growth: 'text-amber-400',
-    unknown: 'text-zinc-600',
-  };
+  return <span className={`stage-badge stage-${stage}`}>{STAGE_LABELS[stage]?.toUpperCase() || stage.toUpperCase()}</span>;
+}
 
+const CATEGORY_ICONS: Record<EnterpriseCategory, React.ReactNode> = {
+  // Enterprise AI
+  infrastructure: <Cpu className="w-3 h-3 text-slate-400" />,
+  security: <Shield className="w-3 h-3 text-slate-400" />,
+  vertical_saas: <Building2 className="w-3 h-3 text-slate-400" />,
+  agentic: <Bot className="w-3 h-3 text-slate-400" />,
+  data_intelligence: <Database className="w-3 h-3 text-slate-400" />,
+  // Consumer AI
+  consumer_ai: <Bot className="w-3 h-3 text-blue-400" />,
+  gaming_ai: <Bot className="w-3 h-3 text-purple-400" />,
+  social_ai: <Bot className="w-3 h-3 text-pink-400" />,
+  // Non-AI (specific categories)
+  crypto: <Bitcoin className="w-3 h-3 text-orange-400" />,
+  fintech: <DollarSign className="w-3 h-3 text-emerald-400" />,
+  healthcare: <Heart className="w-3 h-3 text-rose-400" />,
+  hardware: <Wrench className="w-3 h-3 text-gray-400" />,
+  saas: <Cloud className="w-3 h-3 text-sky-400" />,
+  other: <HelpCircle className="w-3 h-3 text-slate-500" />,
+  // Legacy
+  not_ai: <HelpCircle className="w-3 h-3 text-slate-500" />,
+};
+
+function CategoryBadge({
+  category,
+  shouldDim,
+}: {
+  category?: EnterpriseCategory;
+  shouldDim: boolean;
+}) {
+  const cat = category || 'other';
+  const icon = CATEGORY_ICONS[cat] || CATEGORY_ICONS['other'];
+
+  // Check if it's a consumer AI category
+  const isConsumerAi = cat === 'consumer_ai' || cat === 'gaming_ai' || cat === 'social_ai';
+  const isNonAi = ['crypto', 'fintech', 'healthcare', 'hardware', 'saas', 'other', 'not_ai'].includes(cat);
+
+  // Non-AI categories get their specific styling
+  if (isNonAi) {
+    const displayCat = cat === 'not_ai' ? 'other' : cat;
+    return (
+      <div className={`category-badge category-${displayCat}`}>
+        {icon}
+        {displayCat.replace('_', ' ')}
+      </div>
+    );
+  }
+
+  // Consumer AI gets a different style
+  if (isConsumerAi) {
+    return (
+      <div className={`category-badge category-consumer ${shouldDim ? 'opacity-75' : ''}`}>
+        {icon}
+        {cat.replace('_', ' ')}
+      </div>
+    );
+  }
+
+  // Enterprise AI categories
   return (
-    <span className={`text-[10px] font-medium ${stageColors[stage] || 'text-zinc-600'}`}>
-      {STAGE_LABELS[stage] || stage}
-    </span>
+    <div className={`category-badge category-${cat} ${shouldDim ? 'opacity-75' : ''}`}>
+      {icon}
+      {cat.replace('_', ' ')}
+    </div>
   );
 }
-
-function CategoryLabel({ category }: { category?: EnterpriseCategory }) {
-  if (!category || category === 'not_ai') return null;
-  const labels: Record<string, string> = {
-    infrastructure: 'infrastructure',
-    security: 'security',
-    vertical_saas: 'vertical saas',
-    agentic: 'agentic',
-    data_intelligence: 'data intelligence',
-    consumer_ai: 'consumer ai',
-    gaming_ai: 'gaming ai',
-    social_ai: 'social ai',
-  };
-  return <>{labels[category] || category.replace(/_/g, ' ')}</>;
-}
-
-function formatAmount(amount: string): string {
-  return amount
-    .replace(/\bmillion\b/gi, 'M')
-    .replace(/\bbillion\b/gi, 'B')
-    .replace(/(\d)\s+(M|B)\b/g, '$1$2');
-}
-
 
 function CompanyLinks({
   website,
@@ -401,35 +373,38 @@ function CompanyLinks({
   const hasLinkedin = !!ceoLinkedin;
 
   const handleClick = (e: React.MouseEvent, url: string) => {
-    e.stopPropagation();
+    e.stopPropagation(); // Prevent row click
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   return (
-    <div className={`flex items-center justify-center gap-1 ${shouldDim ? 'opacity-50' : ''}`}>
+    <div className="flex items-center justify-center gap-3">
+      {/* Website Icon */}
       <button
         onClick={(e) => hasWebsite && handleClick(e, website!)}
         disabled={!hasWebsite}
-        className={`group/web p-3 flex items-center justify-center ${hasWebsite ? 'cursor-pointer' : 'cursor-default'}`}
+        className={`p-1.5 rounded transition-all ${
+          hasWebsite
+            ? 'hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 cursor-pointer'
+            : 'text-slate-700 cursor-not-allowed'
+        } ${shouldDim ? 'opacity-50' : ''}`}
         title={hasWebsite ? `Visit ${website}` : 'No website'}
       >
-        <span className={`block w-[7px] h-[7px] rounded-full transition-all ${
-          hasWebsite
-            ? 'bg-cyan-500 group-hover/web:scale-[1.6] group-hover/web:shadow-[0_0_6px_rgba(6,182,212,0.4)]'
-            : 'bg-zinc-800'
-        }`} />
+        <Globe className="w-4 h-4" />
       </button>
+
+      {/* LinkedIn Icon */}
       <button
         onClick={(e) => hasLinkedin && handleClick(e, ceoLinkedin!)}
         disabled={!hasLinkedin}
-        className={`group/li p-3 flex items-center justify-center ${hasLinkedin ? 'cursor-pointer' : 'cursor-default'}`}
+        className={`p-1.5 rounded transition-all ${
+          hasLinkedin
+            ? 'hover:bg-slate-700 text-blue-400 hover:text-blue-300 cursor-pointer'
+            : 'text-slate-700 cursor-not-allowed'
+        } ${shouldDim ? 'opacity-50' : ''}`}
         title={hasLinkedin ? 'CEO LinkedIn' : 'No LinkedIn'}
       >
-        <span className={`block w-[7px] h-[7px] rounded-full transition-all ${
-          hasLinkedin
-            ? 'bg-blue-500 group-hover/li:scale-[1.6] group-hover/li:shadow-[0_0_6px_rgba(59,130,246,0.4)]'
-            : 'bg-zinc-800'
-        }`} />
+        <Linkedin className="w-4 h-4" />
       </button>
     </div>
   );

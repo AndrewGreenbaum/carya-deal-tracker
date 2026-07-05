@@ -16,7 +16,12 @@ import {
   Building2,
   Bot,
   Database,
-  XCircle,
+  Bitcoin,
+  DollarSign,
+  Heart,
+  Wrench,
+  Cloud,
+  HelpCircle,
 } from 'lucide-react';
 import type { Deal, EnterpriseCategory, InvestmentStage } from '../types';
 import { STAGE_LABELS } from '../types';
@@ -59,7 +64,7 @@ export const DealCard = memo(function DealCard({ deal, onClick, showRejected = f
           </div>
         </div>
         <div className="text-right shrink-0">
-          <div className="text-sm font-bold text-white">{deal.amountInvested?.replace(/\bmillion\b/gi, 'M').replace(/\bbillion\b/gi, 'B').replace(/(\d)\s+(M|B)\b/g, '$1$2')}</div>
+          <div className="text-sm font-bold text-white">{deal.amountInvested}</div>
           <div className="text-xs text-slate-500">{formatDate(deal.date)}</div>
         </div>
       </div>
@@ -132,15 +137,25 @@ function StageBadge({ stage, isRejected }: { stage: InvestmentStage; isRejected:
 }
 
 const CATEGORY_ICONS: Record<EnterpriseCategory, React.ReactNode> = {
+  // Enterprise AI
   infrastructure: <Cpu className="w-3 h-3 text-slate-400" />,
   security: <Shield className="w-3 h-3 text-slate-400" />,
   vertical_saas: <Building2 className="w-3 h-3 text-slate-400" />,
   agentic: <Bot className="w-3 h-3 text-slate-400" />,
   data_intelligence: <Database className="w-3 h-3 text-slate-400" />,
+  // Consumer AI
   consumer_ai: <Bot className="w-3 h-3 text-blue-400" />,
   gaming_ai: <Bot className="w-3 h-3 text-purple-400" />,
   social_ai: <Bot className="w-3 h-3 text-pink-400" />,
-  not_ai: <XCircle className="w-3 h-3 text-red-900" />,
+  // Non-AI (specific categories)
+  crypto: <Bitcoin className="w-3 h-3 text-orange-400" />,
+  fintech: <DollarSign className="w-3 h-3 text-emerald-400" />,
+  healthcare: <Heart className="w-3 h-3 text-rose-400" />,
+  hardware: <Wrench className="w-3 h-3 text-gray-400" />,
+  saas: <Cloud className="w-3 h-3 text-sky-400" />,
+  other: <HelpCircle className="w-3 h-3 text-slate-500" />,
+  // Legacy
+  not_ai: <HelpCircle className="w-3 h-3 text-slate-500" />,
 };
 
 function CategoryBadge({
@@ -150,15 +165,18 @@ function CategoryBadge({
   category?: EnterpriseCategory;
   shouldDim: boolean;
 }) {
-  const cat = category || 'not_ai';
-  const icon = CATEGORY_ICONS[cat] || CATEGORY_ICONS['not_ai'];
+  const cat = category || 'other';
+  const icon = CATEGORY_ICONS[cat] || CATEGORY_ICONS['other'];
   const isConsumerAi = cat === 'consumer_ai' || cat === 'gaming_ai' || cat === 'social_ai';
+  const isNonAi = ['crypto', 'fintech', 'healthcare', 'hardware', 'saas', 'other', 'not_ai'].includes(cat);
 
-  if (cat === 'not_ai') {
+  // Non-AI categories get their specific styling
+  if (isNonAi) {
+    const displayCat = cat === 'not_ai' ? 'other' : cat;
     return (
-      <div className="category-badge category-not_ai text-[10px]">
+      <div className={`category-badge category-${displayCat} text-[10px]`}>
         {icon}
-        not ai
+        {displayCat.replace('_', ' ')}
       </div>
     );
   }

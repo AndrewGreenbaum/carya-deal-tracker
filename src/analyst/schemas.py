@@ -59,8 +59,14 @@ class EnterpriseCategory(str, Enum):
     CONSUMER_AI = "consumer_ai"            # Consumer-facing AI apps, personal assistants
     GAMING_AI = "gaming_ai"                # AI for gaming, game engines, NPCs
     SOCIAL_AI = "social_ai"                # AI for social/dating apps, content creation
-    # Non-AI
-    NOT_AI = "not_ai"                      # Not an AI company (crypto, non-AI startups)
+    # Non-AI (specific categories for better classification)
+    CRYPTO = "crypto"                      # Blockchain, Web3, DeFi, NFT, cryptocurrency
+    FINTECH = "fintech"                    # Traditional fintech (neobanks, payments, lending)
+    HEALTHCARE = "healthcare"              # Biotech, pharma, clinical (non-AI)
+    HARDWARE = "hardware"                  # Semiconductors, devices, manufacturing
+    SAAS = "saas"                          # Traditional SaaS without AI
+    OTHER = "other"                        # Fallback for unclear cases
+    NOT_AI = "not_ai"                      # Legacy: maps to "other" for backwards compat
 
 
 class FounderInfo(BaseModel):

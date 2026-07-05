@@ -5,16 +5,16 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { GripVertical, ExternalLink, Calendar, Link } from 'lucide-react';
 import type { TrackerItem } from '../types';
 
 interface TrackerCardProps {
   item: TrackerItem;
   isDragging?: boolean;
-  isSelected?: boolean;
   onClick?: () => void;
 }
 
-export function TrackerCard({ item, isDragging, isSelected, onClick }: TrackerCardProps) {
+export function TrackerCard({ item, isDragging, onClick }: TrackerCardProps) {
   const {
     attributes,
     listeners,
@@ -31,8 +31,6 @@ export function TrackerCard({ item, isDragging, isSelected, onClick }: TrackerCa
 
   const isCurrentlyDragging = isDragging || isSortableDragging;
 
-  const displayAmount = formatAmount(item.amount);
-
   return (
     <div
       ref={setNodeRef}
@@ -42,43 +40,94 @@ export function TrackerCard({ item, isDragging, isSelected, onClick }: TrackerCa
       role="article"
       aria-label={`${item.companyName}${item.leadInvestor ? `, led by ${item.leadInvestor}` : ''}`}
       className={`
-        py-5 px-2 -mx-1 border-b border-zinc-800/40 cursor-grab rounded-md select-none
-        first:pt-1 hover:bg-zinc-800/15 transition-[background] duration-75
-        ${isCurrentlyDragging ? 'opacity-30 cursor-grabbing' : ''}
-        ${isSelected ? 'bg-zinc-800/15' : ''}
+        bg-slate-800 border border-slate-700 rounded-lg p-3 cursor-grab
+        hover:border-slate-600 hover:bg-slate-750 transition-all select-none
+        ${isCurrentlyDragging ? 'opacity-50 shadow-lg ring-2 ring-emerald-500/30 cursor-grabbing' : ''}
       `}
       onClick={() => !isCurrentlyDragging && onClick?.()}
     >
-      {/* Row 1: Company + Amount */}
-      <div className="flex items-baseline justify-between gap-4">
-        <h4 className="text-[15px] font-semibold text-zinc-50 tracking-[-0.02em] truncate">
-          {item.companyName}
-        </h4>
-        {displayAmount && (
-          <span className="text-[15px] font-medium tabular-nums shrink-0 text-zinc-400">
-            {displayAmount}
-          </span>
+      {/* Header with drag handle indicator */}
+      <div className="flex items-start gap-2">
+        <div className="p-0.5 text-slate-500 shrink-0" aria-hidden="true">
+          <GripVertical className="w-4 h-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-sm font-medium text-white truncate">
+            {item.companyName}
+          </h4>
+          {item.roundType && (
+            <span className="text-xs text-slate-400">
+              {item.roundType}
+              {item.amount && ` - ${item.amount}`}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Lead Investor & Added Date - same row */}
+      <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+        {item.leadInvestor ? (
+          <span>Lead: <span className="text-slate-400">{item.leadInvestor}</span></span>
+        ) : (
+          <span />
         )}
-      </div>
-
-      {/* Row 2: Round · Investor | Date */}
-      <div className="flex items-baseline justify-between gap-4 mt-1.5">
-        <span className="text-xs text-zinc-600 truncate">
-          {item.roundType && <>{item.roundType}</>}
-          {item.roundType && item.leadInvestor && <span className="text-zinc-500"> &middot; </span>}
-          {item.leadInvestor && <span className="text-zinc-500">{item.leadInvestor}</span>}
-        </span>
-        <span className="text-[11px] text-zinc-700 font-mono font-light shrink-0">
-          {formatAddedDate(item.createdAt)}
+        <span className="text-[10px] text-slate-600">
+          Added {formatAddedDate(item.createdAt)}
         </span>
       </div>
 
-      {/* Next Step */}
+      {/* Footer with metadata */}
+      <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+        {/* Last Contact */}
+        {item.lastContactDate ? (
+          <div className="flex items-center gap-1">
+            <Calendar className="w-3 h-3" />
+            <span>{formatDate(item.lastContactDate)}</span>
+          </div>
+        ) : (
+          <span />
+        )}
+
+        {/* Links - always on right */}
+        <div className="flex items-center gap-2">
+          {/* Deal Link Indicator */}
+          {item.dealId && (
+            <span
+              className="text-blue-400"
+              title="Linked to Dashboard deal"
+              aria-label="Linked to Dashboard deal"
+            >
+              <Link className="w-3 h-3" aria-hidden="true" />
+            </span>
+          )}
+
+          {/* Website Link */}
+          {item.website && (
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                window.open(item.website, '_blank', 'noopener,noreferrer');
+              }}
+              className="text-slate-400 hover:text-emerald-400 transition-colors cursor-pointer"
+              title={`Open ${item.website}`}
+              aria-label={`Visit ${item.companyName} website`}
+            >
+              <ExternalLink className="w-3 h-3" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Next Step indicator */}
       {item.nextStep && (
-        <div className="text-[11px] text-amber-400/60 mt-2 truncate">
-          {item.nextStep}
+        <div className="mt-2 pt-2 border-t border-slate-700 text-xs text-amber-400 truncate">
+          Next: {item.nextStep}
         </div>
       )}
+
     </div>
   );
 }
@@ -97,6 +146,21 @@ function parseLocalDate(dateString: string): Date {
   return new Date(dateString);
 }
 
+function formatDate(dateString: string): string {
+  try {
+    const date = parseLocalDate(dateString);
+    const now = new Date();
+    const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } catch {
+    return dateString;
+  }
+}
 
 function formatAddedDate(dateString: string): string {
   try {
@@ -106,40 +170,5 @@ function formatAddedDate(dateString: string): string {
     return '';
   }
 }
-
-function formatAmount(raw: string | undefined | null): string {
-  if (!raw) return '';
-  const trimmed = raw.trim();
-  if (!trimmed || /^(N\/A|Unknown|n\/a|unknown)$/i.test(trimmed)) return '';
-
-  // Match optional $, number, optional unit (word or abbreviation), optional modifier like "+"
-  const match = trimmed.match(/^\$?([\d,.]+)\s*(billion|million|thousand|B|M|K)?\s*(\+?)$/i);
-  if (!match) return trimmed; // Can't parse, return as-is
-
-  const numStr = match[1].replace(/,/g, '');
-  const num = parseFloat(numStr);
-  if (isNaN(num)) return trimmed;
-
-  const unitRaw = (match[2] || '').toLowerCase();
-  const modifier = match[3] || '';
-
-  let suffix = '';
-  if (unitRaw === 'b' || unitRaw === 'billion') suffix = 'B';
-  else if (unitRaw === 'm' || unitRaw === 'million') suffix = 'M';
-  else if (unitRaw === 'k' || unitRaw === 'thousand') suffix = 'K';
-
-  // No unit: raw dollar amount — convert large numbers to shorthand
-  if (!suffix) {
-    if (num >= 1_000_000_000) return `$${+(num / 1_000_000_000).toFixed(1)}B${modifier}`;
-    if (num >= 1_000_000) return `$${+(num / 1_000_000).toFixed(1)}M${modifier}`;
-    if (num >= 1_000) return `$${+(num / 1_000).toFixed(0)}K${modifier}`;
-    return `$${num}${modifier}`;
-  }
-
-  // Format with clean number (strip trailing .0)
-  const clean = num % 1 === 0 ? num.toString() : num.toString();
-  return `$${clean}${suffix}${modifier}`;
-}
-
 
 export default TrackerCard;
