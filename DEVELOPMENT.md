@@ -5,7 +5,8 @@ Deal intelligence: **lead investments** from 18 VC firms in **Enterprise AI** st
 ## URLs & Costs
 - Frontend: https://carya-eagle-eye.up.railway.app
 - Backend: https://bud-tracker-backend-production.up.railway.app
-- ~$70/mo (~$28 LLM + $30 Brave + $10 Railway)
+- ~$47/mo (~$28 LLM + $9 Brave + $10 Railway)
+  - **Brave API optimized** (2026-02): $256→$69/mo via batch reduction + frequency control
 
 ## Architecture
 ```
@@ -61,12 +62,13 @@ POST /scrapers/google-news?days_back=30
 GET  /deals?is_lead=true&is_enterprise_ai=true&fund_slug=a16z
 POST /enrichment/deals?limit=50&offset=0&skip_enriched=true
 GET  /enrichment/stats  # Returns coverage: with_both, missing_both, etc.
+GET  /brave/stats       # Brave API cost monitoring (today, 7-day, 30-day usage)
 GET  /health | /scheduler/status | /scans
 ```
 **API Key:** `X-API-Key: dev-key`
 
 ## Database
-**Tables:** deals, funds, articles, tracker_items, scan_jobs, token_usage, portfolio_companies, content_hashes
+**Tables:** deals, funds, articles, tracker_items, scan_jobs, token_usage, portfolio_companies, content_hashes, brave_api_usage
 
 **Key fields:** `amount_usd` (BIGINT), `amount_source` (sec_form_d|crunchbase|article), `is_enterprise_ai`, `is_lead_confirmed`, `lead_evidence_weak`, `enterprise_category`, `verification_snippet`, `founders_json`, `dedup_key`, `amount_dedup_key`
 
@@ -74,6 +76,13 @@ GET  /health | /scheduler/status | /scans
 - `content_hash` - SHA256 first 128 bits
 - `content_length` - For preferring longer articles
 - `expires_at` - 30-day TTL, auto-cleanup on scan start
+
+**brave_api_usage table** (2026-02): Cost monitoring
+- `usage_date` - Date of queries
+- `query_type` - scraping, enrichment_website, enrichment_linkedin, enrichment_date
+- `query_count` - Number of queries
+- `estimated_cost` - Cost in USD ($0.011/query)
+- Target: <400 queries/day (~$4.40/day = ~$130/month)
 
 ## LLM Pipeline
 ```
@@ -178,6 +187,12 @@ POST /enrichment/deals?limit=50&offset=0&skip_enriched=false&force_update=true
 ```
 **LinkedIn queries:** `site:linkedin.com/in "{founder}" "{company}"` → fallback searches
 **Website:** LLM extraction → Brave fallback
+
+**Automatic enrichment** (2026-02 cost optimization):
+- **Frequency:** Every 3rd scan (not every scan) - reduces Brave API costs by ~70%
+- **Website + LinkedIn:** 25 deals/scan (was 100) - skips already-enriched deals
+- **Date enrichment:** 15 deals/scan (was 50) - only enriches placeholder dates (Jan 1, Q1 starts)
+- **Skip logic:** Avoids re-enriching deals with both website + LinkedIn present
 
 ## URL Validation (`url_utils.py`)
 - `is_valid_url()` - rejects placeholders (Unknown, N/A, pending)
@@ -296,12 +311,19 @@ create_scraper_client(user_agent, timeout, ...)
 - `HYBRID_RESULT` / `HYBRID_RESULT_HIGH_CONF` - Sonnet re-extraction outcomes
 - `HYBRID_FAILED` / `HYBRID_FAILED_HIGH_CONF` - Sonnet re-extraction errors (falls back to Haiku)
 - `INVALID_CONFIDENCE` - NaN/Inf confidence from LLM (serious parsing failure)
+- `BRAVE_BUDGET_EXCEEDED` - daily Brave API query budget reached (400 queries/day)
 
-**Cost optimizations** (2026-01):
-- Persistent content dedup: ~$10-15/mo savings (cross-run syndication catch)
-- Source-specific filtering: ~$5-10/mo savings (skip non-funding pages)
-- Tighter Sonnet threshold: ~$2-3/mo savings (0.45 for internal sources)
-- Compiled crypto regex: Minor CPU savings (single regex vs 35 string searches)
+**Cost optimizations:**
+- **LLM (2026-01):**
+  - Persistent content dedup: ~$10-15/mo savings (cross-run syndication catch)
+  - Source-specific filtering: ~$5-10/mo savings (skip non-funding pages)
+  - Tighter Sonnet threshold: ~$2-3/mo savings (0.45 for internal sources)
+  - Compiled crypto regex: Minor CPU savings (single regex vs 35 string searches)
+- **Brave API (2026-02):** $256→$69/mo (73% reduction)
+  - Enrichment batch reduction: 100→25 deals/scan (75% fewer queries)
+  - Date enrichment reduction: 50→15 deals/scan (70% fewer queries)
+  - Frequency control: Every 3rd scan instead of every scan (67% fewer runs)
+  - Skip logic: Avoid re-enriching deals with existing data (80% post-initial savings)
 
 ## Troubleshooting
 | Issue | Fix |
