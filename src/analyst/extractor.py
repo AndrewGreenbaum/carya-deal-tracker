@@ -19,9 +19,8 @@ import math
 import random
 import re
 import instructor
-import httpx
 from contextvars import ContextVar
-from anthropic import Anthropic, APITimeoutError, APIError, RateLimitError
+from anthropic import Anthropic, APITimeoutError, APIError, RateLimitError, Timeout
 from instructor.core import InstructorRetryException
 from typing import Optional, List, Set
 from datetime import datetime, timezone, date, timedelta
@@ -268,7 +267,7 @@ MAX_RETRIES = settings.llm_max_retries
 # FIX: Configure timeout at client level for reliable timeout handling
 _anthropic_client = Anthropic(
     api_key=settings.anthropic_api_key,
-    timeout=httpx.Timeout(settings.llm_timeout, connect=settings.llm_connect_timeout),
+    timeout=Timeout(settings.llm_timeout, connect=settings.llm_connect_timeout),
 )
 client = instructor.from_anthropic(_anthropic_client)
 
@@ -276,7 +275,7 @@ client = instructor.from_anthropic(_anthropic_client)
 # Created once at module load for efficiency (not per-call)
 _sonnet_anthropic_client = Anthropic(
     api_key=settings.anthropic_api_key,
-    timeout=httpx.Timeout(settings.llm_timeout, connect=settings.llm_connect_timeout),
+    timeout=Timeout(settings.llm_timeout, connect=settings.llm_connect_timeout),
 )
 sonnet_client = instructor.from_anthropic(_sonnet_anthropic_client)
 

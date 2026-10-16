@@ -123,6 +123,7 @@ SAMPLE_ARTICLES = {
 }
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_clear_lead_identification():
     """Test that clear lead language is correctly identified."""
@@ -136,6 +137,7 @@ async def test_clear_lead_identification():
     assert any(inv.name.lower().find("sequoia") >= 0 for inv in result.lead_investors)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_ambiguous_lead_flagged():
     """Test that ambiguous 'existing investors led' is flagged."""
@@ -155,6 +157,7 @@ async def test_ambiguous_lead_flagged():
                for inv in result.participating_investors)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_co_lead_identification():
     """Test that co-leads are both identified as leads."""
@@ -170,6 +173,7 @@ async def test_co_lead_identification():
     assert has_a16z and has_gc, f"Expected both co-leads, got: {lead_names}"
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_benchmark_disambiguation():
     """Test that Benchmark Capital is distinguished from Benchmark International."""
@@ -182,6 +186,7 @@ async def test_benchmark_disambiguation():
     # The important thing is Benchmark (the VC) is correctly identified as lead
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_gv_disambiguation():
     """Test that GV (Google Ventures) is distinguished from GV ticker."""
@@ -192,6 +197,7 @@ async def test_gv_disambiguation():
     assert result.tracked_fund_name in ["GV (Google Ventures)", "GV", "Google Ventures"]
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_participation_only():
     """Test that participation is distinguished from leading."""
@@ -204,6 +210,7 @@ async def test_participation_only():
     assert "sequoia" in participant_names or "thrive" in participant_names
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_chain_of_thought_populated():
     """Test that reasoning chain is populated."""
