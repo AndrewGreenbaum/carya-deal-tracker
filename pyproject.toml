@@ -1,5 +1,5 @@
 [project]
-name = "bud-tracker"
+name = "carya-eagle-eye"
 version = "0.1.0"
 description = "Monitor lead investor signals from elite VC firms"
 requires-python = ">=3.11"
@@ -8,6 +8,8 @@ readme = "README.md"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = ["integration: live Anthropic calls requiring explicit opt-in and credentials"]
 
 [tool.ruff]
 line-length = 100
