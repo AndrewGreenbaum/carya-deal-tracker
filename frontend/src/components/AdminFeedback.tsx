@@ -93,7 +93,7 @@ export function AdminFeedback() {
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value as 'all' | 'unreviewed')}
-            className="bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-300 focus:outline-none focus:border-zinc-500"
+            className="bg-zinc-900 border border-zinc-700 rounded-sm px-3 py-2 text-zinc-300 focus:outline-hidden focus:border-zinc-500"
           >
             <option value="unreviewed">Unreviewed Only</option>
             <option value="all">All Feedback</option>
@@ -128,7 +128,7 @@ export function AdminFeedback() {
             <div className="text-red-400 mb-4">Error: {error}</div>
             <button
               onClick={fetchFeedback}
-              className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700"
+              className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-sm hover:bg-zinc-700"
             >
               Retry
             </button>
@@ -151,18 +151,18 @@ export function AdminFeedback() {
                     {/* Type badge */}
                     <div className="flex items-center gap-2 mb-2">
                       {item.feedback_type === 'flag' ? (
-                        <span className="flex items-center gap-1 px-2 py-1 bg-red-950 text-red-400 text-xs rounded border border-red-900">
+                        <span className="flex items-center gap-1 px-2 py-1 bg-red-950 text-red-400 text-xs rounded-sm border border-red-900">
                           <Flag className="w-3 h-3" />
                           FLAG
                         </span>
                       ) : (
-                        <span className="flex items-center gap-1 px-2 py-1 bg-blue-950 text-blue-400 text-xs rounded border border-blue-900">
+                        <span className="flex items-center gap-1 px-2 py-1 bg-blue-950 text-blue-400 text-xs rounded-sm border border-blue-900">
                           <MessageSquare className="w-3 h-3" />
                           {item.suggestion_type?.toUpperCase() || 'SUGGESTION'}
                         </span>
                       )}
                       {item.reviewed && (
-                        <span className="px-2 py-1 bg-zinc-800 text-zinc-400 text-xs rounded border border-zinc-700">
+                        <span className="px-2 py-1 bg-zinc-800 text-zinc-400 text-xs rounded-sm border border-zinc-700">
                           REVIEWED
                         </span>
                       )}
@@ -205,7 +205,7 @@ export function AdminFeedback() {
                     {item.reviewed ? (
                       <button
                         onClick={() => toggleReviewed(item.id, true)}
-                        className="flex items-center gap-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 text-sm transition-colors"
+                        className="flex items-center gap-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-sm hover:bg-zinc-700 text-sm transition-colors"
                         title="Undo Review"
                       >
                         <Undo2 className="w-4 h-4" />
@@ -214,7 +214,7 @@ export function AdminFeedback() {
                     ) : (
                       <button
                         onClick={() => toggleReviewed(item.id, false)}
-                        className="flex items-center gap-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 text-sm transition-colors"
+                        className="flex items-center gap-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-sm hover:bg-zinc-700 text-sm transition-colors"
                         title="Mark as Reviewed"
                       >
                         <Check className="w-4 h-4" />
@@ -223,7 +223,7 @@ export function AdminFeedback() {
                     )}
                     <button
                       onClick={() => deleteFeedback(item.id)}
-                      className="flex items-center gap-1 px-3 py-2 bg-red-950 border border-red-900 rounded hover:bg-red-900 text-red-400 text-sm transition-colors"
+                      className="flex items-center gap-1 px-3 py-2 bg-red-950 border border-red-900 rounded-sm hover:bg-red-900 text-red-400 text-sm transition-colors"
                       title="Delete"
                     >
                       <Trash2 className="w-4 h-4" />

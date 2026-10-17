@@ -132,7 +132,7 @@ export function CommandSidebar({
           <span className="text-sm font-medium text-slate-300">Menu</span>
           <button
             onClick={onMobileClose}
-            className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-slate-200 rounded transition-colors"
+            className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-slate-200 rounded-sm transition-colors"
             aria-label="Close menu"
           >
             <X className="w-5 h-5" />
@@ -169,7 +169,7 @@ export function CommandSidebar({
                 placeholder="Search"
                 value={filters.searchQuery || ''}
                 onChange={(e) => onFiltersChange({ ...filters, searchQuery: e.target.value })}
-                className="w-full bg-transparent border-b border-slate-800 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-slate-500"
+                className="w-full bg-transparent border-b border-slate-800 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-hidden focus:border-slate-500"
               />
               {filters.searchQuery && (
                 <button
@@ -362,7 +362,7 @@ function NavItem({ label, active, onClick }: NavItemProps) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left py-2.5 font-mono text-[13px] transition-colors min-h-[44px] md:min-h-0 focus:outline-none ${
+      className={`w-full text-left py-2.5 font-mono text-[13px] transition-colors min-h-[44px] md:min-h-0 focus:outline-hidden ${
         active
           ? 'text-slate-100 font-medium'
           : 'text-slate-500 hover:text-slate-300'

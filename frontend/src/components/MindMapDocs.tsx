@@ -355,10 +355,10 @@ export function MindMapDocs() {
           </a>
 
           {/* Zoom controls */}
-          <div className="flex items-center gap-1 bg-zinc-900/80 backdrop-blur border border-zinc-800 rounded-lg p-1">
+          <div className="flex items-center gap-1 bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-lg p-1">
             <button
               onClick={() => setZoom(z => Math.max(0.3, z - 0.2))}
-              className="p-1.5 hover:bg-zinc-800 rounded transition-colors"
+              className="p-1.5 hover:bg-zinc-800 rounded-sm transition-colors"
               title="Zoom out"
             >
               <ZoomOut className="w-4 h-4 text-zinc-400" />
@@ -368,7 +368,7 @@ export function MindMapDocs() {
             </span>
             <button
               onClick={() => setZoom(z => Math.min(2.5, z + 0.2))}
-              className="p-1.5 hover:bg-zinc-800 rounded transition-colors"
+              className="p-1.5 hover:bg-zinc-800 rounded-sm transition-colors"
               title="Zoom in"
             >
               <ZoomIn className="w-4 h-4 text-zinc-400" />
@@ -376,7 +376,7 @@ export function MindMapDocs() {
             <div className="w-px h-4 bg-zinc-700 mx-1" />
             <button
               onClick={handleReset}
-              className="p-1.5 hover:bg-zinc-800 rounded transition-colors"
+              className="p-1.5 hover:bg-zinc-800 rounded-sm transition-colors"
               title="Reset view"
             >
               <Maximize2 className="w-4 h-4 text-zinc-400" />

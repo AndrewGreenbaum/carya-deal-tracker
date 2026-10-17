@@ -11,7 +11,7 @@ interface StatsCardsProps {
 
 export const StatsCards = memo(function StatsCards({ stats }: StatsCardsProps) {
   return (
-    <div className="px-6 pt-6 pb-6 bg-[#0a0a0c]">
+    <div className="px-6 pt-6 pb-6 bg-cc-bg">
       <h2 className="text-2xl font-semibold text-white tracking-tight">
         Deals
       </h2>

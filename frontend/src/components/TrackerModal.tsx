@@ -125,7 +125,7 @@ export function TrackerModal({
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/75 backdrop-blur-sm z-40"
+        className="fixed inset-0 bg-black/75 backdrop-blur-xs z-40"
         onClick={handleBackdropClick}
         aria-hidden="true"
       />
@@ -156,7 +156,7 @@ export function TrackerModal({
 
             {/* Company Name */}
             <div className="mb-8">
-              <label className="block text-[10px] uppercase tracking-[0.1em] text-zinc-600 font-medium mb-3">
+              <label className="block text-[10px] uppercase tracking-widest text-zinc-600 font-medium mb-3">
                 Company
               </label>
               <input
@@ -165,20 +165,20 @@ export function TrackerModal({
                 onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
                 placeholder="Acme Inc."
                 required
-                className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-none focus:border-zinc-600 transition-colors"
+                className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-hidden focus:border-zinc-600 transition-colors"
               />
             </div>
 
             {/* Round & Amount */}
             <div className="grid grid-cols-2 gap-8 mb-8">
               <div>
-                <label className="block text-[10px] uppercase tracking-[0.1em] text-zinc-600 font-medium mb-3">
+                <label className="block text-[10px] uppercase tracking-widest text-zinc-600 font-medium mb-3">
                   Round
                 </label>
                 <select
                   value={formData.roundType}
                   onChange={(e) => setFormData({ ...formData, roundType: e.target.value })}
-                  className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 focus:outline-none focus:border-zinc-600 appearance-none cursor-pointer transition-colors"
+                  className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 focus:outline-hidden focus:border-zinc-600 appearance-none cursor-pointer transition-colors"
                 >
                   <option value="">Select...</option>
                   <option value="Pre-Seed">Pre-Seed</option>
@@ -191,7 +191,7 @@ export function TrackerModal({
                 </select>
               </div>
               <div>
-                <label className="block text-[10px] uppercase tracking-[0.1em] text-zinc-600 font-medium mb-3">
+                <label className="block text-[10px] uppercase tracking-widest text-zinc-600 font-medium mb-3">
                   Amount
                 </label>
                 <input
@@ -199,14 +199,14 @@ export function TrackerModal({
                   value={formData.amount}
                   onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
                   placeholder="$10M"
-                  className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-none focus:border-zinc-600 transition-colors"
+                  className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-hidden focus:border-zinc-600 transition-colors"
                 />
               </div>
             </div>
 
             {/* Lead Investor */}
             <div className="mb-8">
-              <label className="block text-[10px] uppercase tracking-[0.1em] text-zinc-600 font-medium mb-3">
+              <label className="block text-[10px] uppercase tracking-widest text-zinc-600 font-medium mb-3">
                 Lead Investor
               </label>
               <input
@@ -214,13 +214,13 @@ export function TrackerModal({
                 value={formData.leadInvestor}
                 onChange={(e) => setFormData({ ...formData, leadInvestor: e.target.value })}
                 placeholder="Sequoia Capital"
-                className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-none focus:border-zinc-600 transition-colors"
+                className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-hidden focus:border-zinc-600 transition-colors"
               />
             </div>
 
             {/* Website */}
             <div className="mb-8">
-              <label className="block text-[10px] uppercase tracking-[0.1em] text-zinc-600 font-medium mb-3">
+              <label className="block text-[10px] uppercase tracking-widest text-zinc-600 font-medium mb-3">
                 Website
               </label>
               <input
@@ -228,13 +228,13 @@ export function TrackerModal({
                 value={formData.website}
                 onChange={(e) => setFormData({ ...formData, website: e.target.value })}
                 placeholder="https://"
-                className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-none focus:border-zinc-600 transition-colors"
+                className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-hidden focus:border-zinc-600 transition-colors"
               />
             </div>
 
             {/* Notes */}
             <div className="mb-8">
-              <label className="block text-[10px] uppercase tracking-[0.1em] text-zinc-600 font-medium mb-3">
+              <label className="block text-[10px] uppercase tracking-widest text-zinc-600 font-medium mb-3">
                 Notes
               </label>
               <textarea
@@ -242,20 +242,20 @@ export function TrackerModal({
                 onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                 placeholder="Internal notes..."
                 rows={2}
-                className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-none focus:border-zinc-600 transition-colors resize-none"
+                className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-hidden focus:border-zinc-600 transition-colors resize-none"
               />
             </div>
 
             {/* Pipeline Section */}
             <div className="border-t border-zinc-800/15 pt-8 mt-8">
               <div className="mb-8">
-                <label className="block text-[10px] uppercase tracking-[0.1em] text-zinc-600 font-medium mb-3">
+                <label className="block text-[10px] uppercase tracking-widest text-zinc-600 font-medium mb-3">
                   Status
                 </label>
                 <select
                   value={formData.status}
                   onChange={(e) => setFormData({ ...formData, status: e.target.value as TrackerStatus })}
-                  className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 focus:outline-none focus:border-zinc-600 appearance-none cursor-pointer transition-colors"
+                  className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 focus:outline-hidden focus:border-zinc-600 appearance-none cursor-pointer transition-colors"
                 >
                   {(Object.entries(TRACKER_STATUS_LABELS) as [TrackerStatus, string][]).map(
                     ([value, label]) => (
@@ -271,7 +271,7 @@ export function TrackerModal({
               {!isCreating && (
                 <>
                   <div className="mb-8">
-                    <label className="block text-[10px] uppercase tracking-[0.1em] text-zinc-600 font-medium mb-3">
+                    <label className="block text-[10px] uppercase tracking-widest text-zinc-600 font-medium mb-3">
                       Next Step
                     </label>
                     <input
@@ -279,19 +279,19 @@ export function TrackerModal({
                       value={formData.nextStep}
                       onChange={(e) => setFormData({ ...formData, nextStep: e.target.value })}
                       placeholder="What's next?"
-                      className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-none focus:border-zinc-600 transition-colors"
+                      className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-hidden focus:border-zinc-600 transition-colors"
                     />
                   </div>
 
                   <div className="mb-8">
-                    <label className="block text-[10px] uppercase tracking-[0.1em] text-zinc-600 font-medium mb-3">
+                    <label className="block text-[10px] uppercase tracking-widest text-zinc-600 font-medium mb-3">
                       Last Contact
                     </label>
                     <input
                       type="date"
                       value={formData.lastContactDate}
                       onChange={(e) => setFormData({ ...formData, lastContactDate: e.target.value })}
-                      className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 focus:outline-none focus:border-zinc-600 transition-colors"
+                      className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 focus:outline-hidden focus:border-zinc-600 transition-colors"
                     />
                   </div>
                 </>

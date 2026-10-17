@@ -54,7 +54,7 @@ export function TrackerColumnModal({
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/75 backdrop-blur-sm z-40"
+        className="fixed inset-0 bg-black/75 backdrop-blur-xs z-40"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -81,7 +81,7 @@ export function TrackerColumnModal({
           <div>
             <label
               htmlFor="displayName"
-              className="block text-[10px] uppercase tracking-[0.1em] text-zinc-600 font-medium mb-3"
+              className="block text-[10px] uppercase tracking-widest text-zinc-600 font-medium mb-3"
             >
               Name
             </label>
@@ -94,7 +94,7 @@ export function TrackerColumnModal({
                 setError(null);
               }}
               placeholder="e.g., Due Diligence"
-              className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-none focus:border-zinc-600 transition-colors"
+              className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-800 placeholder:font-light focus:outline-hidden focus:border-zinc-600 transition-colors"
               autoFocus
             />
             {error && <p className="mt-2 text-xs text-red-400">{error}</p>}

@@ -4,7 +4,7 @@ A deal-intelligence service that collects funding announcements, extracts struct
 
 ## Local setup
 
-Requires Python 3.11+, Node.js 20+, and PostgreSQL for the running backend.
+Requires Python 3.11+, Node.js 22+, and PostgreSQL for the running backend.
 
 ```sh
 python3 -m venv .venv
@@ -30,11 +30,16 @@ npm run dev
 
 The dashboard's API base URL is configured through its Vite environment settings.
 
+The frontend requires Node.js 22 or newer (the container uses Node.js 24). Its styling uses Tailwind CSS 4; the custom theme is defined in `frontend/src/index.css`.
+
+Carya chat is disabled by default. To enable it, set `VITE_CARYA_CHAT_PATH` to a same-origin path such as `/api/chat` at build time, and provide an authenticated WebSocket proxy at that path. The proxy must keep gateway credentials server-side. Do not put a gateway token in a Vite variable or client source. The previously committed token should be revoked or rotated because removing it does not remove Git history.
+
 ## Validation
 
 ```sh
 python -m pytest tests -q
 cd frontend
+npm test
 npm run typecheck
 npm run build
 ```
