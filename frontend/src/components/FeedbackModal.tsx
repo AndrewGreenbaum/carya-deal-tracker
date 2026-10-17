@@ -87,7 +87,7 @@ export function FeedbackModal({ onClose }: FeedbackModalProps) {
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 animate-fade-in"
+        className="fixed inset-0 bg-black/70 backdrop-blur-xs z-40 animate-fade-in"
         onClick={handleBackdropClick}
         aria-hidden="true"
       />
@@ -98,7 +98,7 @@ export function FeedbackModal({ onClose }: FeedbackModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="feedback-modal-title"
-        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-md mx-4 bg-[#0a0a0c] border border-slate-800 rounded-lg shadow-2xl animate-slide-up"
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-md mx-4 bg-cc-bg border border-slate-800 rounded-lg shadow-2xl animate-slide-up"
       >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-slate-800">
@@ -121,7 +121,7 @@ export function FeedbackModal({ onClose }: FeedbackModalProps) {
           <button
             ref={closeButtonRef}
             onClick={onClose}
-            className="p-2 hover:bg-slate-800 rounded transition-colors text-slate-400 hover:text-white"
+            className="p-2 hover:bg-slate-800 rounded-sm transition-colors text-slate-400 hover:text-white"
             aria-label="Close feedback"
           >
             <X className="w-5 h-5" />
@@ -188,7 +188,7 @@ export function FeedbackModal({ onClose }: FeedbackModalProps) {
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
                   placeholder="e.g., Anthropic, OpenAI, Glean"
-                  className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/50"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-sm px-3 py-2 text-white placeholder:text-slate-500 focus:outline-hidden focus:border-emerald-500/50"
                   autoFocus
                 />
               </div>
@@ -206,12 +206,12 @@ export function FeedbackModal({ onClose }: FeedbackModalProps) {
                       : 'e.g., Just raised Series B, AI infrastructure company...'
                   }
                   rows={3}
-                  className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/50 resize-none"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-sm px-3 py-2 text-white placeholder:text-slate-500 focus:outline-hidden focus:border-emerald-500/50 resize-none"
                 />
               </div>
 
               {errorMessage && (
-                <div className="text-sm text-red-400 bg-red-400/10 px-3 py-2 rounded">
+                <div className="text-sm text-red-400 bg-red-400/10 px-3 py-2 rounded-sm">
                   {errorMessage}
                 </div>
               )}

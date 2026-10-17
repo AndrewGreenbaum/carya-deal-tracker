@@ -409,7 +409,7 @@ export function AircraftTracker({ onClose }: AircraftTrackerProps) {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors"
+            className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-sm transition-colors"
             title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
           >
             {isFullscreen ? (
@@ -420,7 +420,7 @@ export function AircraftTracker({ onClose }: AircraftTrackerProps) {
           </button>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors"
+            className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-sm transition-colors"
           >
             <X className="w-5 h-5" />
           </button>

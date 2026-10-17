@@ -209,7 +209,7 @@ function DataSourcesPanel({ isOpen, onToggle }: { isOpen: boolean; onToggle: () 
               {SOURCE_CONFIG.bypassFilter.map(s => (
                 <span
                   key={s.name}
-                  className="px-2 py-1 bg-emerald-900/20 border border-emerald-700/30 rounded text-xs"
+                  className="px-2 py-1 bg-emerald-900/20 border border-emerald-700/30 rounded-sm text-xs"
                   title={s.reason}
                 >
                   {s.label}
@@ -229,7 +229,7 @@ function DataSourcesPanel({ isOpen, onToggle }: { isOpen: boolean; onToggle: () 
               {SOURCE_CONFIG.earlySignals.map(s => (
                 <span
                   key={s.name}
-                  className="px-2 py-1 bg-blue-900/20 border border-blue-700/30 rounded text-xs"
+                  className="px-2 py-1 bg-blue-900/20 border border-blue-700/30 rounded-sm text-xs"
                   title={s.purpose}
                 >
                   {s.label}
@@ -249,7 +249,7 @@ function DataSourcesPanel({ isOpen, onToggle }: { isOpen: boolean; onToggle: () 
               {SOURCE_CONFIG.withFilter.map(s => (
                 <span
                   key={s.name}
-                  className="px-2 py-1 bg-amber-900/20 border border-amber-700/30 rounded text-xs"
+                  className="px-2 py-1 bg-amber-900/20 border border-amber-700/30 rounded-sm text-xs"
                 >
                   {s.label}
                 </span>
@@ -268,7 +268,7 @@ function DataSourcesPanel({ isOpen, onToggle }: { isOpen: boolean; onToggle: () 
               {SOURCE_CONFIG.disabled.map(s => (
                 <span
                   key={s.name}
-                  className="px-2 py-1 bg-red-900/20 border border-red-700/30 rounded text-xs line-through opacity-60"
+                  className="px-2 py-1 bg-red-900/20 border border-red-700/30 rounded-sm text-xs line-through opacity-60"
                   title={s.reason}
                 >
                   {s.label}
@@ -313,7 +313,7 @@ function SourceBreakdown({ sources }: { sources: Record<string, ScanSourceStats>
             }`}
           >
             <div className="flex items-center gap-1.5">
-              <Icon className={`w-3 h-3 ${color} flex-shrink-0`} />
+              <Icon className={`w-3 h-3 ${color} shrink-0`} />
               <span className="font-medium text-white truncate">{name.replace(/_/g, ' ')}</span>
             </div>
             {stats.error_message ? (
@@ -339,7 +339,7 @@ function DealCard({ deal }: { deal: ScanDeal }) {
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-slate-500 flex-shrink-0" />
+            <Building2 className="w-4 h-4 text-slate-500 shrink-0" />
             <span className="font-medium text-white truncate">{deal.startup_name}</span>
           </div>
           <div className="flex items-center gap-2 mt-1 text-sm text-slate-400">
@@ -400,7 +400,7 @@ function ScanRow({ scan, isExpanded, onToggle }: { scan: Scan; isExpanded: boole
         onClick={onToggle}
         className="w-full p-4 flex items-center gap-4 hover:bg-slate-800/50 transition-colors text-left"
       >
-        <div className="flex-shrink-0">
+        <div className="shrink-0">
           {isExpanded ? (
             <ChevronDown className="w-5 h-5 text-slate-400" />
           ) : (
@@ -462,7 +462,7 @@ function ScanRow({ scan, isExpanded, onToggle }: { scan: Scan; isExpanded: boole
               {/* Error message if failed */}
               {details.error_message && (
                 <div className="p-3 bg-red-900/20 border border-red-700/30 rounded-lg flex items-start gap-2">
-                  <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                  <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
                   <div className="text-sm text-red-300">{details.error_message}</div>
                 </div>
               )}
@@ -621,7 +621,7 @@ export function ScansPage({ onBack }: ScansPageProps = {}) {
                 <button
                   onClick={() => setPage(p => Math.max(1, p - 1))}
                   disabled={page === 1}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Previous
                 </button>
@@ -631,7 +631,7 @@ export function ScansPage({ onBack }: ScansPageProps = {}) {
                 <button
                   onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                   disabled={page === totalPages}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Next
                 </button>

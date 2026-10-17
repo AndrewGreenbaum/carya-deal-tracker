@@ -95,7 +95,7 @@ export function TrackerColumn({
         role="region"
         aria-label={`${column.displayName} column, ${count} items`}
         className={`flex-1 min-h-[200px] transition-colors ${
-          isOver ? 'outline outline-1 outline-emerald-500/20 rounded' : ''
+          isOver ? 'outline-solid outline-1 outline-emerald-500/20 rounded-sm' : ''
         }`}
       >
         {items.length > 0 ? (

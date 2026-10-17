@@ -130,7 +130,7 @@ function renderInline(text: string): React.ReactNode {
   return parts.map((part, i) => {
     if (part.startsWith('`') && part.endsWith('`')) {
       return (
-        <code key={i} className="bg-slate-800 text-emerald-400 px-1 py-0.5 rounded text-xs">
+        <code key={i} className="bg-slate-800 text-emerald-400 px-1 py-0.5 rounded-sm text-xs">
           {part.slice(1, -1)}
         </code>
       );
@@ -246,12 +246,12 @@ function TreeNodeComponent({ node, depth, onToggle, isLast, parentLines }: TreeN
             {/* Expand/collapse icon */}
             {(hasChildren || hasContent) ? (
               node.expanded ? (
-                <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
               ) : (
-                <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
               )
             ) : (
-              <Circle className={`w-2 h-2 ${getNodeColor()} rounded-full flex-shrink-0`} />
+              <Circle className={`w-2 h-2 ${getNodeColor()} rounded-full shrink-0`} />
             )}
 
             {/* Node dot */}
@@ -319,7 +319,7 @@ function MarkdownContent({ content }: { content: string }) {
   const flushCode = () => {
     if (codeLines.length > 0) {
       elements.push(
-        <pre key={elements.length} className="bg-slate-900 rounded p-2 overflow-x-auto my-2 text-xs">
+        <pre key={elements.length} className="bg-slate-900 rounded-sm p-2 overflow-x-auto my-2 text-xs">
           <code className="text-emerald-400">{codeLines.join('\n')}</code>
         </pre>
       );
@@ -333,7 +333,7 @@ function MarkdownContent({ content }: { content: string }) {
       const body = tableRows.slice(2);
       elements.push(
         <div key={elements.length} className="overflow-x-auto my-2">
-          <table className="min-w-full border border-slate-700 rounded text-xs">
+          <table className="min-w-full border border-slate-700 rounded-sm text-xs">
             <thead className="bg-slate-800">
               <tr>
                 {headers.map((h, i) => (
@@ -510,16 +510,16 @@ export function TreeDocs() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#050506] flex items-center justify-center">
+      <div className="min-h-screen bg-cc-bg-dark flex items-center justify-center">
         <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#050506] text-slate-300">
+    <div className="min-h-screen bg-cc-bg-dark text-slate-300">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-[#0a0a0c] border-b border-slate-800 px-6 py-4">
+      <header className="sticky top-0 z-50 bg-cc-bg border-b border-slate-800 px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
             <a
@@ -538,13 +538,13 @@ export function TreeDocs() {
           <div className="flex items-center gap-4">
             <button
               onClick={() => setAllExpanded(true)}
-              className="px-3 py-1.5 text-sm bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
+              className="px-3 py-1.5 text-sm bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-sm transition-colors"
             >
               Expand All
             </button>
             <button
               onClick={() => setAllExpanded(false)}
-              className="px-3 py-1.5 text-sm bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
+              className="px-3 py-1.5 text-sm bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-sm transition-colors"
             >
               Collapse All
             </button>
@@ -556,7 +556,7 @@ export function TreeDocs() {
       </header>
 
       {/* Legend */}
-      <div className="bg-[#0a0a0c]/80 border-b border-slate-800 px-6 py-2">
+      <div className="bg-cc-bg/80 border-b border-slate-800 px-6 py-2">
         <div className="max-w-6xl mx-auto flex items-center gap-6 text-xs text-slate-400">
           <span className="text-slate-500">Legend:</span>
           <div className="flex items-center gap-1.5">

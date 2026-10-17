@@ -120,7 +120,7 @@ function MarkdownContent({ content }: { content: string }) {
     return parts.map((part, i) => {
       if (part.startsWith('`') && part.endsWith('`')) {
         return (
-          <code key={i} className="bg-slate-800 text-emerald-400 px-1.5 py-0.5 rounded text-sm">
+          <code key={i} className="bg-slate-800 text-emerald-400 px-1.5 py-0.5 rounded-sm text-sm">
             {part.slice(1, -1)}
           </code>
         );
@@ -325,16 +325,16 @@ export function ClaudeDocs() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#050506] flex items-center justify-center">
+      <div className="min-h-screen bg-cc-bg-dark flex items-center justify-center">
         <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#050506] text-slate-300">
+    <div className="min-h-screen bg-cc-bg-dark text-slate-300">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-[#0a0a0c] border-b border-slate-800 px-6 py-4">
+      <header className="sticky top-0 z-50 bg-cc-bg border-b border-slate-800 px-6 py-4">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
             <a
@@ -357,7 +357,7 @@ export function ClaudeDocs() {
       </header>
 
       {/* Navigation */}
-      <nav className="sticky top-[73px] z-40 bg-[#0a0a0c]/95 backdrop-blur border-b border-slate-800 px-6 py-3">
+      <nav className="sticky top-[73px] z-40 bg-cc-bg/95 backdrop-blur-sm border-b border-slate-800 px-6 py-3">
         <div className="max-w-5xl mx-auto flex flex-wrap gap-2">
           {h2Sections.map((section) => (
             <a

@@ -39,9 +39,9 @@ export function StealthTracker() {
   };
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-[#050506]">
+    <div className="flex-1 flex flex-col overflow-hidden bg-cc-bg-dark">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-slate-800 bg-[#0a0a0c] sticky top-0 z-10">
+      <div className="px-6 py-4 border-b border-slate-800 bg-cc-bg sticky top-0 z-10">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Ghost className="w-6 h-6 text-purple-400" />
@@ -58,7 +58,7 @@ export function StealthTracker() {
               <select
                 value={selectedFund || ''}
                 onChange={(e) => setSelectedFund(e.target.value || undefined)}
-                className="appearance-none bg-slate-900 border border-slate-700 rounded px-3 py-1.5 pr-8 text-sm text-slate-300 focus:outline-none focus:border-emerald-500"
+                className="appearance-none bg-slate-900 border border-slate-700 rounded-sm px-3 py-1.5 pr-8 text-sm text-slate-300 focus:outline-hidden focus:border-emerald-500"
               >
                 <option value="">All Funds</option>
                 {TRACKED_FUNDS.map((fund) => (
@@ -129,7 +129,7 @@ export function StealthTracker() {
       </div>
 
       {/* Footer Stats */}
-      <div className="px-6 py-3 border-t border-slate-800 bg-[#0a0a0c] text-xs text-slate-600 flex justify-between">
+      <div className="px-6 py-3 border-t border-slate-800 bg-cc-bg text-xs text-slate-600 flex justify-between">
         <span>{detections.length} detections</span>
         <span>
           {detections.filter((d) => d.isConfirmed).length} confirmed
@@ -155,12 +155,12 @@ function DetectionRow({ detection, fundName }: DetectionRowProps) {
               {detection.companyName || 'Unknown Company'}
             </span>
             {detection.isConfirmed ? (
-              <span className="flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                 <CheckCircle className="w-3 h-3" />
                 Confirmed
               </span>
             ) : (
-              <span className="px-2 py-0.5 rounded text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30">
+              <span className="px-2 py-0.5 rounded-sm text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30">
                 Pending
               </span>
             )}
@@ -184,7 +184,7 @@ function DetectionRow({ detection, fundName }: DetectionRowProps) {
           href={detection.detectedUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-400 hover:text-blue-300 hover:bg-slate-800 rounded transition-colors"
+          className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-400 hover:text-blue-300 hover:bg-slate-800 rounded-sm transition-colors"
         >
           <ExternalLink className="w-4 h-4" />
           View

@@ -1,6 +1,81 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+@theme {
+  --font-mono: JetBrains Mono, Menlo, Monaco, Consolas, monospace;
+
+  --color-cc-bg: #0a0a0c;
+  --color-cc-bg-dark: #050506;
+  --color-cc-sidebar: #0d0d10;
+  --color-cc-border: #1e293b;
+  --color-cc-card: #0f172a;
+
+  --color-accent-emerald: #10b981;
+  --color-accent-blue: #3b82f6;
+  --color-accent-purple: #a855f7;
+  --color-accent-orange: #f97316;
+  --color-accent-yellow: #eab308;
+  --color-accent-red: #ef4444;
+  --color-accent-cyan: #06b6d4;
+
+  --animate-pulse-glow: pulse-glow 2s ease-in-out infinite;
+  --animate-fade-in: fade-in 0.15s ease-out;
+  --animate-slide-in: slide-in 0.3s ease-out;
+  --animate-slide-up: scale-in 0.15s ease-out;
+  --animate-spin-slow: spin 3s linear infinite;
+
+  --text-xxs: 0.625rem;
+
+  @keyframes pulse-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 10px #10b981;
+      opacity: 1;
+    }
+    50% {
+      box-shadow: 0 0 20px #10b981;
+      opacity: 0.8;
+    }
+  }
+  @keyframes fade-in {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes slide-in {
+    0% {
+      transform: translateX(-10px);
+      opacity: 0;
+    }
+    100% {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+  @keyframes scale-in {
+    0% {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+}
+
+/* Preserve the previous default border color after the Tailwind 4 migration. */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
 
 /* Base styles */
 body {
@@ -111,7 +186,7 @@ body {
 
 /* Category badges */
 .category-badge {
-  @apply inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs border;
+  @apply inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-xs border;
 }
 
 .category-infrastructure {
@@ -141,7 +216,7 @@ body {
 
 /* Stage badges */
 .stage-badge {
-  @apply px-1.5 py-0.5 rounded text-xxs border;
+  @apply px-1.5 py-0.5 rounded-sm text-xxs border;
 }
 
 .stage-seed, .stage-pre_seed {
@@ -170,24 +245,24 @@ body {
 
 /* Button styles */
 .btn-primary {
-  @apply px-3 py-1.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/50 rounded;
+  @apply px-3 py-1.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/50 rounded-sm;
   @apply hover:bg-emerald-500/20 transition-colors text-xs font-medium;
 }
 
 .btn-secondary {
-  @apply px-3 py-1.5 bg-slate-800 text-slate-300 border border-slate-700 rounded;
+  @apply px-3 py-1.5 bg-slate-800 text-slate-300 border border-slate-700 rounded-sm;
   @apply hover:bg-slate-700 transition-colors text-xs font-medium;
 }
 
 /* Stats card */
 .stats-card {
-  @apply p-4 bg-gradient-to-br from-slate-900 to-slate-900/50 border border-slate-800 rounded;
+  @apply p-4 bg-linear-to-br from-slate-900 to-slate-900/50 border border-slate-800 rounded-sm;
   @apply hover:border-emerald-500/30 transition-colors;
 }
 
 /* Filter checkbox */
 .filter-checkbox {
-  @apply w-4 h-4 border rounded flex items-center justify-center text-xxs font-bold;
+  @apply w-4 h-4 border rounded-sm flex items-center justify-center text-xxs font-bold;
   @apply transition-colors cursor-pointer;
 }
 

@@ -399,7 +399,7 @@ const DealRow = memo(React.forwardRef<HTMLDivElement, DealRowProps>(function Dea
 
 function StageBadge({ stage, isRejected }: { stage: InvestmentStage; isRejected: boolean }) {
   if (isRejected) {
-    return <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-slate-700 text-slate-400">Unknown</span>;
+    return <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-sm bg-slate-700 text-slate-400">Unknown</span>;
   }
 
   const stageStyles: Record<string, string> = {
@@ -414,7 +414,7 @@ function StageBadge({ stage, isRejected }: { stage: InvestmentStage; isRejected:
   };
 
   return (
-    <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded border ${stageStyles[stage] || stageStyles.unknown}`}>
+    <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-sm border ${stageStyles[stage] || stageStyles.unknown}`}>
       {STAGE_LABELS[stage] || stage}
     </span>
   );

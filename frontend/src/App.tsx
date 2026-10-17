@@ -413,7 +413,7 @@ function App() {
   }, []);
 
   return (
-    <div className="h-screen flex bg-[#050506] text-slate-300 font-['JetBrains_Mono',monospace]">
+    <div className="h-screen flex bg-cc-bg-dark text-slate-300 font-['JetBrains_Mono',monospace]">
       {/* Main Layout - no header, content starts immediately */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Sidebar - hidden on mobile (shown via drawer), visible on desktop */}
@@ -470,7 +470,7 @@ function App() {
           {/* Mobile menu button - no header, just a floating button */}
           <button
             onClick={() => setMobileMenuOpen(true)}
-            className="md:hidden absolute top-3 left-3 z-30 flex items-center justify-center w-10 h-10 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 rounded transition-colors"
+            className="md:hidden absolute top-3 left-3 z-30 flex items-center justify-center w-10 h-10 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 rounded-sm transition-colors"
             aria-label="Toggle menu"
           >
             <Menu className="w-5 h-5" />
@@ -486,11 +486,11 @@ function App() {
                 const now = new Date();
                 const isRunning = nextRun.getTime() <= now.getTime();
                 return isRunning ? (
-                  <div className="px-6 py-2 border-b border-slate-800 bg-[#0a0a0c]">
+                  <div className="px-6 py-2 border-b border-slate-800 bg-cc-bg">
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-emerald-400 font-medium">SCANNING</span>
                       <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
-                        <div className="h-full w-1/3 bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-500 rounded-full animate-scan-bar" />
+                        <div className="h-full w-1/3 bg-linear-to-r from-emerald-500 via-emerald-400 to-emerald-500 rounded-full animate-scan-bar" />
                       </div>
                     </div>
                   </div>

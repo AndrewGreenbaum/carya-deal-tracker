@@ -71,7 +71,7 @@ export function TrackerBulkAddModal({
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/75 backdrop-blur-sm z-40"
+        className="fixed inset-0 bg-black/75 backdrop-blur-xs z-40"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -98,7 +98,7 @@ export function TrackerBulkAddModal({
           <div>
             <label
               htmlFor="companies"
-              className="block text-[10px] uppercase tracking-[0.1em] text-zinc-600 font-medium mb-3"
+              className="block text-[10px] uppercase tracking-widest text-zinc-600 font-medium mb-3"
             >
               One per line
             </label>
@@ -111,7 +111,7 @@ export function TrackerBulkAddModal({
               }}
               placeholder={"Acme Corp\nTechStartup\nAI Solutions"}
               rows={8}
-              className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-[13px] text-zinc-200 font-mono font-light leading-[1.8] placeholder:text-zinc-800 focus:outline-none focus:border-zinc-600 transition-colors resize-none"
+              className="w-full bg-transparent border-b border-zinc-800 py-2.5 text-[13px] text-zinc-200 font-mono font-light leading-[1.8] placeholder:text-zinc-800 focus:outline-hidden focus:border-zinc-600 transition-colors resize-none"
               autoFocus
             />
             {parsedNames.length > 0 && (
