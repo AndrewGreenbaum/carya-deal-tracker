@@ -1,78 +1,59 @@
 # Carya Eagle Eye
 
-Deal-intelligence system for tracking lead investment signals from target VC funds, extracting structured funding data, and serving that data to a frontend dashboard.
+A deal-intelligence service that collects funding announcements, extracts structured company and investor details, filters duplicate records, and serves an analyst dashboard.
 
-## What I Built
+## Local setup
 
-- Backend ingestion + extraction pipeline for funding/deal signals.
-- Structured persistence with migration support.
-- Frontend dashboard for review and drill-down.
-- Test suite around extraction/storage flows.
+Requires Python 3.11+, Node.js 22+, and PostgreSQL for the running backend.
 
-## Why This Exists
-
-Raw funding content is inconsistent across sources. This project standardizes extraction and tracks lead-signal quality so downstream analysis is reliable.
-
-## Architecture
-
-- Ingestion/scraping scripts for source collection.
-- Extraction layer for structured deal parsing.
-- Storage layer (`src/archivist`) for normalized persistence.
-- API + frontend (`frontend`) for visibility.
-
-## Key Tradeoffs
-
-1. Structured extraction with strict schemas:
-Reduces bad data drift; tradeoff is extra handling for ambiguous articles.
-
-2. Source-specific heuristics + shared normalization:
-Improves accuracy on noisy inputs; tradeoff is ongoing heuristic maintenance.
-
-3. Clear separation of backend/frontend workspaces:
-Keeps deployment and debugging cleaner; tradeoff is more coordination across stacks.
-
-## Run
-
-### Backend
-Prerequisites: Python 3.11+ (project requires `>=3.11`).
-```bash
+```sh
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Frontend
-Prerequisites: Node.js 18+ and npm dependencies installed.
-```bash
+Configure a local `DATABASE_URL` and the relevant service keys using `.env.example` as a reference. Start the API with:
+
+```sh
+uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Startup applies database migrations and starts the scraping scheduler. Use a development database; ingestion and extraction need configured external services and may incur API charges.
+
+Start the dashboard from a second terminal:
+
+```sh
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-## Test
+The dashboard's API base URL is configured through its Vite environment settings.
 
-Prerequisites: Python 3.11+ and project dependencies installed.
+The frontend requires Node.js 22 or newer (the container uses Node.js 24). Its styling uses Tailwind CSS 4; the custom theme is defined in `frontend/src/index.css`.
 
-```bash
-python3 -m pytest tests -q
+Carya chat is disabled by default. To enable it, set `VITE_CARYA_CHAT_PATH` to a same-origin path such as `/api/chat` at build time, and provide an authenticated WebSocket proxy at that path. The proxy must keep gateway credentials server-side. Do not put a gateway token in a Vite variable or client source. The previously committed token should be revoked or rotated because removing it does not remove Git history.
+
+## Validation
+
+```sh
+python -m pytest tests -q
+cd frontend
+npm test
+npm run typecheck
+npm run build
 ```
 
-## Troubleshoot
+The default Python run excludes tests marked `integration`. Seven extraction cases call Anthropic and require an explicit `python -m pytest -m integration` run with credentials. Unit tests cover normalization, validation, extraction helpers and duplicate matching. A passing unit suite does not verify source availability, migration behavior against an existing database, or live extraction quality.
 
-- Empty dashboard: verify backend data ingest path and API base config.
-- Extraction quality drops: review source-specific parsing and confidence thresholds.
-- Migration issues: check `alembic` revision state before rerunning ingestion.
+## Structure
 
-## Interview Talking Points
+- `src/harvester`: article collection and orchestration
+- `src/analyst`: structured extraction and validation
+- `src/archivist`: SQL models, persistence and deduplication
+- `src/scheduler`: scheduled scans and notifications
+- `src/main.py`: FastAPI endpoints
+- `frontend`: React/TypeScript dashboard
+- `alembic`: database migrations
 
-- How I chose schema strictness vs extraction flexibility.
-- How I debugged lead-signal misclassification.
-- Why I split pipeline modules instead of one extraction script.
-
-## Related Docs
-
-- `DECISIONS.md`
-- `BUILD_LOG.md`
-- `KNOWN_LIMITATIONS.md`
-- `DEMO.md`
-- `SECURITY.md`
+Bud Tracker and Carya Eagle Eye share substantial source history and functionality. Extraction remains dependent on article quality; ambiguous investment roles need analyst review. No accuracy or performance result is implied by the presence of a feature or test.

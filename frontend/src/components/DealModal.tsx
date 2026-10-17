@@ -168,7 +168,7 @@ export const DealModal = memo(function DealModal({ deal, onClose, onDealUpdated 
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/85 backdrop-blur-[12px] z-40"
+        className="fixed inset-0 bg-black/85 backdrop-blur-md z-40"
         onClick={handleBackdropClick}
         aria-hidden="true"
       />
@@ -215,7 +215,7 @@ export const DealModal = memo(function DealModal({ deal, onClose, onDealUpdated 
             <button
               ref={closeButtonRef}
               onClick={onClose}
-              className="w-8 h-8 flex items-center justify-center rounded-md text-slate-700 hover:text-slate-400 transition-colors focus:outline-none"
+              className="w-8 h-8 flex items-center justify-center rounded-md text-slate-700 hover:text-slate-400 transition-colors focus:outline-hidden"
               aria-label="Close deal details"
             >
               <X className="w-4 h-4" aria-hidden="true" />

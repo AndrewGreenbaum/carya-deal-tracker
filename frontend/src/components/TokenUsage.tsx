@@ -134,7 +134,7 @@ export function TokenUsage() {
             <select
               value={days}
               onChange={(e) => setDays(Number(e.target.value))}
-              className="bg-gray-900 border border-green-900 rounded px-3 py-2 text-green-400"
+              className="bg-gray-900 border border-green-900 rounded-sm px-3 py-2 text-green-400"
             >
               <option value={7}>Last 7 days</option>
               <option value={14}>Last 14 days</option>
@@ -143,7 +143,7 @@ export function TokenUsage() {
             </select>
             <button
               onClick={fetchUsage}
-              className="flex items-center gap-2 px-4 py-2 bg-green-900/30 border border-green-700 rounded hover:bg-green-900/50"
+              className="flex items-center gap-2 px-4 py-2 bg-green-900/30 border border-green-700 rounded-sm hover:bg-green-900/50"
             >
               <RefreshCw className="w-4 h-4" />
               Refresh
@@ -159,7 +159,7 @@ export function TokenUsage() {
             <div className="text-red-400 mb-4">Error: {error}</div>
             <button
               onClick={fetchUsage}
-              className="px-4 py-2 bg-green-900/30 border border-green-700 rounded hover:bg-green-900/50"
+              className="px-4 py-2 bg-green-900/30 border border-green-700 rounded-sm hover:bg-green-900/50"
             >
               Retry
             </button>

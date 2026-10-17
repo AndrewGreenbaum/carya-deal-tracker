@@ -154,7 +154,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
+        className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50"
         onClick={handleBackdropClick}
         aria-hidden="true"
       />
@@ -165,7 +165,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="edit-modal-title"
-        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl mx-4 bg-[#0a0a0c] border border-slate-800 rounded-lg shadow-2xl max-h-[90vh] overflow-hidden flex flex-col"
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl mx-4 bg-cc-bg border border-slate-800 rounded-lg shadow-2xl max-h-[90vh] overflow-hidden flex flex-col"
       >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-slate-800 shrink-0">
@@ -174,7 +174,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
           </h2>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-slate-800 rounded transition-colors text-slate-400 hover:text-white"
+            className="p-2 hover:bg-slate-800 rounded-sm transition-colors text-slate-400 hover:text-white"
             aria-label="Close"
           >
             <X className="w-5 h-5" />
@@ -186,7 +186,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
           <div className="p-6 space-y-6">
             {/* Error */}
             {error && (
-              <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm">
+              <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-sm text-red-400 text-sm">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 {error}
               </div>
@@ -207,7 +207,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                     value={companyName}
                     onChange={(e) => setCompanyName(e.target.value)}
                     required
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-sm text-white placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -220,7 +220,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                       value={website}
                       onChange={(e) => setWebsite(e.target.value)}
                       placeholder="https://example.com"
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-sm text-white placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
                     />
                   </div>
                   <div>
@@ -232,7 +232,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                       value={linkedinUrl}
                       onChange={(e) => setLinkedinUrl(e.target.value)}
                       placeholder="https://linkedin.com/company/..."
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-sm text-white placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
                     />
                   </div>
                 </div>
@@ -252,7 +252,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                   <select
                     value={roundType}
                     onChange={(e) => setRoundType(e.target.value as InvestmentStage)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-sm text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
                   >
                     {ROUND_TYPES.map((rt) => (
                       <option key={rt} value={rt}>
@@ -270,7 +270,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     placeholder="$10M"
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-sm text-white placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
                   />
                 </div>
                 <div>
@@ -281,7 +281,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                     type="date"
                     value={announcedDate}
                     onChange={(e) => setAnnouncedDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-sm text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
                   />
                 </div>
                 <div>
@@ -293,7 +293,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                     value={leadPartnerName}
                     onChange={(e) => setLeadPartnerName(e.target.value)}
                     placeholder="Partner name"
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-sm text-white placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -314,7 +314,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                     onChange={(e) =>
                       setEnterpriseCategory(e.target.value as EnterpriseCategory | '')
                     }
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-sm text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
                   >
                     <option value="">Not Classified</option>
                     {ENTERPRISE_CATEGORIES.map((cat) => (
@@ -330,7 +330,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                       type="checkbox"
                       checked={isEnterpriseAi}
                       onChange={(e) => setIsEnterpriseAi(e.target.checked)}
-                      className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-emerald-500/50"
+                      className="w-4 h-4 rounded-sm bg-slate-800 border-slate-700 text-emerald-500 focus:ring-emerald-500/50"
                     />
                     <span className="text-sm font-medium text-slate-300">
                       Enterprise AI
@@ -362,7 +362,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                   {founders.map((founder, index) => (
                     <div
                       key={index}
-                      className="p-3 bg-slate-900/50 border border-slate-800 rounded"
+                      className="p-3 bg-slate-900/50 border border-slate-800 rounded-sm"
                     >
                       <div className="grid grid-cols-12 gap-2">
                         <div className="col-span-4">
@@ -373,7 +373,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                               handleFounderChange(index, 'name', e.target.value)
                             }
                             placeholder="Name"
-                            className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                            className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-sm text-sm text-white placeholder-slate-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500/50"
                           />
                         </div>
                         <div className="col-span-3">
@@ -384,7 +384,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                               handleFounderChange(index, 'title', e.target.value)
                             }
                             placeholder="Title"
-                            className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                            className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-sm text-sm text-white placeholder-slate-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500/50"
                           />
                         </div>
                         <div className="col-span-4">
@@ -395,7 +395,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
                               handleFounderChange(index, 'linkedinUrl', e.target.value)
                             }
                             placeholder="LinkedIn URL"
-                            className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                            className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-sm text-sm text-white placeholder-slate-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500/50"
                           />
                         </div>
                         <div className="col-span-1 flex items-center justify-center">
@@ -429,7 +429,7 @@ export function DealEditModal({ deal, onClose, onSave }: DealEditModalProps) {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded font-medium transition-colors"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-sm font-medium transition-colors"
             >
               {isSubmitting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />

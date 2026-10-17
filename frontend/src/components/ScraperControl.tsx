@@ -156,7 +156,7 @@ export function ScraperControl() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-[#050506]">
+      <div className="flex-1 flex items-center justify-center bg-cc-bg-dark">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-slate-700 border-t-emerald-500 rounded-full animate-spin" />
           <span className="text-slate-500 text-sm">Loading scraper status...</span>
@@ -167,7 +167,7 @@ export function ScraperControl() {
 
   if (error) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-[#050506]">
+      <div className="flex-1 flex items-center justify-center bg-cc-bg-dark">
         <div className="text-center">
           <AlertCircle className="w-12 h-12 mx-auto mb-4 text-slate-600" />
           <p className="text-slate-400">{error}</p>
@@ -180,9 +180,9 @@ export function ScraperControl() {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-[#050506]">
+    <div className="flex-1 flex flex-col overflow-hidden bg-cc-bg-dark">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-slate-800 bg-[#0a0a0c] sticky top-0 z-10">
+      <div className="px-6 py-4 border-b border-slate-800 bg-cc-bg sticky top-0 z-10">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Zap className="w-6 h-6 text-amber-400" />
@@ -222,7 +222,7 @@ export function ScraperControl() {
         <div className="px-6 py-3 bg-red-900/30 border-b border-red-700/50">
           {Array.from(scraperErrors.entries()).map(([source, message]) => (
             <div key={source} className="flex items-center gap-2 text-sm text-red-300">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <AlertCircle className="w-4 h-4 shrink-0" />
               <span className="font-medium">{source}:</span>
               <span>{message}</span>
             </div>
@@ -324,7 +324,7 @@ export function ScraperControl() {
       </div>
 
       {/* Footer Stats */}
-      <div className="px-6 py-3 border-t border-slate-800 bg-[#0a0a0c] text-xs text-slate-600 flex justify-between">
+      <div className="px-6 py-3 border-t border-slate-800 bg-cc-bg text-xs text-slate-600 flex justify-between">
         <span>
           {status?.implemented?.length || 0} implemented / {status?.unimplemented?.length || 0}{' '}
           pending
@@ -431,7 +431,7 @@ function FundScraperCard({
       <button
         onClick={onRun}
         disabled={!isImplemented || isRunning}
-        className="w-full flex items-center justify-center gap-1 py-1.5 text-xs bg-slate-800 text-slate-400 rounded hover:bg-slate-700 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="w-full flex items-center justify-center gap-1 py-1.5 text-xs bg-slate-800 text-slate-400 rounded-sm hover:bg-slate-700 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         {isRunning ? (
           <>
