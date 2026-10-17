@@ -1,4 +1,4 @@
-# Carya Eagle Eye
+# Carya Deal Tracker
 
 A deal-intelligence service that collects funding announcements, extracts structured company and investor details, filters duplicate records, and serves an analyst dashboard.
 
@@ -56,4 +56,4 @@ The default Python run excludes tests marked `integration`. Seven extraction cas
 - `frontend`: React/TypeScript dashboard
 - `alembic`: database migrations
 
-Bud Tracker and Carya Eagle Eye share substantial source history and functionality. Extraction remains dependent on article quality; ambiguous investment roles need analyst review. No accuracy or performance result is implied by the presence of a feature or test.
+Funding News Tracker and Carya Deal Tracker share substantial source history and functionality. Extraction remains dependent on article quality; ambiguous investment roles need analyst review. No accuracy or performance result is implied by the presence of a feature or test.

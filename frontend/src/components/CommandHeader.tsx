@@ -39,7 +39,7 @@ export function CommandHeader({
         )}
         <div className="w-2.5 h-2.5 md:w-3 md:h-3 bg-emerald-500 rounded-full pulse-glow" />
         <h1 className="text-base md:text-xl font-bold tracking-tighter bg-linear-to-r from-amber-300 via-yellow-200 to-amber-400 bg-clip-text text-transparent animate-shimmer bg-size-[200%_100%]">
-          Carya Eagle Eye
+          Carya Deal Tracker
         </h1>
       </div>
     </header>

@@ -145,7 +145,7 @@ export function CommandSidebar({
           <div className="flex items-center gap-2.5 pt-6 pb-10">
             <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse shadow-[0_0_6px_rgba(148,163,184,0.6)]" style={{ animationDuration: '4s' }} />
             <span className="text-[11px] font-light tracking-[0.2em] uppercase text-slate-400 font-mono">
-              Carya Eagle Eye
+              Carya Deal Tracker
             </span>
           </div>
 
