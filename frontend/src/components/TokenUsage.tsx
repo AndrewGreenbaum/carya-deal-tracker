@@ -1,3 +1,4 @@
+import { API_BASE, apiFetch } from '../auth/session';
 /**
  * TokenUsage.tsx - Token Usage Dashboard
  *
@@ -6,7 +7,7 @@
  * - Bar chart: Cost breakdown by source
  * - Line chart: Daily cost trends
  *
- * Access via /usage URL (no password required)
+ * Access via /usage after signing in
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -24,8 +25,6 @@ import {
   Legend,
 } from 'recharts';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'https://bud-tracker-backend-production.up.railway.app';
-const API_KEY = 'dev-key';
 
 interface TokenUsageBySource {
   source: string;
@@ -91,8 +90,8 @@ export function TokenUsage() {
     setError(null);
     try {
       const url = `${API_BASE}/usage/tokens?days=${days}`;
-      const res = await fetch(url, {
-        headers: { 'X-API-Key': API_KEY },
+      const res = await apiFetch(url, {
+        headers: { },
       });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);

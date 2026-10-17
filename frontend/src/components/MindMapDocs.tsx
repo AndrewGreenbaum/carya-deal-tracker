@@ -1,3 +1,4 @@
+import { API_BASE, apiFetch } from '../auth/session';
 /**
  * MindMapDocs.tsx - Interactive Mind Map with Pan/Zoom
  *
@@ -8,7 +9,6 @@
 import { useState, useEffect, useCallback, useRef, MouseEvent, WheelEvent } from 'react';
 import { RefreshCw, ArrowLeft, X, ZoomIn, ZoomOut, Maximize2, Move } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'https://bud-tracker-backend-production.up.railway.app';
 
 // Palantir/Anduril muted tactical color palette
 const COLORS = {
@@ -255,7 +255,7 @@ export function MindMapDocs() {
     const fetchDocs = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/docs/claude`);
+        const res = await apiFetch(`${API_BASE}/docs/claude`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const sections = parseMarkdownSections(data.content);

@@ -1,3 +1,4 @@
+import { API_BASE, apiFetch } from '../auth/session';
 /**
  * NewDeals - Shows unseen deals from the last 30 days
  * Each unseen deal has a slowly flashing blue dot that disappears on hover/keyboard selection
@@ -5,8 +6,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://bud-tracker-backend-production.up.railway.app';
-const API_KEY = import.meta.env.VITE_API_KEY || 'dev-key';
 
 const SEEN_KEY = 'carya-seen-deals';
 
@@ -70,8 +69,8 @@ export function NewDeals() {
 
   const loadDeals = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/deals?days=30&limit=200`, {
-        headers: { 'X-API-Key': API_KEY },
+      const res = await apiFetch(`${API_BASE}/deals?days=30&limit=200`, {
+        headers: { },
       });
       if (!res.ok) throw new Error('Failed to fetch deals');
       const data: DealsResponse = await res.json();

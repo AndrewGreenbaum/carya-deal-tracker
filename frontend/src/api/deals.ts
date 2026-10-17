@@ -1,3 +1,4 @@
+import { API_BASE, apiFetch } from '../auth/session';
 /**
  * Bud Tracker API Client
  *
@@ -36,8 +37,6 @@ import type {
 // Configuration
 // ============================================
 
-const API_BASE = import.meta.env.VITE_API_BASE || '/api';
-const API_KEY = import.meta.env.VITE_API_KEY || 'dev-key';
 
 // ============================================
 // Cache Infrastructure
@@ -88,9 +87,8 @@ async function apiGet<T>(path: string, useCache = true): Promise<T> {
     if (cached) return cached;
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     headers: {
-      'X-API-Key': API_KEY,
     },
   });
 
@@ -105,11 +103,10 @@ async function apiGet<T>(path: string, useCache = true): Promise<T> {
 }
 
 async function apiPost<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-API-Key': API_KEY,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -123,11 +120,10 @@ async function apiPost<T>(path: string, body?: unknown): Promise<T> {
 }
 
 async function apiPut<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
-      'X-API-Key': API_KEY,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -141,10 +137,9 @@ async function apiPut<T>(path: string, body?: unknown): Promise<T> {
 }
 
 async function apiDelete(path: string): Promise<void> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     method: 'DELETE',
     headers: {
-      'X-API-Key': API_KEY,
     },
   });
 

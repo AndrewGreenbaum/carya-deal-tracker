@@ -1,3 +1,4 @@
+import { API_BASE, apiFetch } from '../auth/session';
 /**
  * ClaudeDocs.tsx - System Documentation Page
  *
@@ -8,7 +9,6 @@
 import { useState, useEffect } from 'react';
 import { RefreshCw, BookOpen, ArrowLeft, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'https://bud-tracker-backend-production.up.railway.app';
 
 interface Section {
   id: string;
@@ -293,7 +293,7 @@ export function ClaudeDocs() {
     const fetchDocs = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/docs/claude`);
+        const res = await apiFetch(`${API_BASE}/docs/claude`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setUpdatedAt(data.updated_at);

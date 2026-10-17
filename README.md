@@ -57,3 +57,19 @@ The default Python run excludes tests marked `integration`. Seven extraction cas
 - `alembic`: database migrations
 
 Funding News Tracker and Carya Deal Tracker share substantial source history and functionality. Extraction remains dependent on article quality; ambiguous investment roles need analyst review. No accuracy or performance result is implied by the presence of a feature or test.
+
+## Private access
+
+Before starting the API, set `API_KEYS` on the server to a random access key of at least 32 characters. For example, generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and save it in your private environment configuration. Empty, short, or default keys stop API startup before database work begins. Do not put this key in a `VITE_` variable or commit it.
+
+The dashboard now opens a sign-in screen. Enter the access key there; the browser keeps a signed one-hour session in this tab's session storage and does not save the access key. Sign out revokes that session. API clients can continue using the `X-API-Key` header. Private responses and exports are not cached, and export credentials are sent in headers rather than URLs. Use HTTPS outside localhost.
+
+Run one API worker per deployment. Sessions and login throttling are held in that process, so restarting it signs users out. Multiple workers or replicas require a shared session store before scaling. The supplied startup commands use one worker.
+
+Set `FRONTEND_URL` to your dashboard origin when hosting it separately; `VITE_API_BASE` can point the public frontend to the API but must contain no credentials. The aircraft stream uses the same expiring session.
+
+The local PostgreSQL Compose service now requires `POSTGRES_PASSWORD` and binds only to `127.0.0.1`. Update `DATABASE_URL` to match your chosen password. An existing database volume retains its existing password; changing Compose configuration alone does not change that password.
+
+CSV exports quote formula-shaped text so it remains text when opened in a spreadsheet. Plain phone numbers and signed numbers retain their existing format.
+
+Authentication and export regressions run with `python -m pytest tests -q`. Browser-session tests run with `cd frontend && npm test`; `npm run build` checks the production frontend. Tests use synthetic credentials and local mocked services.

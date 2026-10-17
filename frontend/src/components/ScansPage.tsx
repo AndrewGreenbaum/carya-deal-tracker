@@ -1,3 +1,4 @@
+import { API_BASE, apiFetch } from '../auth/session';
 import { useState, useEffect, useCallback } from 'react';
 import {
   Clock,
@@ -51,8 +52,6 @@ const SOURCE_CONFIG = {
   ],
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
-const API_KEY = import.meta.env.VITE_API_KEY || 'dev-key';
 
 interface ScanSourceStats {
   articles_found: number;
@@ -383,8 +382,8 @@ function ScanRow({ scan, isExpanded, onToggle }: { scan: Scan; isExpanded: boole
   useEffect(() => {
     if (isExpanded && !details) {
       setLoading(true);
-      fetch(`${API_BASE}/scans/${scan.id}`, {
-        headers: { 'X-API-Key': API_KEY },
+      apiFetch(`${API_BASE}/scans/${scan.id}`, {
+        headers: { },
       })
         .then(res => res.json())
         .then(data => setDetails(data))
@@ -521,8 +520,8 @@ export function ScansPage({ onBack }: ScansPageProps = {}) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/scans?page=${page}&limit=${limit}`, {
-        headers: { 'X-API-Key': API_KEY },
+      const res = await apiFetch(`${API_BASE}/scans?page=${page}&limit=${limit}`, {
+        headers: { },
       });
       if (!res.ok) throw new Error('Failed to fetch scans');
       const data: ScanListResponse = await res.json();

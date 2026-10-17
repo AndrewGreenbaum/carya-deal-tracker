@@ -1,3 +1,4 @@
+import { API_BASE, apiFetch } from '../auth/session';
 /**
  * TreeDocs.tsx - Interactive Mind Map/Tree View of System Documentation
  *
@@ -8,7 +9,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, BookOpen, ArrowLeft, ChevronDown, ChevronRight, Circle, Minus } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'https://bud-tracker-backend-production.up.railway.app';
 
 // Tree node structure
 interface TreeNode {
@@ -450,7 +450,7 @@ export function TreeDocs() {
     const fetchDocs = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/docs/claude`);
+        const res = await apiFetch(`${API_BASE}/docs/claude`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setUpdatedAt(data.updated_at);
