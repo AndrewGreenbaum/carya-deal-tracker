@@ -60,4 +60,4 @@ Chat is disabled by default. Enabling it requires a same-origin WebSocket proxy 
 
 ## History
 
-Carya grew out of Funding News Tracker, and the earlier code history is included here. Imported commit dates are approximate reconstructions of the October 2025–August 2026 development period, when changes were committed in batches. October 2026 maintenance and security commits retain their recorded dates.
+Carya grew out of Funding News Tracker, and the earlier code history is included here.
