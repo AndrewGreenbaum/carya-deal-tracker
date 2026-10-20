@@ -4,7 +4,7 @@ A deal-intelligence service that collects funding announcements, extracts struct
 
 ## Repository history
 
-Carya Deal Tracker grew out of Funding News Tracker. Its earlier code history is included here, joined to Carya's January 2026 snapshot with the recorded Git dates retained.
+Carya Deal Tracker grew out of Funding News Tracker, and the earlier code history is included here. Imported commit dates are approximate reconstructions of the October 2025–August 2026 development period, when changes were committed in batches. October 2026 maintenance and security commits retain their recorded dates.
 
 ## Local setup
 
