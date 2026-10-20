@@ -1,4 +1,5 @@
 """Authentication regressions use only local ASGI requests and synthetic keys."""
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +13,7 @@ from src.auth import Authentication, AuthenticationMiddleware
 KEY = "test-access-key-0123456789-abcdef01"
 
 
-def client_for(key=KEY):
+def client_for(key=KEY, *, socket_closed=None):
     manager = Authentication(lambda: [key], audience="unit-test")
     app = FastAPI()
     app.add_middleware(AuthenticationMiddleware, authentication=manager)
@@ -30,7 +31,14 @@ def client_for(key=KEY):
     @app.websocket("/persistent-socket")
     async def persistent_socket(websocket: WebSocket):
         await websocket.accept()
-        await websocket.receive_text()
+        try:
+            while True:
+                await websocket.send_text(await websocket.receive_text())
+        except WebSocketDisconnect:
+            pass
+        finally:
+            if socket_closed is not None:
+                socket_closed.set()
 
     return TestClient(app), manager
 
@@ -122,3 +130,28 @@ def test_logout_prevents_socket_reconnection():
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/socket", subprotocols=["carya-session", token]):
             pass
+
+
+def test_logout_closes_an_existing_socket_without_waiting_for_expiry():
+    socket_closed = Event()
+    client, _ = client_for(socket_closed=socket_closed)
+    token = login(client)
+    with client.websocket_connect("/persistent-socket", subprotocols=["carya-session", token]) as ws:
+        ws.send_text("before logout")
+        assert ws.receive_text() == "before logout"
+        assert client.post("/auth/logout", headers={"Authorization": "Bearer " + token}).status_code == 204
+        # Bound the failure time: an unpatched server leaves this socket open for an hour.
+        assert socket_closed.wait(timeout=2), "Logout left the authenticated socket running"
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_text()
+        assert closed.value.code == 1008
+
+
+def test_logout_does_not_close_another_sessions_socket():
+    client, _ = client_for()
+    token = login(client)
+    other_token = login(client)
+    with client.websocket_connect("/persistent-socket", subprotocols=["carya-session", other_token]) as ws:
+        assert client.post("/auth/logout", headers={"Authorization": "Bearer " + token}).status_code == 204
+        ws.send_text("still authenticated")
+        assert ws.receive_text() == "still authenticated"

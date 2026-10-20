@@ -12,7 +12,8 @@ import json
 import secrets
 import time
 from collections import deque
-from threading import Lock
+from threading import RLock
+from typing import Callable
 
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, Response
@@ -26,7 +27,8 @@ class Authentication:
         self.salt = secrets.token_bytes(32)
         self.attempts: dict[str, deque] = {}
         self.revoked: dict[str, int] = {}
-        self.lock = Lock()
+        self.session_listeners: dict[str, set[Callable[[], None]]] = {}
+        self.lock = RLock()
 
     def configured_keys(self) -> list[str]:
         keys = [key.strip() for key in self.key_provider() if key and key.strip()]
@@ -92,15 +94,41 @@ class Authentication:
             return True
 
     def revoke(self, token: str) -> None:
-        expiry = self.session_expiry(token)
-        if expiry is not None:
-            with self.lock:
+        listeners = []
+        with self.lock:
+            expiry = self.session_expiry(token)
+            if expiry is not None:
                 # A bounded revocation table; rekeying safely expires all sessions.
                 if len(self.revoked) >= 10000:
                     self.salt = secrets.token_bytes(32)
                     self.revoked.clear()
+                    listeners = [listener for group in self.session_listeners.values()
+                                 for listener in group]
+                    self.session_listeners.clear()
                 else:
-                    self.revoked[hashlib.sha256(token.encode()).hexdigest()] = expiry
+                    token_id = hashlib.sha256(token.encode()).hexdigest()
+                    self.revoked[token_id] = expiry
+                    listeners = list(self.session_listeners.pop(token_id, ()))
+        for listener in listeners:
+            listener()
+
+    def watch_session(self, token: str, listener: Callable[[], None]) -> bool:
+        """Register atomically with validation so logout cannot miss a new socket."""
+        with self.lock:
+            if self.session_expiry(token) is None:
+                return False
+            token_id = hashlib.sha256(token.encode()).hexdigest()
+            self.session_listeners.setdefault(token_id, set()).add(listener)
+            return True
+
+    def unwatch_session(self, token: str, listener: Callable[[], None]) -> None:
+        with self.lock:
+            token_id = hashlib.sha256(token.encode()).hexdigest()
+            listeners = self.session_listeners.get(token_id)
+            if listeners is not None:
+                listeners.discard(listener)
+                if not listeners:
+                    del self.session_listeners[token_id]
 
 
 class AuthenticationMiddleware:
@@ -187,8 +215,34 @@ class AuthenticationMiddleware:
             await send(message)
 
         if scope["type"] == "websocket" and expiry is not None:
+            revoked = asyncio.Event()
+            loop = asyncio.get_running_loop()
+
+            def on_revoked():
+                try:
+                    loop.call_soon_threadsafe(revoked.set)
+                except RuntimeError:
+                    pass  # The socket's event loop has already shut down.
+
+            if not self.authentication.watch_session(token, on_revoked):
+                return await respond(401, "Sign in to access this API.")
+            connection = asyncio.create_task(self.app(scope, receive, private_send))
+            revocation = asyncio.create_task(revoked.wait())
             try:
-                return await asyncio.wait_for(self.app(scope, receive, private_send), timeout=max(1, expiry - time.time()))
-            except asyncio.TimeoutError:
-                return await send({"type": "websocket.close", "code": 1008})
+                done, _ = await asyncio.wait(
+                    {connection, revocation},
+                    timeout=max(0, expiry - time.time()),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if connection in done:
+                    return await connection
+                connection.cancel()
+                await asyncio.gather(connection, return_exceptions=True)
+                await send({"type": "websocket.close", "code": 1008})
+            finally:
+                self.authentication.unwatch_session(token, on_revoked)
+                connection.cancel()
+                revocation.cancel()
+                await asyncio.gather(connection, revocation, return_exceptions=True)
+            return
         return await self.app(scope, receive, private_send)
