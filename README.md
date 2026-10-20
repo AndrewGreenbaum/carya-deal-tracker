@@ -1,63 +1,63 @@
 # Carya Deal Tracker
 
-A deal-intelligence service that collects funding announcements, extracts structured company and investor details, filters duplicate records, and serves an analyst dashboard.
+Carya collects funding announcements and extracts company, investor, and round details with Claude. A FastAPI backend handles scraping, validation, and duplicate matching; a React dashboard is used to review deals and manage a tracker.
 
-## Repository history
+The focus is lead investments in enterprise AI companies from a configured set of VC firms. Investment roles and amounts can be ambiguous, so the dashboard keeps source links and evidence snippets for review.
 
-Carya Deal Tracker grew out of Funding News Tracker, and the earlier code history is included here. Imported commit dates are approximate reconstructions of the October 2025–August 2026 development period, when changes were committed in batches. October 2026 maintenance and security commits retain their recorded dates.
+## Run locally
 
-## Local setup
-
-Requires Python 3.11+, Node.js 22+, and PostgreSQL for the running backend.
+Requires Python 3.11+, Node.js 22+, and PostgreSQL.
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+cp .env.example .env
 ```
 
-Configure a local `DATABASE_URL` and the relevant service keys using `.env.example` as a reference. Start the API with:
+Edit `.env` with a local `DATABASE_URL` and the service keys needed for the sources you want to run. Settings are defined in [src/config/settings.py](src/config/settings.py). Set `API_KEYS` before exposing the backend outside local development; its default is a development key.
 
 ```sh
-uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
+python -m uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Startup applies database migrations and starts the scraping scheduler. Use a development database; ingestion and extraction need configured external services and may incur API charges.
+Startup applies database migrations and starts the scraping scheduler. Use a development database. Scraping, extraction, and enrichment can make paid API calls.
 
-Start the dashboard from a second terminal:
+In a second terminal:
 
 ```sh
 cd frontend
 npm ci
-npm run dev
+VITE_API_TARGET=http://127.0.0.1:8000 npm run dev
 ```
 
-The dashboard's API base URL is configured through its Vite environment settings.
+The command sets the local Vite proxy target; without it, the proxy defaults to the older Railway address. `VITE_API_BASE` selects the dashboard API base URL for other environments.
 
-The frontend requires Node.js 22 or newer (the container uses Node.js 24). Its styling uses Tailwind CSS 4; the custom theme is defined in `frontend/src/index.css`.
+## Checks
 
-Carya chat is disabled by default. To enable it, set `VITE_CARYA_CHAT_PATH` to a same-origin path such as `/api/chat` at build time, and provide an authenticated WebSocket proxy at that path. The proxy must keep gateway credentials server-side. Do not put a gateway token in a Vite variable or client source. The previously committed token should be revoked or rotated because removing it does not remove Git history.
-
-## Validation
+From the repository root, with the Python environment active:
 
 ```sh
 python -m pytest tests -q
+```
+
+For the dashboard:
+
+```sh
 cd frontend
 npm test
 npm run typecheck
 npm run build
 ```
 
-The default Python run excludes tests marked `integration`. Seven extraction cases call Anthropic and require an explicit `python -m pytest -m integration` run with credentials. Unit tests cover normalization, validation, extraction helpers and duplicate matching. A passing unit suite does not verify source availability, migration behavior against an existing database, or live extraction quality.
+Python tests exclude the `integration` marker by default. Run `python -m pytest -m integration` explicitly to call Anthropic with configured credentials. The regular suite covers extraction helpers, normalization, validation, and duplicate matching; live sources and database upgrades need separate checks.
 
-## Structure
+## Working on it
 
-- `src/harvester`: article collection and orchestration
-- `src/analyst`: structured extraction and validation
-- `src/archivist`: SQL models, persistence and deduplication
-- `src/scheduler`: scheduled scans and notifications
-- `src/main.py`: FastAPI endpoints
-- `frontend`: React/TypeScript dashboard
-- `alembic`: database migrations
+[CLAUDE.md](CLAUDE.md) covers the pipeline, fund matching rules, enrichment, and troubleshooting. The main code is in `src/harvester`, `src/analyst`, `src/archivist`, and `src/scheduler`; endpoints are in `src/main.py`. The dashboard is in `frontend/` and database migrations are in `alembic/`.
 
-Funding News Tracker and Carya Deal Tracker share substantial source history and functionality. Extraction remains dependent on article quality; ambiguous investment roles need analyst review. No accuracy or performance result is implied by the presence of a feature or test.
+Chat is disabled by default. Enabling it requires a same-origin WebSocket proxy and a `VITE_CARYA_CHAT_PATH` such as `/api/chat` at build time. Keep gateway credentials on the proxy server.
+
+## History
+
+Carya grew out of Funding News Tracker, and the earlier code history is included here. Imported commit dates are approximate reconstructions of the October 2025–August 2026 development period, when changes were committed in batches. October 2026 maintenance and security commits retain their recorded dates.
