@@ -26,7 +26,7 @@ from ..base_scraper import NormalizedArticle
 from ...config.settings import settings
 
 
-# YC Algolia API configuration (from settings, with fallback to public defaults)
+# YC Algolia API configuration comes from explicit server environment settings.
 ALGOLIA_INDEX = "YCCompany_production"
 
 # YC batch identifiers (format: "Winter 2024", "Summer 2024", etc.)

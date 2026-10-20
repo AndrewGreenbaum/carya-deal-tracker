@@ -1,5 +1,8 @@
 title = "repo secret scanning config"
 
+[extend]
+useDefault = true
+
 [allowlist]
 description = "Allow placeholders only"
 regexes = [

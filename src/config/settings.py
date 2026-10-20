@@ -19,9 +19,9 @@ class Settings(BaseSettings):
     google_alerts_feeds: str = ""  # Comma-separated Google Alerts RSS feed URLs
     api_keys: str = "dev-key"  # Comma-separated valid API keys for authentication
 
-    # Y Combinator Algolia credentials (public, from YC website)
-    yc_algolia_app_id: str = "45BWZJ1SGC"
-    yc_algolia_api_key: str = "<SET_IN_ENV>"
+    # Optional YC directory access: configure both values in the server environment.
+    yc_algolia_app_id: str = ""
+    yc_algolia_api_key: str = ""
 
     @property
     def valid_api_keys(self) -> list[str]:
