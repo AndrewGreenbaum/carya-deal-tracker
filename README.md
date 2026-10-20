@@ -2,6 +2,10 @@
 
 A deal-intelligence service that collects funding announcements, extracts structured company and investor details, filters duplicate records, and serves an analyst dashboard.
 
+## Repository history
+
+This project continues the earlier Funding News Tracker work. The early history was imported retrospectively; commit dates should not be read as a contemporaneous development timeline.
+
 ## Local setup
 
 Requires Python 3.11+, Node.js 22+, and PostgreSQL for the running backend.
