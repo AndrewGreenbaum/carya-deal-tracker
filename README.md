@@ -15,7 +15,7 @@ python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` with a local `DATABASE_URL` and the service keys needed for the sources you want to run. Settings are defined in [src/config/settings.py](src/config/settings.py). Set `API_KEYS` before exposing the backend outside local development; its default is a development key.
+Edit `.env` with a local `DATABASE_URL` and the service keys needed for the sources you want to run. Settings are defined in [src/config/settings.py](src/config/settings.py). Set `API_KEYS` to a random access key of at least 32 characters before starting the API. Keep it out of `VITE_` variables and source control.
 
 ```sh
 python -m uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
