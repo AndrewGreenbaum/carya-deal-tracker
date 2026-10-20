@@ -1,3 +1,4 @@
+import { API_BASE, apiFetch, sessionSocket } from '../auth/session';
 /**
  * AircraftTracker - Interactive aircraft tracking map
  * Real-time ADS-B data from OpenSky Network via backend
@@ -31,8 +32,6 @@ interface AircraftTrackerProps {
 }
 
 // Backend URL - use deployed backend
-const API_BASE = 'https://bud-tracker-backend-production.up.railway.app';
-const WS_URL = 'wss://bud-tracker-backend-production.up.railway.app/aircraft/ws';
 
 // USA center for initial map view
 const USA_CENTER: [number, number] = [39.8283, -98.5795];
@@ -288,7 +287,7 @@ export function AircraftTracker({ onClose }: AircraftTrackerProps) {
   // Fetch initial aircraft data
   const fetchAircraft = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/aircraft`);
+      const response = await apiFetch(`${API_BASE}/aircraft`);
       if (response.ok) {
         const data = await response.json();
         setAircraft(data.aircraft || []);
@@ -305,7 +304,7 @@ export function AircraftTracker({ onClose }: AircraftTrackerProps) {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     try {
-      const ws = new WebSocket(WS_URL);
+      const ws = sessionSocket('/aircraft/ws');
       wsRef.current = ws;
 
       ws.onopen = () => {

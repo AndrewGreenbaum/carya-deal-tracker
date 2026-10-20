@@ -9,6 +9,7 @@ export default defineConfig({
       '/api': {
         target: process.env.VITE_API_TARGET || 'https://bud-tracker-backend-production.up.railway.app',
         changeOrigin: true,
+        ws: true,
         secure: true,
         rewrite: (path) => path.replace(/^\/api/, '')
       }

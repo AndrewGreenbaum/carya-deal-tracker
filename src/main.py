@@ -13,6 +13,7 @@ OPTIMIZED:
 """
 
 import asyncio
+from .common.csv_safety import safe_csv_row
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -23,16 +24,16 @@ import time
 
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, HTTPException, Depends, Security, Query, Request, Response, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Query, Request, Response, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, nullslast, nullsfirst
 from sqlalchemy.orm import selectinload
 
 from .config import settings, FUND_REGISTRY, get_all_funds
+from .auth import Authentication, AuthenticationMiddleware
 from .analyst import extract_deal, DealExtraction, LeadStatus
 from .analyst.extractor import extract_deal_batch, clear_content_hash_cache, set_extraction_context, clear_extraction_context
 from .archivist import (
@@ -127,17 +128,14 @@ cache = SimpleCache()
 
 # ----- API Key Security -----
 
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+authentication = Authentication(lambda: settings.valid_api_keys, audience="carya-deal-tracker")
 
 
-async def verify_api_key(api_key: str = Security(api_key_header)):
-    """Verify API key for protected endpoints."""
-    if not api_key:
-        raise HTTPException(status_code=401, detail="API key required")
-    # Validate against configured API keys
-    if api_key not in settings.valid_api_keys:
-        raise HTTPException(status_code=403, detail="Invalid API key")
-    return api_key
+async def verify_api_key(request: Request):
+    """The shared middleware accepts API credentials or an expiring session."""
+    if not getattr(request.state, "authenticated", False):
+        raise HTTPException(status_code=401, detail="Sign in to access this API.")
+    return "authenticated"
 
 
 def run_migrations():
@@ -194,6 +192,7 @@ def run_migrations():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
+    authentication.configured_keys()
     print("Starting The Bud Tracker...")
     print(f"Tracking {len(FUND_REGISTRY)} VC funds")
 
@@ -242,6 +241,8 @@ app = FastAPI(
     version="0.2.0",  # Version bump for optimizations
     lifespan=lifespan
 )
+
+app.add_middleware(AuthenticationMiddleware, authentication=authentication)
 
 # GZip compression for responses > 500 bytes
 app.add_middleware(GZipMiddleware, minimum_size=500)
@@ -1030,7 +1031,7 @@ async def export_deals_csv(
             writer = csv.writer(output)
 
             # Header row
-            writer.writerow([
+            writer.writerow(safe_csv_row([
                 "Company",
                 "Round",
                 "Amount",
@@ -1040,7 +1041,7 @@ async def export_deals_csv(
                 "Enterprise Category",
                 "Is Enterprise AI",
                 "Verification Snippet",
-            ])
+            ]))
 
             # Data rows
             for deal in deals:
@@ -1051,7 +1052,7 @@ async def export_deals_csv(
                         lead_investor = inv.investor_name
                         break
 
-                writer.writerow([
+                writer.writerow(safe_csv_row([
                     deal.company.name if deal.company else "Unknown",
                     deal.round_type,
                     deal.amount or "Undisclosed",
@@ -1061,7 +1062,7 @@ async def export_deals_csv(
                     deal.enterprise_category or "",
                     "Yes" if deal.is_enterprise_ai else "No",
                     deal.verification_snippet or "",
-                ])
+                ]))
 
             output.seek(0)
 

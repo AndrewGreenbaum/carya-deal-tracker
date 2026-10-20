@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     firecrawl_api_key: str = ""  # Firecrawl for JS-heavy PR sites
     twitter_bearer_token: str = ""  # Twitter API v2 Bearer Token
     google_alerts_feeds: str = ""  # Comma-separated Google Alerts RSS feed URLs
-    api_keys: str = "dev-key"  # Comma-separated valid API keys for authentication
+    api_keys: str = ""  # Comma-separated valid API keys for authentication
 
     # Optional YC directory access: configure both values in the server environment.
     yc_algolia_app_id: str = ""
@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     frontend_url: str = ""  # e.g., https://your-frontend.railway.app
 
     # Database - Railway provides DATABASE_URL
-    database_url: str = "postgresql+asyncpg://bud:tracker@localhost:5432/budtracker"
+    database_url: str = "postgresql+asyncpg://bud@localhost:5432/budtracker"
 
     @field_validator("database_url", mode="before")
     @classmethod

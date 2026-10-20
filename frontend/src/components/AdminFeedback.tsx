@@ -1,3 +1,4 @@
+import { API_BASE, apiFetch } from '../auth/session';
 /**
  * AdminFeedback.tsx - Admin page to view and manage feedback
  * Access via /admin URL
@@ -6,8 +7,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Check, Flag, MessageSquare, Trash2, Undo2 } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'https://bud-tracker-backend-production.up.railway.app';
-const API_KEY = 'dev-key';
 
 interface FeedbackItem {
   id: number;
@@ -34,8 +33,8 @@ export function AdminFeedback() {
     try {
       const params = filter === 'unreviewed' ? '?reviewed=false' : '';
       const url = `${API_BASE}/feedback${params}`;
-      const res = await fetch(url, {
-        headers: { 'X-API-Key': API_KEY },
+      const res = await apiFetch(url, {
+        headers: { },
       });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -55,9 +54,9 @@ export function AdminFeedback() {
   const toggleReviewed = async (id: number, currentStatus: boolean) => {
     const newStatus = !currentStatus;
     try {
-      const res = await fetch(`${API_BASE}/feedback/${id}/reviewed?reviewed=${newStatus}`, {
+      const res = await apiFetch(`${API_BASE}/feedback/${id}/reviewed?reviewed=${newStatus}`, {
         method: 'PATCH',
-        headers: { 'X-API-Key': API_KEY },
+        headers: { },
       });
       if (!res.ok) throw new Error('Failed to update');
       setFeedback(prev => prev.map(f =>
@@ -71,9 +70,9 @@ export function AdminFeedback() {
   const deleteFeedback = async (id: number) => {
     if (!confirm('Delete this feedback item permanently?')) return;
     try {
-      const res = await fetch(`${API_BASE}/feedback/${id}`, {
+      const res = await apiFetch(`${API_BASE}/feedback/${id}`, {
         method: 'DELETE',
-        headers: { 'X-API-Key': API_KEY },
+        headers: { },
       });
       if (!res.ok) throw new Error('Failed to delete');
       setFeedback(prev => prev.filter(f => f.id !== id));

@@ -1,3 +1,4 @@
+import { downloadCsv } from './auth/session';
 /**
  * App.tsx - Main orchestrator for the Bud Tracker Command Center
  *
@@ -388,7 +389,7 @@ function App() {
   };
 
 
-  const handleExport = () => {
+  const handleExport = async () => {
     // Use same Option C filter logic as loadDeals
     const url = getExportUrl({
       is_lead: filters.leadOnly ? true : undefined,
@@ -398,7 +399,8 @@ function App() {
       fund_slug: filters.selectedFund,
       search: debouncedSearch || undefined,
     });
-    window.open(url, '_blank');
+    try { await downloadCsv(url, 'funding-deals.csv'); }
+    catch { setError('Unable to download the export. Please try again.'); }
   };
 
   const handleLoadMore = useCallback(() => {

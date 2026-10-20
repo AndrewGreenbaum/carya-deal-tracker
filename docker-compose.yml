@@ -6,10 +6,10 @@ services:
     container_name: budtracker-db
     environment:
       POSTGRES_USER: bud
-      POSTGRES_PASSWORD: tracker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a unique POSTGRES_PASSWORD}
       POSTGRES_DB: budtracker
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

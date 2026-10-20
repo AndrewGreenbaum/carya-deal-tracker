@@ -48,3 +48,6 @@ EXPANSION_OPTIONS.txt
 dashboard*.html
 dashbaord.html
 resume*.txt
+
+# Private browser sessions and scraper captures
+.playwright-data/
