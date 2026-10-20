@@ -15,7 +15,7 @@ python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` with a local `DATABASE_URL` and the service keys needed for the sources you want to run. Settings are defined in [src/config/settings.py](src/config/settings.py). Set `API_KEYS` to a random access key of at least 32 characters before starting the API. Empty, short, or default keys stop startup. Keep the key out of `VITE_` variables and source control.
+Edit `.env` with a local `DATABASE_URL` and the service keys needed for the sources you want to run. Settings are defined in [src/config/settings.py](src/config/settings.py). Set `API_KEYS` to a random access key of at least 32 characters before starting the API. Keep it out of `VITE_` variables and source control.
 
 ```sh
 python -m uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
@@ -57,18 +57,6 @@ Python tests exclude the `integration` marker by default. Run `python -m pytest 
 [CLAUDE.md](CLAUDE.md) covers the pipeline, fund matching rules, enrichment, and troubleshooting. The main code is in `src/harvester`, `src/analyst`, `src/archivist`, and `src/scheduler`; endpoints are in `src/main.py`. The dashboard is in `frontend/` and database migrations are in `alembic/`.
 
 Chat is disabled by default. Enabling it requires a same-origin WebSocket proxy and a `VITE_CARYA_CHAT_PATH` such as `/api/chat` at build time. Keep gateway credentials on the proxy server.
-
-## Access and hosting
-
-The dashboard asks for the access key and exchanges it for a signed one-hour session. The browser keeps the session in this tab's session storage and does not save the key. Signing out revokes the session; API clients use `X-API-Key`. Export credentials travel in headers rather than URLs. Private HTTP responses use `Cache-Control: no-store`. Use HTTPS outside localhost.
-
-Run one API worker. Sessions and login throttling are held in that process, so a restart signs users out. Multiple workers need a shared session store first.
-
-For a separately hosted dashboard, set `FRONTEND_URL` to its origin. `VITE_API_BASE` can select the API address but must contain no credentials. The aircraft stream uses the same expiring session.
-
-The local PostgreSQL Compose service requires `POSTGRES_PASSWORD` and binds to `127.0.0.1`. Set `DATABASE_URL` to match. Changing the Compose setting does not change the password in an existing database volume.
-
-CSV exports escape formula-shaped text for spreadsheet use. Ordinary phone numbers and signed numbers keep their existing format.
 
 ## History
 
